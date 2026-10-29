@@ -1,3 +1,4 @@
+
 <!doctype html>
 <html lang="it">
 <head>
@@ -37,13 +38,40 @@
         </div>
         <span id="phase-pill" class="phase-pill neutral">In attesa</span>
       </div>
+
       <div class="timer-display" id="timer-display" role="timer" aria-live="off">25:00</div>
       <p id="timer-caption" class="timer-caption">La prossima sessione apparirà qui.</p>
-      <div class="timer-track" aria-hidden="true"><div id="timer-progress" class="timer-progress"></div></div>
+
+      <div class="timer-track" aria-hidden="true">
+        <div id="timer-progress" class="timer-progress"></div>
+      </div>
+
       <div class="timer-footer">
         <span id="timer-session-label">Nessuna sessione in corso</span>
         <span id="timer-end-label">—</span>
       </div>
+
+      <!-- Accesso alla modalità Focus -->
+      <div class="timer-controls">
+        <button id="focus-mode-button" class="button button-primary" type="button">
+          Modalità Focus
+        </button>
+      </div>
+    </section>
+
+    <!-- Impostazioni notifiche -->
+    <section class="notification-card">
+      <div>
+        <p class="eyebrow">AVVISI</p>
+        <h2>Notifiche</h2>
+        <p id="notification-status" class="muted">
+          Le notifiche non sono ancora abilitate.
+        </p>
+      </div>
+
+      <button id="notification-button" class="button button-secondary" type="button">
+        Abilita notifiche
+      </button>
     </section>
 
     <section class="schedule-section">
@@ -62,6 +90,7 @@
       </div>
 
       <div id="sessions-list" class="sessions-list"></div>
+
       <div id="empty-state" class="empty-state hidden">
         <div class="empty-icon" aria-hidden="true">◷</div>
         <h3>Nessuna sessione in programma</h3>
@@ -76,13 +105,24 @@
         <h2>Impostazioni predefinite</h2>
         <p class="muted">Si applicano alle nuove sessioni. Puoi modificare i valori per ogni singola sessione.</p>
       </div>
+
       <form id="defaults-form" class="defaults-form">
-        <label> Lavoro predefinito
-          <span class="input-with-suffix"><input id="default-work" type="number" min="1" max="240" value="25" required><span>min</span></span>
+        <label>
+          Lavoro predefinito
+          <span class="input-with-suffix">
+            <input id="default-work" type="number" min="1" max="240" value="25" required>
+            <span>min</span>
+          </span>
         </label>
-        <label> Pausa predefinita
-          <span class="input-with-suffix"><input id="default-break" type="number" min="1" max="90" value="5" required><span>min</span></span>
+
+        <label>
+          Pausa predefinita
+          <span class="input-with-suffix">
+            <input id="default-break" type="number" min="1" max="90" value="5" required>
+            <span>min</span>
+          </span>
         </label>
+
         <button class="button button-secondary" type="submit">Salva preferenze</button>
       </form>
     </section>
@@ -93,18 +133,26 @@
         <h2>Backup e ripristino</h2>
         <p class="muted">Le sessioni restano in questo browser. Esporta una copia JSON per trasferirle o conservarle.</p>
       </div>
+
       <div class="backup-actions">
         <button id="export-button" class="button button-secondary" type="button">Esporta backup</button>
-        <label class="button button-secondary file-button">Importa backup<input id="import-input" type="file" accept=".json,application/json"></label>
+        <label class="button button-secondary file-button">
+          Importa backup
+          <input id="import-input" type="file" accept=".json,application/json">
+        </label>
       </div>
     </section>
 
     <aside class="notice">
       <span class="notice-icon" aria-hidden="true">i</span>
-      <p><strong>Nota sull'avvio automatico.</strong> La scheda deve essere aperta e il dispositivo attivo. Se il browser sospende la pagina o il computer va in stop, gli aggiornamenti visivi possono fermarsi; al ritorno, il timer si riallinea all'orario reale. Una PWA non può garantire l'avvio con l'app completamente chiusa su tutti i sistemi.</p>
+      <p>
+        <strong>Nota sull'avvio automatico.</strong>
+        La scheda deve essere aperta e il dispositivo attivo. Se il browser sospende la pagina o il computer va in stop, gli aggiornamenti visivi possono fermarsi; al ritorno, il timer si riallinea all'orario reale. Una PWA non può garantire l'avvio con l'app completamente chiusa su tutti i sistemi.
+      </p>
     </aside>
   </main>
 
+  <!-- Finestra di creazione e modifica sessione -->
   <dialog id="session-dialog" class="session-dialog">
     <form id="session-form" method="dialog">
       <div class="dialog-heading">
@@ -114,31 +162,46 @@
         </div>
         <button id="close-dialog" class="icon-button" type="button" aria-label="Chiudi">×</button>
       </div>
+
       <input id="session-id" type="hidden">
-      <label class="field-label">Nome della sessione
+
+      <label class="field-label">
+        Nome della sessione
         <input id="session-title" type="text" maxlength="80" placeholder="Es. Studio del greco" required>
       </label>
-      <label class="field-label">Data
+
+      <label class="field-label">
+        Data
         <input id="session-date" type="date" required>
       </label>
+
       <div class="two-fields">
-        <label class="field-label">Inizio
+        <label class="field-label">
+          Inizio
           <input id="session-start" type="time" value="09:00" required>
         </label>
-        <label class="field-label">Fine
+
+        <label class="field-label">
+          Fine
           <input id="session-end" type="time" value="11:00" required>
         </label>
       </div>
+
       <div class="two-fields">
-        <label class="field-label">Lavoro (minuti)
+        <label class="field-label">
+          Lavoro (minuti)
           <input id="session-work" type="number" min="1" max="240" value="25" required>
         </label>
-        <label class="field-label">Pausa (minuti)
+
+        <label class="field-label">
+          Pausa (minuti)
           <input id="session-break" type="number" min="1" max="90" value="5" required>
         </label>
       </div>
+
       <p class="form-hint">Il timer alterna lavoro e pausa fino all'ora di fine. L'ultimo intervallo viene accorciato se necessario.</p>
       <p id="form-error" class="form-error" role="alert"></p>
+
       <div class="dialog-actions">
         <button id="delete-session-button" class="button button-danger hidden" type="button">Elimina</button>
         <span class="action-spacer"></span>
@@ -148,7 +211,34 @@
     </form>
   </dialog>
 
+  <!-- Schermata a tutto schermo della modalità Focus -->
+  <div id="focus-overlay" class="focus-overlay hidden">
+    <div class="focus-content">
+      <p id="focus-phase" class="eyebrow">IN ATTESA</p>
+
+      <h1 id="focus-title">Pronto quando vuoi</h1>
+
+      <div id="focus-timer" class="focus-timer">25:00</div>
+
+      <p id="focus-caption" class="focus-caption">
+        La prossima sessione apparirà qui.
+      </p>
+
+      <div class="focus-track">
+        <div id="focus-progress" class="focus-progress"></div>
+      </div>
+
+      <p id="focus-end-label" class="focus-end-label"></p>
+
+      <button id="exit-focus-button" class="button button-secondary" type="button">
+        Esci dalla modalità Focus
+      </button>
+    </div>
+  </div>
+
+  <!-- Messaggi temporanei -->
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
   <script src="./app.js" defer></script>
 </body>
 </html>
