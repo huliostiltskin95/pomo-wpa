@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f7f8fa">
+  <meta name="description" content="Agenda di concentrazione con sessioni Pomodoro programmabili.">
+  <title>Tempo — Pomodoro</title>
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="./" aria-label="Tempo, pagina iniziale">
+      <span class="brand-mark" aria-hidden="true">t</span>
+      <span>tempo</span>
+    </a>
+    <div class="top-actions">
+      <span id="connection-status" class="quiet-status">Pronta</span>
+      <button id="install-button" class="button button-secondary hidden" type="button">Installa app</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="intro">
+      <p class="eyebrow">IL TUO TEMPO, CON INTENZIONE</p>
+      <h1>Fai spazio alla concentrazione.</h1>
+      <p class="intro-copy">Programma una finestra di lavoro. Tempo avvierà i cicli quando l'app è aperta e l'orario previsto è arrivato.</p>
+    </section>
+
+    <section class="timer-card" aria-labelledby="timer-heading">
+      <div class="timer-topline">
+        <div>
+          <p class="eyebrow" id="timer-mode">NESSUNA SESSIONE ATTIVA</p>
+          <h2 id="timer-heading">Pronto quando vuoi</h2>
+        </div>
+        <span id="phase-pill" class="phase-pill neutral">In attesa</span>
+      </div>
+      <div class="timer-display" id="timer-display" role="timer" aria-live="off">25:00</div>
+      <p id="timer-caption" class="timer-caption">La prossima sessione apparirà qui.</p>
+      <div class="timer-track" aria-hidden="true"><div id="timer-progress" class="timer-progress"></div></div>
+      <div class="timer-footer">
+        <span id="timer-session-label">Nessuna sessione in corso</span>
+        <span id="timer-end-label">—</span>
+      </div>
+    </section>
+
+    <section class="schedule-section">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">PIANIFICAZIONE</p>
+          <h2>Le tue sessioni</h2>
+        </div>
+        <button id="new-session-button" class="button button-primary" type="button">＋ Nuova sessione</button>
+      </div>
+
+      <div class="date-toolbar">
+        <label for="filter-date">Mostra il giorno</label>
+        <input id="filter-date" type="date">
+        <button id="today-button" class="text-button" type="button">Oggi</button>
+      </div>
+
+      <div id="sessions-list" class="sessions-list"></div>
+      <div id="empty-state" class="empty-state hidden">
+        <div class="empty-icon" aria-hidden="true">◷</div>
+        <h3>Nessuna sessione in programma</h3>
+        <p>Aggiungi una finestra di concentrazione per organizzare la giornata.</p>
+        <button id="empty-add-button" class="button button-secondary" type="button">Crea la prima sessione</button>
+      </div>
+    </section>
+
+    <section class="settings-card">
+      <div>
+        <p class="eyebrow">PREFERENZE</p>
+        <h2>Impostazioni predefinite</h2>
+        <p class="muted">Si applicano alle nuove sessioni. Puoi modificare i valori per ogni singola sessione.</p>
+      </div>
+      <form id="defaults-form" class="defaults-form">
+        <label> Lavoro predefinito
+          <span class="input-with-suffix"><input id="default-work" type="number" min="1" max="240" value="25" required><span>min</span></span>
+        </label>
+        <label> Pausa predefinita
+          <span class="input-with-suffix"><input id="default-break" type="number" min="1" max="90" value="5" required><span>min</span></span>
+        </label>
+        <button class="button button-secondary" type="submit">Salva preferenze</button>
+      </form>
+    </section>
+
+    <section class="backup-card">
+      <div>
+        <p class="eyebrow">I TUOI DATI</p>
+        <h2>Backup e ripristino</h2>
+        <p class="muted">Le sessioni restano in questo browser. Esporta una copia JSON per trasferirle o conservarle.</p>
+      </div>
+      <div class="backup-actions">
+        <button id="export-button" class="button button-secondary" type="button">Esporta backup</button>
+        <label class="button button-secondary file-button">Importa backup<input id="import-input" type="file" accept=".json,application/json"></label>
+      </div>
+    </section>
+
+    <aside class="notice">
+      <span class="notice-icon" aria-hidden="true">i</span>
+      <p><strong>Nota sull'avvio automatico.</strong> La scheda deve essere aperta e il dispositivo attivo. Se il browser sospende la pagina o il computer va in stop, gli aggiornamenti visivi possono fermarsi; al ritorno, il timer si riallinea all'orario reale. Una PWA non può garantire l'avvio con l'app completamente chiusa su tutti i sistemi.</p>
+    </aside>
+  </main>
+
+  <dialog id="session-dialog" class="session-dialog">
+    <form id="session-form" method="dialog">
+      <div class="dialog-heading">
+        <div>
+          <p class="eyebrow">PIANIFICAZIONE</p>
+          <h2 id="dialog-title">Nuova sessione</h2>
+        </div>
+        <button id="close-dialog" class="icon-button" type="button" aria-label="Chiudi">×</button>
+      </div>
+      <input id="session-id" type="hidden">
+      <label class="field-label">Nome della sessione
+        <input id="session-title" type="text" maxlength="80" placeholder="Es. Studio del greco" required>
+      </label>
+      <label class="field-label">Data
+        <input id="session-date" type="date" required>
+      </label>
+      <div class="two-fields">
+        <label class="field-label">Inizio
+          <input id="session-start" type="time" value="09:00" required>
+        </label>
+        <label class="field-label">Fine
+          <input id="session-end" type="time" value="11:00" required>
+        </label>
+      </div>
+      <div class="two-fields">
+        <label class="field-label">Lavoro (minuti)
+          <input id="session-work" type="number" min="1" max="240" value="25" required>
+        </label>
+        <label class="field-label">Pausa (minuti)
+          <input id="session-break" type="number" min="1" max="90" value="5" required>
+        </label>
+      </div>
+      <p class="form-hint">Il timer alterna lavoro e pausa fino all'ora di fine. L'ultimo intervallo viene accorciato se necessario.</p>
+      <p id="form-error" class="form-error" role="alert"></p>
+      <div class="dialog-actions">
+        <button id="delete-session-button" class="button button-danger hidden" type="button">Elimina</button>
+        <span class="action-spacer"></span>
+        <button id="cancel-dialog" class="button button-secondary" type="button">Annulla</button>
+        <button class="button button-primary" type="submit">Salva sessione</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="./app.js" defer></script>
+</body>
+</html>
