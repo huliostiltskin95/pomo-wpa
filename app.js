@@ -1,3 +1,5 @@
+import { localDateString, timeToMinutes, dateTime, formatTime, formatDate, escapeHtml, clampInt, pauseMinutes, normalizeSession, validSession, sessionBounds, getSessionStatus, getPhase, mmss, getActiveSession as findActiveSession, getNextSession as findNextSession, hasSessionOverlaps } from "./core/tempo-core.js";
+
 (() => {
   "use strict";
   const STORAGE_KEY = "tempo-pomodoro-v2";
@@ -16,20 +18,10 @@
   let swRegistration = null;
   let audioContext = null;
   let soundNodes = [];
+  let soundMasterNode = null;
   let soundPlaying = false;
-  let soundBuffer = null;
   let soundTimer = null;
 
-  function localDateString(date=new Date()){const y=date.getFullYear(),m=String(date.getMonth()+1).padStart(2,"0"),d=String(date.getDate()).padStart(2,"0");return `${y}-${m}-${d}`;}
-  function timeToMinutes(value){const [h,m]=value.split(":").map(Number);return h*60+m;}
-  function dateTime(date,time){const [y,mo,d]=date.split("-").map(Number),[h,mi]=time.split(":").map(Number);return new Date(y,mo-1,d,h,mi,0,0);}
-  function formatTime(date){return new Intl.DateTimeFormat("it-IT",{hour:"2-digit",minute:"2-digit"}).format(date);}
-  function formatDate(value){const [y,m,d]=value.split("-").map(Number);return new Intl.DateTimeFormat("it-IT",{weekday:"short",day:"numeric",month:"short"}).format(new Date(y,m-1,d));}
-  function escapeHtml(value){return String(value).replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));}
-  function clampInt(value,min,max,fallback){const n=Number(value);return Number.isInteger(n)&&n>=min&&n<=max?n:fallback;}
-  function pauseMinutes(work){return Math.max(1,Math.round(work/5));}
-  function normalizeSession(s){return {...s,breakEnabled:s.breakEnabled!==undefined?Boolean(s.breakEnabled):true};}
-  function validSession(s){return s&&typeof s.id==="string"&&typeof s.title==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(s.date)&&/^\d{2}:\d{2}$/.test(s.start)&&/^\d{2}:\d{2}$/.test(s.end)&&Number.isInteger(s.workMinutes)&&s.workMinutes>=1&&s.workMinutes<=240&&timeToMinutes(s.end)>timeToMinutes(s.start);}
   function loadState(){
     try{
       let raw=localStorage.getItem(STORAGE_KEY);if(!raw)raw=localStorage.getItem(OLD_STORAGE_KEY);
@@ -38,17 +30,8 @@
     return {sessions:[],defaults:{...DEFAULTS}};
   }
   function persist(){try{localStorage.setItem(STORAGE_KEY,JSON.stringify(state));return true;}catch(error){showToast("Non è stato possibile salvare i dati nel browser.");return false;}}
-  function sessionBounds(s){return {start:dateTime(s.date,s.start),end:dateTime(s.date,s.end)};}
-  function getSessionStatus(s,now=new Date()){const {start,end}=sessionBounds(s);if(now<start)return "upcoming";if(now>=end)return "finished";return "active";}
-  function getActiveSession(now=new Date()){return state.sessions.filter(s=>getSessionStatus(s,now)==="active").sort((a,b)=>sessionBounds(a).start-sessionBounds(b).start)[0]||null;}
-  function getNextSession(now=new Date()){return state.sessions.filter(s=>getSessionStatus(s,now)==="upcoming").sort((a,b)=>sessionBounds(a).start-sessionBounds(b).start)[0]||null;}
-  function getPhase(s,now=new Date()){
-    const {start,end}=sessionBounds(s),workMs=s.workMinutes*60000,elapsed=Math.max(0,now-start),remainingSession=Math.max(0,end-now);
-    if(!s.breakEnabled){return {kind:"work",label:"Concentrazione",start,end,remaining:Math.max(0,Math.ceil(remainingSession/1000)),progress:Math.min(100,elapsed/Math.max(1,end-start)*100),sessionEnd:end,totalRemaining:Math.ceil(remainingSession/1000)};}
-    const breakMs=pauseMinutes(s.workMinutes)*60000,cycleMs=workMs+breakMs,cycleIndex=Math.floor(elapsed/cycleMs),within=elapsed%cycleMs,isWork=within<workMs,phaseDuration=isWork?workMs:breakMs,phaseElapsed=isWork?within:within-workMs,phaseStart=new Date(start.getTime()+cycleIndex*cycleMs+(isWork?0:workMs)),theoreticalEnd=new Date(phaseStart.getTime()+phaseDuration),phaseEnd=theoreticalEnd<end?theoreticalEnd:end;
-    return {kind:isWork?"work":"break",label:isWork?"Concentrazione":"Pausa",start:phaseStart,end:phaseEnd,remaining:Math.max(0,Math.ceil((phaseEnd-now)/1000)),progress:Math.min(100,Math.max(0,phaseElapsed/phaseDuration*100)),sessionEnd:end,totalRemaining:Math.ceil(remainingSession/1000)};
-  }
-  function mmss(seconds){const m=Math.floor(Math.max(0,seconds)/60),s=Math.max(0,seconds)%60;return `${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;}
+  function getActiveSession(now=new Date()){return findActiveSession(state.sessions,now);}
+  function getNextSession(now=new Date()){return findNextSession(state.sessions,now);}
   function showToast(message){els.toast.textContent=message;els.toast.classList.add("show");clearTimeout(toastTimeout);toastTimeout=setTimeout(()=>els.toast.classList.remove("show"),3200);}
   async function sendNotification(title,body){if(!("Notification" in window)||Notification.permission!=="granted")return;try{if(swRegistration)await swRegistration.showNotification(title,{body,icon:"./icon.svg",tag:"tempo-"+Date.now(),renotify:false});else new Notification(title,{body,icon:"./icon.svg"});}catch(error){console.warn("Notifica non disponibile:",error);}}
   function notifyPhaseChange(session,phase){const key=`${session.id}:${phase.kind}:${phase.start.getTime()}`;if(key===lastPhaseKey)return;const wasSet=Boolean(lastPhaseKey);lastPhaseKey=key;if(wasSet){const title=phase.kind==="work"?"Concentrazione":"Pausa";const body=phase.kind==="work"?`Riprendi: ${session.title}`:`È il momento di una pausa · ${session.title}`;showToast(body);sendNotification(title,body);}}
@@ -66,34 +49,85 @@
   function updatePlannedSummary(){const date=els.sessionDate.value,id=els.sessionId.value,items=state.sessions.filter(s=>s.date===date&&s.id!==id).sort((a,b)=>a.start.localeCompare(b.start));els.plannedSummaryList.innerHTML=items.length?items.map(s=>`<div class="planned-row"><span>${escapeHtml(s.start)}–${escapeHtml(s.end)}</span><span>${escapeHtml(s.title)}</span></div>`).join("") : "Nessun'altra sessione per questa data.";}
   function openNewDialog(){els.sessionForm.reset();els.sessionId.value="";els.dialogTitle.textContent="Nuova sessione";els.sessionTitle.value="";els.sessionDate.value=els.filterDate.value||localDateString();els.sessionStart.value="09:00";els.sessionEnd.value="11:00";els.sessionWork.value=state.defaults.workMinutes;els.sessionBreakEnabled.checked=state.defaults.breakEnabled;els.formError.textContent="";els.deleteButton.classList.add("hidden");updateBreakPreview();updatePlannedSummary();els.dialog.showModal();els.sessionTitle.focus();}
   function openEditDialog(id){const s=state.sessions.find(x=>x.id===id);if(!s)return;els.sessionId.value=s.id;els.dialogTitle.textContent="Modifica sessione";els.sessionTitle.value=s.title;els.sessionDate.value=s.date;els.sessionStart.value=s.start;els.sessionEnd.value=s.end;els.sessionWork.value=s.workMinutes;els.sessionBreakEnabled.checked=s.breakEnabled;els.formError.textContent="";els.deleteButton.classList.remove("hidden");updateBreakPreview();updatePlannedSummary();els.dialog.showModal();}
-  function saveSession(event){event.preventDefault();const existingId=els.sessionId.value,session={id:existingId||(crypto.randomUUID?crypto.randomUUID():`${Date.now()}-${Math.random().toString(16).slice(2)}`),title:els.sessionTitle.value.trim(),date:els.sessionDate.value,start:els.sessionStart.value,end:els.sessionEnd.value,workMinutes:Number(els.sessionWork.value),breakEnabled:els.sessionBreakEnabled.checked};if(!session.title){els.formError.textContent="Inserisci un nome per la sessione.";return;}if(!validSession(session)){els.formError.textContent="Controlla gli orari: la fine deve essere successiva all'inizio e la durata deve essere valida.";return;}const start=dateTime(session.date,session.start),end=dateTime(session.date,session.end),overlaps=state.sessions.some(s=>{if(s.id===session.id||s.date!==session.date)return false;const b=sessionBounds(s);return start<b.end&&end>b.start;});if(overlaps){els.formError.textContent="Questa sessione si sovrappone a un'altra sessione dello stesso giorno.";return;}if(existingId)state.sessions=state.sessions.map(s=>s.id===existingId?session:s);else state.sessions.push(session);persist();els.filterDate.value=session.date;els.dialog.close();renderAll();showToast(existingId?"Sessione aggiornata.":"Sessione aggiunta all'agenda.");}
-  function deleteSession(id){const s=state.sessions.find(x=>x.id===id);if(!s||!window.confirm(`Eliminare la sessione “${s.title}”?`))return;state.sessions=state.sessions.filter(x=>x.id!==id);persist();if(els.dialog.open)els.dialog.close();renderAll();showToast("Sessione eliminata.");}
-  function saveDefaults(event){event.preventDefault();const work=Number(els.defaultWork.value);if(!Number.isInteger(work)||work<1||work>240){showToast("Inserisci una durata valida.");return;}state.defaults={workMinutes:work,breakEnabled:els.defaultBreakEnabled.checked};persist();renderTimer();showToast("Preferenze salvate.");}
+  function saveSession(event){
+    event.preventDefault();
+    const existingId=els.sessionId.value;
+    const session={id:existingId||(crypto.randomUUID?crypto.randomUUID():`${Date.now()}-${Math.random().toString(16).slice(2)}`),title:els.sessionTitle.value.trim(),date:els.sessionDate.value,start:els.sessionStart.value,end:els.sessionEnd.value,workMinutes:Number(els.sessionWork.value),breakEnabled:els.sessionBreakEnabled.checked};
+    if(!session.title){els.formError.textContent="Inserisci un nome per la sessione.";return;}
+    if(!validSession(session)){els.formError.textContent="Controlla gli orari: la fine deve essere successiva all'inizio e la durata deve essere valida.";return;}
+    const start=dateTime(session.date,session.start),end=dateTime(session.date,session.end);
+    const overlaps=state.sessions.some(s=>{if(s.id===session.id||s.date!==session.date)return false;const bounds=sessionBounds(s);return start<bounds.end&&end>bounds.start;});
+    if(overlaps){els.formError.textContent="Questa sessione si sovrappone a un'altra sessione dello stesso giorno.";return;}
+    const previous=state.sessions;
+    state.sessions=existingId?state.sessions.map(s=>s.id===existingId?session:s):[...state.sessions,session];
+    if(!persist()){state.sessions=previous;return;}
+    els.filterDate.value=session.date;els.dialog.close();renderAll();showToast(existingId?"Sessione aggiornata.":"Sessione aggiunta all'agenda.");
+  }
+  function deleteSession(id){
+    const session=state.sessions.find(item=>item.id===id);
+    if(!session||!window.confirm(`Eliminare la sessione “${session.title}”?`))return;
+    const previous=state.sessions;
+    state.sessions=state.sessions.filter(item=>item.id!==id);
+    if(!persist()){state.sessions=previous;return;}
+    if(els.dialog.open)els.dialog.close();renderAll();showToast("Sessione eliminata.");
+  }
+  function saveDefaults(event){
+    event.preventDefault();
+    const work=Number(els.defaultWork.value);
+    if(!Number.isInteger(work)||work<1||work>240){showToast("Inserisci una durata valida.");return;}
+    const previous=state.defaults;
+    state.defaults={workMinutes:work,breakEnabled:els.defaultBreakEnabled.checked};
+    if(!persist()){state.defaults=previous;els.defaultWork.value=previous.workMinutes;els.defaultBreakEnabled.checked=previous.breakEnabled;return;}
+    renderTimer();showToast("Preferenze salvate.");
+  }
   function downloadFile(content,type,filename){const blob=new Blob([content],{type}),url=URL.createObjectURL(blob),link=document.createElement("a");link.href=url;link.download=filename;document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}
   function exportBackup(){downloadFile(JSON.stringify({app:"Tempo Pomodoro",version:2,exportedAt:new Date().toISOString(),defaults:state.defaults,sessions:state.sessions},null,2),"application/json",`tempo-backup-${localDateString()}.json`);showToast("Backup esportato.");}
-  async function importBackup(file){if(!file)return;try{const data=JSON.parse(await file.text());if(!data||!Array.isArray(data.sessions))throw new Error("Formato non valido");const sessions=data.sessions.map(normalizeSession);if(sessions.some(s=>!validSession(s)))throw new Error("Una o più sessioni non sono valide");const sorted=[...sessions].sort((a,b)=>`${a.date} ${a.start}`.localeCompare(`${b.date} ${b.start}`));for(let i=1;i<sorted.length;i++)if(sorted[i].date===sorted[i-1].date&&timeToMinutes(sorted[i].start)<timeToMinutes(sorted[i-1].end))throw new Error("Il backup contiene sessioni sovrapposte");const defaults={workMinutes:clampInt(data.defaults?.workMinutes,1,240,25),breakEnabled:data.defaults?.breakEnabled!==undefined?Boolean(data.defaults.breakEnabled):true};const replace=window.confirm("Vuoi sostituire tutti i dati attuali con quelli del backup? Premi Annulla per unire le sessioni.");if(replace)state={sessions,defaults};else{const byId=new Map(state.sessions.map(s=>[s.id,s]));sessions.forEach(s=>byId.set(s.id,s));const merged=[...byId.values()].sort((a,b)=>`${a.date} ${a.start}`.localeCompare(`${b.date} ${b.start}`));for(let i=1;i<merged.length;i++)if(merged[i].date===merged[i-1].date&&timeToMinutes(merged[i].start)<timeToMinutes(merged[i-1].end))throw new Error("L'unione crea sovrapposizioni. Modifica il backup o sostituisci i dati.");state.sessions=merged;}persist();els.filterDate.value=localDateString();renderAll();showToast("Backup importato.");}catch(error){showToast(`Importazione non riuscita: ${error.message}`);}finally{els.importInput.value="";}}
+  async function importBackup(file){
+    if(!file)return;
+    const previous=state;
+    try{
+      const data=JSON.parse(await file.text());
+      if(!data||!Array.isArray(data.sessions))throw new Error("Formato non valido");
+      const sessions=data.sessions.map(normalizeSession);
+      if(sessions.some(session=>!validSession(session)))throw new Error("Una o più sessioni non sono valide");
+      if(new Set(sessions.map(session=>session.id)).size!==sessions.length)throw new Error("Il backup contiene identificativi di sessione duplicati");
+      if(hasSessionOverlaps(sessions))throw new Error("Il backup contiene sessioni sovrapposte");
+      const defaults={workMinutes:clampInt(data.defaults?.workMinutes,1,240,25),breakEnabled:data.defaults?.breakEnabled!==undefined?Boolean(data.defaults.breakEnabled):true};
+      const replace=window.confirm("Vuoi sostituire tutti i dati attuali con quelli del backup? Premi Annulla per unire le sessioni.");
+      if(replace)state={sessions,defaults};
+      else{
+        const byId=new Map(state.sessions.map(session=>[session.id,session]));
+        sessions.forEach(session=>byId.set(session.id,session));
+        const merged=[...byId.values()];
+        if(hasSessionOverlaps(merged))throw new Error("Unione non valida: le sessioni si sovrappongono.");
+        state.sessions=merged;
+      }
+      if(!persist()){state=previous;return;}
+      els.filterDate.value=localDateString();renderAll();showToast("Backup importato.");
+    }catch(error){state=previous;showToast(`Importazione non riuscita: ${error.message}`);}
+    finally{els.importInput.value="";}
+  }
   function icsEscape(value){return String(value).replace(/\\/g,"\\\\").replace(/;/g,"\\;").replace(/,/g,"\\,").replace(/\r?\n/g,"\\n");}
   function icsDate(date,time){return `${date.replace(/-/g,"")}T${time.replace(":","")}00`;}
   function exportIcs(){if(!state.sessions.length){showToast("Non ci sono sessioni da esportare.");return;}const lines=["BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//Tempo Pomodoro//IT","CALSCALE:GREGORIAN","METHOD:PUBLISH","X-WR-CALNAME:Tempo - Sessioni di concentrazione"];state.sessions.slice().sort((a,b)=>`${a.date} ${a.start}`.localeCompare(`${b.date} ${b.start}`)).forEach(s=>{const uid=`${s.id}@tempo-pomodoro`,desc=`Concentrazione: ${s.workMinutes} min. ${s.breakEnabled?`Pause automatiche: ${pauseMinutes(s.workMinutes)} min (rapporto 5:1).`:"Pause disattivate."}`;lines.push("BEGIN:VEVENT",`UID:${icsEscape(uid)}`,`DTSTAMP:${new Date().toISOString().replace(/[-:]/g,"").replace(/\.\d{3}/,"")}`,`DTSTART:${icsDate(s.date,s.start)}`,`DTEND:${icsDate(s.date,s.end)}`,`SUMMARY:${icsEscape("Concentrazione: "+s.title)}`,`DESCRIPTION:${icsEscape(desc)}`,"END:VEVENT");});lines.push("END:VCALENDAR");downloadFile(lines.join("\r\n"),"text/calendar;charset=utf-8",`tempo-sessioni-${localDateString()}.ics`);showToast("Calendario esportato in formato iCalendar.");}
 
   // Ambient audio generated locally with Web Audio API (works offline).
   function makeNoiseBuffer(ctx,seconds=4){const length=Math.floor(ctx.sampleRate*seconds),buffer=ctx.createBuffer(1,length,ctx.sampleRate),data=buffer.getChannelData(0);for(let i=0;i<length;i++)data[i]=Math.random()*2-1;return buffer;}
-  function stopSound(){soundNodes.forEach(node=>{try{node.stop?.();}catch{}try{node.disconnect?.();}catch{}});soundNodes=[];if(soundTimer)clearInterval(soundTimer);soundTimer=null;soundPlaying=false;els.soundToggle.textContent="Avvia suono";els.soundStatus.textContent="Audio disattivato";els.focusSoundButton.textContent="Avvia suono";}
-  function startSound(){const kind=els.soundSelect.value;if(kind==="off"){showToast("Seleziona prima un suono.");return;}const AudioCtx=window.AudioContext||window.webkitAudioContext;if(!AudioCtx){showToast("Audio non supportato da questo browser.");return;}if(!audioContext)audioContext=new AudioCtx();audioContext.resume();stopSound();const master=audioContext.createGain();master.gain.value=Number(els.soundVolume.value)/100;master.connect(audioContext.destination);const buffer=makeNoiseBuffer(audioContext,4);
+  function stopSound(){soundNodes.forEach(node=>{try{node.stop?.();}catch{}try{node.disconnect?.();}catch{}});soundNodes=[];soundMasterNode=null;if(soundTimer)clearInterval(soundTimer);soundTimer=null;soundPlaying=false;els.soundToggle.textContent="Avvia suono";els.soundStatus.textContent="Audio disattivato";els.focusSoundButton.textContent="Avvia suono";}
+  function startSound(){const kind=els.soundSelect.value;if(kind==="off"){showToast("Seleziona prima un suono.");return;}const AudioCtx=window.AudioContext||window.webkitAudioContext;if(!AudioCtx){showToast("Audio non supportato da questo browser.");return;}if(!audioContext)audioContext=new AudioCtx();audioContext.resume();stopSound();const master=audioContext.createGain();soundMasterNode=master;master.gain.value=Number(els.soundVolume.value)/100;master.connect(audioContext.destination);const buffer=makeNoiseBuffer(audioContext,4);
     const source=audioContext.createBufferSource();source.buffer=buffer;source.loop=true;let filter=audioContext.createBiquadFilter();filter.type="lowpass";filter.frequency.value=kind==="white"?16000:kind==="brown"?220:kind==="rain"?4200:700;source.connect(filter);filter.connect(master);source.start();soundNodes.push(source,filter,master);
     if(kind==="rain"){const lfo=audioContext.createOscillator(),depth=audioContext.createGain();lfo.frequency.value=.13;depth.gain.value=1100;lfo.connect(depth);depth.connect(filter.frequency);lfo.start();soundNodes.push(lfo,depth);}
     if(kind==="fire"){filter.type="lowpass";filter.frequency.value=950;const crackle=()=>{if(!soundPlaying)return;const osc=audioContext.createBufferSource(),gain=audioContext.createGain(),hp=audioContext.createBiquadFilter();osc.buffer=makeNoiseBuffer(audioContext,.08);hp.type="highpass";hp.frequency.value=1800;gain.gain.setValueAtTime(.0001,audioContext.currentTime);gain.gain.linearRampToValueAtTime(.10,audioContext.currentTime+.008);gain.gain.exponentialRampToValueAtTime(.0001,audioContext.currentTime+.07);osc.connect(hp);hp.connect(gain);gain.connect(master);osc.start();osc.stop(audioContext.currentTime+.08);};soundTimer=setInterval(crackle,450+Math.random()*900);}
     soundPlaying=true;els.soundToggle.textContent="Ferma suono";els.soundStatus.textContent=`In riproduzione: ${els.soundSelect.options[els.soundSelect.selectedIndex].text}`;els.focusSoundButton.textContent="Ferma suono";
   }
   function toggleSound(){if(soundPlaying)stopSound();else startSound();}
-  function updateVolume(){els.volumeValue.textContent=`${els.soundVolume.value}%`;if(audioContext&&soundPlaying){const master=soundNodes.find(n=>n instanceof GainNode&&n!==null);if(master)master.gain.setTargetAtTime(Number(els.soundVolume.value)/100,audioContext.currentTime,.05);}}
+  function updateVolume(){els.volumeValue.textContent=`${els.soundVolume.value}%`;if(audioContext&&soundPlaying){const master=soundMasterNode;if(master)master.gain.setTargetAtTime(Number(els.soundVolume.value)/100,audioContext.currentTime,.05);}}
   async function enableNotifications(){if(!("Notification" in window)){showToast("Le notifiche non sono supportate da questo browser.");return;}if(!swRegistration){showToast("Attendi il completamento della registrazione dell'app, poi riprova.");return;}const permission=await Notification.requestPermission();els.notificationButton.textContent=permission==="granted"?"Notifiche attive":"Attiva notifiche";showToast(permission==="granted"?"Notifiche attivate.":"Permesso per le notifiche non concesso.");}
   async function enterFocus(){els.focusOverlay.classList.remove("hidden");document.body.classList.add("focus-open");try{if(document.documentElement.requestFullscreen)await document.documentElement.requestFullscreen();}catch(error){console.info("Fullscreen non disponibile senza gesto o permesso.",error);}}
   async function exitFocus(){els.focusOverlay.classList.add("hidden");document.body.classList.remove("focus-open");if(document.fullscreenElement)try{await document.exitFullscreen();}catch{}}
-  function escapeIcsFileName(){}
 
   els.newSessionButton.addEventListener("click",openNewDialog);els.emptyAddButton.addEventListener("click",openNewDialog);els.sessionForm.addEventListener("submit",saveSession);els.closeDialog.addEventListener("click",()=>els.dialog.close());els.cancelDialog.addEventListener("click",()=>els.dialog.close());els.deleteButton.addEventListener("click",()=>deleteSession(els.sessionId.value));els.filterDate.addEventListener("change",renderSessions);els.todayButton.addEventListener("click",()=>{els.filterDate.value=localDateString();renderSessions();});els.sessionsList.addEventListener("click",event=>{const edit=event.target.closest("[data-edit]"),del=event.target.closest("[data-delete]");if(edit)openEditDialog(edit.dataset.edit);if(del)deleteSession(del.dataset.delete);});els.defaultsForm.addEventListener("submit",saveDefaults);els.exportButton.addEventListener("click",exportBackup);els.importInput.addEventListener("change",()=>importBackup(els.importInput.files[0]));els.sessionWork.addEventListener("input",updateBreakPreview);els.sessionBreakEnabled.addEventListener("change",updateBreakPreview);els.sessionDate.addEventListener("change",updatePlannedSummary);els.focusButton.addEventListener("click",enterFocus);els.exitFocusButton.addEventListener("click",exitFocus);els.focusFullscreenButton.addEventListener("click",async()=>{try{if(!document.fullscreenElement)await document.documentElement.requestFullscreen();else await document.exitFullscreen();}catch{showToast("Schermo intero non disponibile in questo browser.");}});els.notificationButton.addEventListener("click",enableNotifications);els.soundToggle.addEventListener("click",toggleSound);els.focusSoundButton.addEventListener("click",toggleSound);els.soundSelect.addEventListener("change",()=>{if(soundPlaying){stopSound();startSound();}});els.soundVolume.addEventListener("input",updateVolume);els.exportIcsButton.addEventListener("click",exportIcs);
-  window.addEventListener("beforeinstallprompt",event=>{event.preventDefault();deferredInstallPrompt=event;els.installButton.classList.remove("hidden");});els.installButton.addEventListener("click",async()=>{if(!deferredInstallPrompt){showToast("Per installare, usa il menu del browser e scegli ‘Installa app’ o ‘Aggiungi alla schermata Home’. ");return;}deferredInstallPrompt.prompt();await deferredInstallPrompt.userChoice;deferredInstallPrompt=null;els.installButton.classList.add("hidden");});window.addEventListener("online",()=>{els.connectionStatus.textContent="Online";});window.addEventListener("offline",()=>{els.connectionStatus.textContent="Offline";});document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")renderAll();});window.addEventListener("focus",renderAll);document.addEventListener("keydown",event=>{if(event.key==="Escape"&&!els.focusOverlay.classList.contains("hidden"))exitFocus();});
-  els.filterDate.value=localDateString();els.connectionStatus.textContent=navigator.onLine?"Pronta":"Offline";els.notificationButton.textContent=("Notification" in window&&Notification.permission==="granted")?"Notifiche attive":"Attiva notifiche";renderAll();setInterval(()=>{renderTimer();renderSessions();},1000);
+  window.addEventListener("beforeinstallprompt",event=>{event.preventDefault();deferredInstallPrompt=event;els.installButton.classList.remove("hidden");});els.installButton.addEventListener("click",async()=>{if(!deferredInstallPrompt){showToast("Per installare, usa il menu del browser e scegli ‘Installa app’ o ‘Aggiungi alla schermata Home’. ");return;}const prompt=deferredInstallPrompt;deferredInstallPrompt=null;await prompt.prompt();const choice=await prompt.userChoice;if(choice?.outcome==="accepted")els.installButton.classList.add("hidden");});window.addEventListener("online",()=>{els.connectionStatus.textContent="Online";});window.addEventListener("offline",()=>{els.connectionStatus.textContent="Offline";});document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")renderAll();});window.addEventListener("focus",renderAll);document.addEventListener("keydown",event=>{if(event.key==="Escape"&&!els.focusOverlay.classList.contains("hidden"))exitFocus();});
+  els.filterDate.value=localDateString();els.connectionStatus.textContent=navigator.onLine?"Pronta":"Offline";els.notificationButton.textContent=("Notification" in window&&Notification.permission==="granted")?"Notifiche attive":"Attiva notifiche";renderAll();setInterval(()=>renderTimer(),1000);setInterval(()=>renderSessions(),15000);
   if("serviceWorker" in navigator&&(location.protocol==="https:"||location.hostname==="localhost")){window.addEventListener("load",()=>{navigator.serviceWorker.register("./sw.js").then(reg=>{swRegistration=reg;els.connectionStatus.textContent=navigator.onLine?"Pronta · offline disponibile":"Offline";}).catch(error=>console.warn("Service worker non registrato:",error));});}
 })();

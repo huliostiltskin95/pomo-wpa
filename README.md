@@ -30,10 +30,48 @@ Il file `.ics` contiene le sessioni programmate come eventi di calendario. Può 
 
 ## Aggiornamento dopo una modifica
 
-Il service worker usa la cache `tempo-pomodoro-v3`. Quando pubblichi una nuova versione, incrementa il numero della cache in `sw.js` (ad esempio `v4`) per forzare il rinnovo dei file memorizzati.
+Il service worker usa la cache `tempo-pomodoro-v5`. Quando pubblichi una nuova versione, incrementa il numero della cache in `sw.js` (ad esempio `v4`) per forzare il rinnovo dei file memorizzati.
 
 ## Limiti
 
 - Una PWA statica non può garantire timer, notifiche o avvio di sessioni con l'app completamente chiusa o il dispositivo in sospensione.
 - La riproduzione audio richiede un'interazione iniziale dell'utente e può essere sospesa dal sistema operativo in background.
 - I dati sono memorizzati localmente nel browser: usa periodicamente il backup JSON per conservarli o trasferirli su un altro dispositivo.
+
+## Architettura condivisa
+
+La logica indipendente dalla piattaforma è in `core/tempo-core.js`: validazione e normalizzazione delle sessioni, calcolo delle pause, individuazione delle sessioni attive/prossime e calcolo della fase Pomodoro. La PWA importa direttamente questo modulo ES; il service worker include il modulo nella cache offline.
+
+La cartella `obsidian/` contiene l'integrazione iniziale per Obsidian. Il plugin usa lo stesso core, ma salva i propri dati tramite l'API di persistenza di Obsidian (`data.json` del plugin). I dati PWA in `localStorage` e quelli Obsidian sono separati: non c'è sincronizzazione automatica tra i due ambienti.
+
+### Build del plugin Obsidian
+
+Requisiti: Node.js e npm.
+
+```bash
+cd obsidian
+npm install
+npm run build
+```
+
+La build genera `obsidian/main.js`. Per installare manualmente nel vault, crea la cartella `.obsidian/plugins/tempo-pomodoro/` e copia al suo interno:
+- `obsidian/main.js` (generato dalla build)
+- `obsidian/manifest.json`
+- `obsidian/styles.css`
+
+Poi abilita **Tempo — Pomodoro** da **Impostazioni → Plugin comunitari**. Per lo sviluppo, esegui `npm run dev` dalla cartella `obsidian/` e lascia attivo il processo di watch.
+
+### Funzioni attualmente disponibili nel plugin
+
+- Pannello laterale Tempo con timer aggiornato ogni secondo e indicazione della sessione attiva o della prossima.
+- Creazione di sessioni con data, orari, durata di concentrazione e pause automatiche 5:1 facoltative.
+- Controllo delle sovrapposizioni e validazione dei dati.
+- Elenco delle sessioni future e possibilità di eliminarle.
+- Preferenze predefinite persistenti e comandi Obsidian per aprire il pannello o creare una sessione.
+
+Questa è la prima integrazione funzionante, non ancora una parità completa con la PWA: backup JSON, esportazione iCalendar, notifiche native, suoni ambientali, modalità focus e modifica delle sessioni non sono ancora implementati nel plugin.
+
+
+## Test automatici
+
+Il core condiviso è coperto da test Node.js per validazione di date e orari, rilevamento delle sovrapposizioni (incluse quelle annidate), rapporto lavoro/pausa e calcolo delle fasi Pomodoro. I test vengono eseguiti da GitHub Actions insieme al controllo sintattico della PWA e alla build del plugin Obsidian.
