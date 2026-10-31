@@ -10,3 +10,7 @@
 .tempo-progress-fill { height: 100%; border-radius: inherit; background: var(--interactive-accent); transition: width .3s linear; }
 .tempo-session-row { display: grid; grid-template-columns: minmax(88px, auto) 1fr; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--background-modifier-border); }
 .tempo-session-time, .tempo-session-details { display: flex; flex-direction: column; gap: 3px; }
+
+.tempo-session-row { grid-template-columns: minmax(88px, auto) 1fr auto; }
+.tempo-remove-session { align-self: center; border: 0; border-radius: 6px; padding: 2px 9px; color: var(--text-muted); background: transparent; cursor: pointer; }
+.tempo-remove-session:hover { color: var(--text-error); background: var(--background-modifier-hover); }
