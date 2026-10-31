@@ -27,10 +27,11 @@ export default class TempoPlugin extends Plugin {
   async loadTempoData() {
     const saved = await this.loadData() as Partial<TempoData> | null;
     const sessions = Array.isArray(saved?.sessions) ? saved!.sessions.map(normalizeSession).filter(validSession) as TempoSession[] : [];
+    const savedWork = Number(saved?.defaults?.workMinutes);
     this.data = {
       sessions,
       defaults: {
-        workMinutes: Number.isInteger(saved?.defaults?.workMinutes) && saved!.defaults!.workMinutes >= 1 && saved!.defaults!.workMinutes <= 240 ? saved!.defaults!.workMinutes : DEFAULTS.workMinutes,
+        workMinutes: Number.isInteger(savedWork) && savedWork >= 1 && savedWork <= 240 ? savedWork : DEFAULTS.workMinutes,
         breakEnabled: saved?.defaults?.breakEnabled !== undefined ? Boolean(saved.defaults.breakEnabled) : DEFAULTS.breakEnabled
       }
     };
