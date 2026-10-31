@@ -47,6 +47,8 @@ export default class TempoPlugin extends Plugin {
     this.app.workspace.revealLeaf(leaf);
   }
 
+  async removeSession(id: string) { this.data.sessions = this.data.sessions.filter(session => session.id !== id); await this.saveTempoData(); new Notice("Sessione eliminata."); }
+
   async addSession(session: TempoSession) {
     if (!validSession(session)) { new Notice("Dati della sessione non validi."); return; }
     const start = sessionBounds(session).start.getTime(), end = sessionBounds(session).end.getTime();
@@ -113,6 +115,8 @@ class TempoView extends ItemView {
       const details = row.createDiv("tempo-session-details");
       details.createEl("strong", { text: session.title });
       details.createEl("span", { text: `${session.workMinutes} min lavoro${session.breakEnabled ? ` · ${pauseMinutes(session.workMinutes)} min pausa` : " · senza pause"}` });
+      const remove = row.createEl("button", { text: "×", cls: "tempo-remove-session", attr: { "aria-label": "Elimina sessione" } });
+      remove.addEventListener("click", async () => { if (window.confirm(`Eliminare la sessione “${session.title}”?`)) await this.plugin.removeSession(session.id); });
     }
   }
 }
@@ -129,10 +133,10 @@ class SessionModal extends Modal {
     let workMinutes = this.plugin.data.defaults.workMinutes;
     let breakEnabled = this.plugin.data.defaults.breakEnabled;
     new Setting(contentEl).setName("Nome").addText(text => text.setPlaceholder("Es. Studio del greco").onChange(value => title = value));
-    new Setting(contentEl).setName("Data").addText(text => text.setValue(date).onChange(value => date = value));
-    new Setting(contentEl).setName("Inizio").addText(text => text.setValue(start).onChange(value => start = value));
-    new Setting(contentEl).setName("Fine").addText(text => text.setValue(end).onChange(value => end = value));
-    new Setting(contentEl).setName("Minuti di concentrazione").addText(text => text.setValue(String(workMinutes)).onChange(value => workMinutes = Number(value)));
+    new Setting(contentEl).setName("Data").addText(text => { text.setValue(date); text.inputEl.type = "date"; text.onChange(value => date = value); });
+    new Setting(contentEl).setName("Inizio").addText(text => { text.setValue(start); text.inputEl.type = "time"; text.onChange(value => start = value); });
+    new Setting(contentEl).setName("Fine").addText(text => { text.setValue(end); text.inputEl.type = "time"; text.onChange(value => end = value); });
+    new Setting(contentEl).setName("Minuti di concentrazione").addText(text => { text.setValue(String(workMinutes)); text.inputEl.type = "number"; text.inputEl.min = "1"; text.inputEl.max = "240"; text.onChange(value => workMinutes = Number(value)); });
     new Setting(contentEl).setName("Pause automatiche (rapporto 5:1)").addToggle(toggle => toggle.setValue(breakEnabled).onChange(value => breakEnabled = value));
     new Setting(contentEl).addButton(button => button.setButtonText("Salva sessione").setCta().onClick(async () => {
       const session: TempoSession = { id: crypto.randomUUID(), title: title.trim(), date, start, end, workMinutes, breakEnabled };
