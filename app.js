@@ -1,3 +1,5 @@
+import { localDateString, timeToMinutes, dateTime, formatTime, formatDate, escapeHtml, clampInt, pauseMinutes, normalizeSession, validSession, sessionBounds, getSessionStatus, getPhase, mmss, getActiveSession as findActiveSession, getNextSession as findNextSession } from "./core/tempo-core.js";
+
 (() => {
   "use strict";
   const STORAGE_KEY = "tempo-pomodoro-v2";
@@ -20,16 +22,6 @@
   let soundBuffer = null;
   let soundTimer = null;
 
-  function localDateString(date=new Date()){const y=date.getFullYear(),m=String(date.getMonth()+1).padStart(2,"0"),d=String(date.getDate()).padStart(2,"0");return `${y}-${m}-${d}`;}
-  function timeToMinutes(value){const [h,m]=value.split(":").map(Number);return h*60+m;}
-  function dateTime(date,time){const [y,mo,d]=date.split("-").map(Number),[h,mi]=time.split(":").map(Number);return new Date(y,mo-1,d,h,mi,0,0);}
-  function formatTime(date){return new Intl.DateTimeFormat("it-IT",{hour:"2-digit",minute:"2-digit"}).format(date);}
-  function formatDate(value){const [y,m,d]=value.split("-").map(Number);return new Intl.DateTimeFormat("it-IT",{weekday:"short",day:"numeric",month:"short"}).format(new Date(y,m-1,d));}
-  function escapeHtml(value){return String(value).replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));}
-  function clampInt(value,min,max,fallback){const n=Number(value);return Number.isInteger(n)&&n>=min&&n<=max?n:fallback;}
-  function pauseMinutes(work){return Math.max(1,Math.round(work/5));}
-  function normalizeSession(s){return {...s,breakEnabled:s.breakEnabled!==undefined?Boolean(s.breakEnabled):true};}
-  function validSession(s){return s&&typeof s.id==="string"&&typeof s.title==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(s.date)&&/^\d{2}:\d{2}$/.test(s.start)&&/^\d{2}:\d{2}$/.test(s.end)&&Number.isInteger(s.workMinutes)&&s.workMinutes>=1&&s.workMinutes<=240&&timeToMinutes(s.end)>timeToMinutes(s.start);}
   function loadState(){
     try{
       let raw=localStorage.getItem(STORAGE_KEY);if(!raw)raw=localStorage.getItem(OLD_STORAGE_KEY);
@@ -38,17 +30,13 @@
     return {sessions:[],defaults:{...DEFAULTS}};
   }
   function persist(){try{localStorage.setItem(STORAGE_KEY,JSON.stringify(state));return true;}catch(error){showToast("Non è stato possibile salvare i dati nel browser.");return false;}}
-  function sessionBounds(s){return {start:dateTime(s.date,s.start),end:dateTime(s.date,s.end)};}
-  function getSessionStatus(s,now=new Date()){const {start,end}=sessionBounds(s);if(now<start)return "upcoming";if(now>=end)return "finished";return "active";}
-  function getActiveSession(now=new Date()){return state.sessions.filter(s=>getSessionStatus(s,now)==="active").sort((a,b)=>sessionBounds(a).start-sessionBounds(b).start)[0]||null;}
-  function getNextSession(now=new Date()){return state.sessions.filter(s=>getSessionStatus(s,now)==="upcoming").sort((a,b)=>sessionBounds(a).start-sessionBounds(b).start)[0]||null;}
-  function getPhase(s,now=new Date()){
+  function getActiveSession(now=new Date()){return findActiveSession(state.sessions,now);}
+  function getNextSession(now=new Date()){return findNextSession(state.sessions,now);}
     const {start,end}=sessionBounds(s),workMs=s.workMinutes*60000,elapsed=Math.max(0,now-start),remainingSession=Math.max(0,end-now);
     if(!s.breakEnabled){return {kind:"work",label:"Concentrazione",start,end,remaining:Math.max(0,Math.ceil(remainingSession/1000)),progress:Math.min(100,elapsed/Math.max(1,end-start)*100),sessionEnd:end,totalRemaining:Math.ceil(remainingSession/1000)};}
     const breakMs=pauseMinutes(s.workMinutes)*60000,cycleMs=workMs+breakMs,cycleIndex=Math.floor(elapsed/cycleMs),within=elapsed%cycleMs,isWork=within<workMs,phaseDuration=isWork?workMs:breakMs,phaseElapsed=isWork?within:within-workMs,phaseStart=new Date(start.getTime()+cycleIndex*cycleMs+(isWork?0:workMs)),theoreticalEnd=new Date(phaseStart.getTime()+phaseDuration),phaseEnd=theoreticalEnd<end?theoreticalEnd:end;
     return {kind:isWork?"work":"break",label:isWork?"Concentrazione":"Pausa",start:phaseStart,end:phaseEnd,remaining:Math.max(0,Math.ceil((phaseEnd-now)/1000)),progress:Math.min(100,Math.max(0,phaseElapsed/phaseDuration*100)),sessionEnd:end,totalRemaining:Math.ceil(remainingSession/1000)};
   }
-  function mmss(seconds){const m=Math.floor(Math.max(0,seconds)/60),s=Math.max(0,seconds)%60;return `${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;}
   function showToast(message){els.toast.textContent=message;els.toast.classList.add("show");clearTimeout(toastTimeout);toastTimeout=setTimeout(()=>els.toast.classList.remove("show"),3200);}
   async function sendNotification(title,body){if(!("Notification" in window)||Notification.permission!=="granted")return;try{if(swRegistration)await swRegistration.showNotification(title,{body,icon:"./icon.svg",tag:"tempo-"+Date.now(),renotify:false});else new Notification(title,{body,icon:"./icon.svg"});}catch(error){console.warn("Notifica non disponibile:",error);}}
   function notifyPhaseChange(session,phase){const key=`${session.id}:${phase.kind}:${phase.start.getTime()}`;if(key===lastPhaseKey)return;const wasSet=Boolean(lastPhaseKey);lastPhaseKey=key;if(wasSet){const title=phase.kind==="work"?"Concentrazione":"Pausa";const body=phase.kind==="work"?`Riprendi: ${session.title}`:`È il momento di una pausa · ${session.title}`;showToast(body);sendNotification(title,body);}}
