@@ -1,0 +1,9 @@
+{
+  "id": "tempo-pomodoro",
+  "name": "Tempo — Pomodoro",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Agenda di concentrazione con sessioni programmate e cicli Pomodoro.",
+  "author": "Tempo",
+  "isDesktopOnly": false
+}
