@@ -1,0 +1,35 @@
+name: Validate Tempo
+on:
+  push:
+    branches: [main, refactor/shared-core]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check PWA JavaScript syntax
+        run: |
+          node --check app.js
+          node --check core/tempo-core.js
+      - name: Install Obsidian plugin build dependencies
+        working-directory: obsidian
+        run: npm install
+      - name: Build Obsidian plugin
+        working-directory: obsidian
+        run: npm run build
+      - name: Upload plugin build
+        uses: actions/upload-artifact@v4
+        with:
+          name: tempo-obsidian-plugin
+          path: |
+            obsidian/main.js
+            obsidian/manifest.json
+            obsidian/styles.css
+          if-no-files-found: error
