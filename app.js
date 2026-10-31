@@ -49,12 +49,64 @@ import { localDateString, timeToMinutes, dateTime, formatTime, formatDate, escap
   function updatePlannedSummary(){const date=els.sessionDate.value,id=els.sessionId.value,items=state.sessions.filter(s=>s.date===date&&s.id!==id).sort((a,b)=>a.start.localeCompare(b.start));els.plannedSummaryList.innerHTML=items.length?items.map(s=>`<div class="planned-row"><span>${escapeHtml(s.start)}–${escapeHtml(s.end)}</span><span>${escapeHtml(s.title)}</span></div>`).join("") : "Nessun'altra sessione per questa data.";}
   function openNewDialog(){els.sessionForm.reset();els.sessionId.value="";els.dialogTitle.textContent="Nuova sessione";els.sessionTitle.value="";els.sessionDate.value=els.filterDate.value||localDateString();els.sessionStart.value="09:00";els.sessionEnd.value="11:00";els.sessionWork.value=state.defaults.workMinutes;els.sessionBreakEnabled.checked=state.defaults.breakEnabled;els.formError.textContent="";els.deleteButton.classList.add("hidden");updateBreakPreview();updatePlannedSummary();els.dialog.showModal();els.sessionTitle.focus();}
   function openEditDialog(id){const s=state.sessions.find(x=>x.id===id);if(!s)return;els.sessionId.value=s.id;els.dialogTitle.textContent="Modifica sessione";els.sessionTitle.value=s.title;els.sessionDate.value=s.date;els.sessionStart.value=s.start;els.sessionEnd.value=s.end;els.sessionWork.value=s.workMinutes;els.sessionBreakEnabled.checked=s.breakEnabled;els.formError.textContent="";els.deleteButton.classList.remove("hidden");updateBreakPreview();updatePlannedSummary();els.dialog.showModal();}
-  function saveSession(event){event.preventDefault();const existingId=els.sessionId.value,session={id:existingId||(crypto.randomUUID?crypto.randomUUID():`${Date.now()}-${Math.random().toString(16).slice(2)}`),title:els.sessionTitle.value.trim(),date:els.sessionDate.value,start:els.sessionStart.value,end:els.sessionEnd.value,workMinutes:Number(els.sessionWork.value),breakEnabled:els.sessionBreakEnabled.checked};if(!session.title){els.formError.textContent="Inserisci un nome per la sessione.";return;}if(!validSession(session)){els.formError.textContent="Controlla gli orari: la fine deve essere successiva all'inizio e la durata deve essere valida.";return;}const start=dateTime(session.date,session.start),end=dateTime(session.date,session.end),overlaps=state.sessions.some(s=>{if(s.id===session.id||s.date!==session.date)return false;const b=sessionBounds(s);return start<b.end&&end>b.start;});if(overlaps){els.formError.textContent="Questa sessione si sovrappone a un'altra sessione dello stesso giorno.";return;}if(existingId)state.sessions=state.sessions.map(s=>s.id===existingId?session:s);else state.sessions.push(session);persist();els.filterDate.value=session.date;els.dialog.close();renderAll();showToast(existingId?"Sessione aggiornata.":"Sessione aggiunta all'agenda.");}
-  function deleteSession(id){const s=state.sessions.find(x=>x.id===id);if(!s||!window.confirm(`Eliminare la sessione “${s.title}”?`))return;state.sessions=state.sessions.filter(x=>x.id!==id);persist();if(els.dialog.open)els.dialog.close();renderAll();showToast("Sessione eliminata.");}
-  function saveDefaults(event){event.preventDefault();const work=Number(els.defaultWork.value);if(!Number.isInteger(work)||work<1||work>240){showToast("Inserisci una durata valida.");return;}state.defaults={workMinutes:work,breakEnabled:els.defaultBreakEnabled.checked};persist();renderTimer();showToast("Preferenze salvate.");}
+  function saveSession(event){
+    event.preventDefault();
+    const existingId=els.sessionId.value;
+    const session={id:existingId||(crypto.randomUUID?crypto.randomUUID():`${Date.now()}-${Math.random().toString(16).slice(2)}`),title:els.sessionTitle.value.trim(),date:els.sessionDate.value,start:els.sessionStart.value,end:els.sessionEnd.value,workMinutes:Number(els.sessionWork.value),breakEnabled:els.sessionBreakEnabled.checked};
+    if(!session.title){els.formError.textContent="Inserisci un nome per la sessione.";return;}
+    if(!validSession(session)){els.formError.textContent="Controlla gli orari: la fine deve essere successiva all'inizio e la durata deve essere valida.";return;}
+    const start=dateTime(session.date,session.start),end=dateTime(session.date,session.end);
+    const overlaps=state.sessions.some(s=>{if(s.id===session.id||s.date!==session.date)return false;const bounds=sessionBounds(s);return start<bounds.end&&end>bounds.start;});
+    if(overlaps){els.formError.textContent="Questa sessione si sovrappone a un'altra sessione dello stesso giorno.";return;}
+    const previous=state.sessions;
+    state.sessions=existingId?state.sessions.map(s=>s.id===existingId?session:s):[...state.sessions,session];
+    if(!persist()){state.sessions=previous;return;}
+    els.filterDate.value=session.date;els.dialog.close();renderAll();showToast(existingId?"Sessione aggiornata.":"Sessione aggiunta all'agenda.");
+  }
+  function deleteSession(id){
+    const session=state.sessions.find(item=>item.id===id);
+    if(!session||!window.confirm(`Eliminare la sessione “${session.title}”?`))return;
+    const previous=state.sessions;
+    state.sessions=state.sessions.filter(item=>item.id!==id);
+    if(!persist()){state.sessions=previous;return;}
+    if(els.dialog.open)els.dialog.close();renderAll();showToast("Sessione eliminata.");
+  }
+  function saveDefaults(event){
+    event.preventDefault();
+    const work=Number(els.defaultWork.value);
+    if(!Number.isInteger(work)||work<1||work>240){showToast("Inserisci una durata valida.");return;}
+    const previous=state.defaults;
+    state.defaults={workMinutes:work,breakEnabled:els.defaultBreakEnabled.checked};
+    if(!persist()){state.defaults=previous;els.defaultWork.value=previous.workMinutes;els.defaultBreakEnabled.checked=previous.breakEnabled;return;}
+    renderTimer();showToast("Preferenze salvate.");
+  }
   function downloadFile(content,type,filename){const blob=new Blob([content],{type}),url=URL.createObjectURL(blob),link=document.createElement("a");link.href=url;link.download=filename;document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}
   function exportBackup(){downloadFile(JSON.stringify({app:"Tempo Pomodoro",version:2,exportedAt:new Date().toISOString(),defaults:state.defaults,sessions:state.sessions},null,2),"application/json",`tempo-backup-${localDateString()}.json`);showToast("Backup esportato.");}
-  async function importBackup(file){if(!file)return;try{const data=JSON.parse(await file.text());if(!data||!Array.isArray(data.sessions))throw new Error("Formato non valido");const sessions=data.sessions.map(normalizeSession);if(sessions.some(s=>!validSession(s)))throw new Error("Una o più sessioni non sono valide");if(new Set(sessions.map(session=>session.id)).size!==sessions.length)throw new Error("Il backup contiene identificativi di sessione duplicati");if(hasSessionOverlaps(sessions))throw new Error("Il backup contiene sessioni sovrapposte");const defaults={workMinutes:clampInt(data.defaults?.workMinutes,1,240,25),breakEnabled:data.defaults?.breakEnabled!==undefined?Boolean(data.defaults.breakEnabled):true};const replace=window.confirm("Vuoi sostituire tutti i dati attuali con quelli del backup? Premi Annulla per unire le sessioni.");if(replace)state={sessions,defaults};else{const byId=new Map(state.sessions.map(s=>[s.id,s]));sessions.forEach(s=>byId.set(s.id,s));const merged=[...byId.values()];if(hasSessionOverlaps(merged))throw new Error("Unione non valida: le sessioni si sovrappongono.");state.sessions=merged;}persist();els.filterDate.value=localDateString();renderAll();showToast("Backup importato.");}catch(error){showToast(`Importazione non riuscita: ${error.message}`);}finally{els.importInput.value="";}}
+  async function importBackup(file){
+    if(!file)return;
+    const previous=state;
+    try{
+      const data=JSON.parse(await file.text());
+      if(!data||!Array.isArray(data.sessions))throw new Error("Formato non valido");
+      const sessions=data.sessions.map(normalizeSession);
+      if(sessions.some(session=>!validSession(session)))throw new Error("Una o più sessioni non sono valide");
+      if(new Set(sessions.map(session=>session.id)).size!==sessions.length)throw new Error("Il backup contiene identificativi di sessione duplicati");
+      if(hasSessionOverlaps(sessions))throw new Error("Il backup contiene sessioni sovrapposte");
+      const defaults={workMinutes:clampInt(data.defaults?.workMinutes,1,240,25),breakEnabled:data.defaults?.breakEnabled!==undefined?Boolean(data.defaults.breakEnabled):true};
+      const replace=window.confirm("Vuoi sostituire tutti i dati attuali con quelli del backup? Premi Annulla per unire le sessioni.");
+      if(replace)state={sessions,defaults};
+      else{
+        const byId=new Map(state.sessions.map(session=>[session.id,session]));
+        sessions.forEach(session=>byId.set(session.id,session));
+        const merged=[...byId.values()];
+        if(hasSessionOverlaps(merged))throw new Error("Unione non valida: le sessioni si sovrappongono.");
+        state.sessions=merged;
+      }
+      if(!persist()){state=previous;return;}
+      els.filterDate.value=localDateString();renderAll();showToast("Backup importato.");
+    }catch(error){state=previous;showToast(`Importazione non riuscita: ${error.message}`);}
+    finally{els.importInput.value="";}
+  }
   function icsEscape(value){return String(value).replace(/\\/g,"\\\\").replace(/;/g,"\\;").replace(/,/g,"\\,").replace(/\r?\n/g,"\\n");}
   function icsDate(date,time){return `${date.replace(/-/g,"")}T${time.replace(":","")}00`;}
   function exportIcs(){if(!state.sessions.length){showToast("Non ci sono sessioni da esportare.");return;}const lines=["BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//Tempo Pomodoro//IT","CALSCALE:GREGORIAN","METHOD:PUBLISH","X-WR-CALNAME:Tempo - Sessioni di concentrazione"];state.sessions.slice().sort((a,b)=>`${a.date} ${a.start}`.localeCompare(`${b.date} ${b.start}`)).forEach(s=>{const uid=`${s.id}@tempo-pomodoro`,desc=`Concentrazione: ${s.workMinutes} min. ${s.breakEnabled?`Pause automatiche: ${pauseMinutes(s.workMinutes)} min (rapporto 5:1).`:"Pause disattivate."}`;lines.push("BEGIN:VEVENT",`UID:${icsEscape(uid)}`,`DTSTAMP:${new Date().toISOString().replace(/[-:]/g,"").replace(/\.\d{3}/,"")}`,`DTSTART:${icsDate(s.date,s.start)}`,`DTEND:${icsDate(s.date,s.end)}`,`SUMMARY:${icsEscape("Concentrazione: "+s.title)}`,`DESCRIPTION:${icsEscape(desc)}`,"END:VEVENT");});lines.push("END:VCALENDAR");downloadFile(lines.join("\r\n"),"text/calendar;charset=utf-8",`tempo-sessioni-${localDateString()}.ics`);showToast("Calendario esportato in formato iCalendar.");}
