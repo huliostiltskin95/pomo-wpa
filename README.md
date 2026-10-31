@@ -1,76 +1,39 @@
-# Tempo — PWA Pomodoro
+# Tempo — Pomodoro
 
-Una piccola app web progressiva, in italiano, per programmare sessioni di concentrazione con cicli lavoro/pausa personalizzati. Usa solo HTML, CSS e JavaScript: non richiede server, account, framework o dipendenze.
+PWA installabile e utilizzabile offline per programmare finestre di concentrazione.
 
 ## Funzioni
 
-- Sessioni su date future o sul giorno corrente, con titolo, orario di inizio/fine e durata lavoro/pausa personalizzate.
-- Avvio automatico quando l'orario previsto arriva e la pagina è aperta.
-- Alternanza automatica tra lavoro e pausa, fino all'orario di fine.
-- Nessuna sovrapposizione tra sessioni dello stesso giorno.
-- Preferenze predefinite modificabili.
-- Salvataggio locale nel browser.
-- Esportazione e importazione di backup JSON.
-- Interfaccia adattiva per desktop e dispositivi mobili.
-- Service worker per il caricamento offline dopo la prima visita.
-- Installazione come PWA, dove supportata dal browser.
+- Pianificazione di sessioni per data e intervallo orario, con riepilogo delle altre sessioni già presenti nella giornata.
+- Cicli di concentrazione e pausa con rapporto automatico 5:1 (ad esempio 25 + 5 minuti).
+- Possibilità di disattivare completamente le pause per ogni sessione o come preferenza predefinita.
+- Timer che si riallinea all'orario reale quando la pagina torna attiva. Per l'avvio automatico la PWA deve restare aperta e il dispositivo deve essere attivo.
+- Modalità focus a tutto schermo (richiede un'azione dell'utente).
+- Notifiche di cambio fase, se il browser le supporta e l'utente concede il permesso.
+- Suoni ambientali generati localmente tramite Web Audio API: rumore bianco, rumore marrone, pioggia e caminetto. Non richiedono servizi esterni e non sono veri file audio registrati.
+- Salvataggio locale, backup/ripristino JSON ed esportazione delle sessioni in formato iCalendar `.ics`.
 
-## Pubblicazione su GitHub Pages
+## Rapporto lavoro/pausa
 
-1. Crea un repository GitHub, ad esempio `tempo-pomodoro`.
-2. Scarica ed estrai l'archivio del progetto.
-3. Carica **tutti i file e le cartelle del progetto** nella radice del repository: `index.html`, `app.js`, `styles.css`, `manifest.webmanifest`, `sw.js`, `icon.svg` e `README.md`.
-4. In GitHub apri **Settings → Pages**.
-5. In **Build and deployment**, scegli **Deploy from a branch**.
-6. Seleziona il branch `main` e la cartella `/ (root)`, poi salva.
-7. Attendi la pubblicazione. L'indirizzo sarà simile a `https://TUO-USERNAME.github.io/tempo-pomodoro/`.
+La pausa viene calcolata come `round(durata_concentrazione / 5)`, con una durata minima di un minuto. Per esempio, 25 minuti di concentrazione generano 5 minuti di pausa. Disattivando le pause, l'intera finestra programmata è trattata come un unico intervallo di concentrazione.
 
-GitHub Pages può impiegare qualche minuto ad aggiornare il sito. Se il repository ha un nome diverso, il percorso finale cambia di conseguenza. Il progetto usa percorsi relativi (`./`) per funzionare anche in un sottopercorso GitHub Pages.
+## TickTick e calendari
 
-### Aggiornamenti
+Il file `.ics` contiene le sessioni programmate come eventi di calendario. Può essere importato in un'app calendario compatibile. TickTick può mostrare calendari locali su iOS/macOS e sottoscrivere calendari esterni tramite URL; l'esportazione locale da Tempo non crea da sola una sincronizzazione automatica o bidirezionale con TickTick. L'importazione non crea registrazioni native del timer Pomodoro di TickTick.
 
-Quando modifichi i file e li carichi nel repository, il browser può continuare a usare temporaneamente la versione in cache. Per verificare una nuova versione:
-- ricarica la pagina;
-- se necessario, chiudi e riapri la PWA;
-- in caso di cache persistente, cancella i dati del sito dal browser.
+## Installazione su GitHub Pages
 
-Se pubblichi una nuova versione importante, aumenta `CACHE_NAME` in `sw.js`, ad esempio da `tempo-pomodoro-v1` a `tempo-pomodoro-v2`.
+1. Carica tutti i file nella root del repository.
+2. In GitHub apri **Settings → Pages**.
+3. Seleziona il branch principale e la cartella `/ (root)`.
+4. Apri l'indirizzo Pages in HTTPS e installa la PWA dal browser.
 
-## Uso
+## Aggiornamento dopo una modifica
 
-1. Apri la pagina e scegli **Nuova sessione**.
-2. Inserisci un titolo, la data, l'ora d'inizio e l'ora di fine.
-3. Imposta i minuti di lavoro e pausa. I valori predefiniti si possono cambiare in **Impostazioni predefinite**.
-4. Salva. La sessione apparirà nell'agenda del giorno selezionato.
-5. Lascia la pagina aperta: quando arriva l'ora d'inizio, il timer entra automaticamente nel ciclo corretto.
+Il service worker usa la cache `tempo-pomodoro-v3`. Quando pubblichi una nuova versione, incrementa il numero della cache in `sw.js` (ad esempio `v4`) per forzare il rinnovo dei file memorizzati.
 
-Le sessioni vengono salvate nel browser del dispositivo. Esporta regolarmente un backup JSON per trasferire i dati o conservarli.
+## Limiti
 
-## Limiti tecnici da conoscere
-
-- **Pagina aperta richiesta per l'avvio automatico:** una PWA statica non può garantire l'avvio di un timer con l'app completamente chiusa su tutti i sistemi operativi.
-- **Sospensione e risparmio energetico:** se il browser sospende la pagina o il computer/telefono entra in stop, il timer visivo può non aggiornarsi in tempo reale. Al ritorno in primo piano viene ricalcolato in base all'orario reale, quindi non perde il conto del tempo trascorso.
-- **Notifiche e suoni:** questa versione non si affida a notifiche push o a processi in background. Gli avvisi interni compaiono mentre la pagina è visibile; la disponibilità delle notifiche di sistema varia tra browser e sistemi operativi.
-- **Dati locali:** i dati non si sincronizzano tra dispositivi. I dati del browser possono essere cancellati manualmente o dalle impostazioni di pulizia; usa il backup JSON.
-- **Installazione:** l'esperienza PWA varia tra browser. GitHub Pages fornisce HTTPS, requisito necessario per il service worker; su alcuni browser l'installazione può essere disponibile dal menu del browser invece che tramite un pulsante interno.
-- **Icona:** il progetto include un'icona SVG. Alcune combinazioni di browser/sistema operativo possono preferire icone PNG di dimensioni dedicate per una migliore installazione; l'app resta utilizzabile anche senza.
-- **Orari:** le sessioni sono pensate per iniziare e terminare nella stessa giornata locale. Non è possibile programmare una sessione che attraversi la mezzanotte.
-- **Precisione:** la pagina aggiorna l'interfaccia ogni secondo quando il browser la esegue. Il conto alla rovescia deriva da orari reali e si riallinea dopo sospensioni, ma non è un timer di sistema con garanzia al millisecondo.
-
-## Dati e privacy
-
-L'app non contiene analytics, pubblicità, account, chiamate a servizi esterni o dipendenze remote. Le sessioni e le preferenze sono salvate in `localStorage` del browser. Il backup JSON contiene titoli, date, orari, durate e preferenze: conservalo in un luogo appropriato.
-
-## Test locale
-
-Per testare il service worker, servi i file con un server locale (non aprire `index.html` direttamente dal file system). Se hai Python installato:
-
-```bash
-python -m http.server 8000
-```
-
-Poi visita `http://localhost:8000/`. Per testare l'installazione PWA nel modo più fedele possibile, pubblica su GitHub Pages via HTTPS.
-
-## Licenza
-
-Puoi riutilizzare e modificare il progetto. Se desideri distribuirlo pubblicamente con una licenza formale, aggiungi un file `LICENSE` con la licenza scelta.
+- Una PWA statica non può garantire timer, notifiche o avvio di sessioni con l'app completamente chiusa o il dispositivo in sospensione.
+- La riproduzione audio richiede un'interazione iniziale dell'utente e può essere sospesa dal sistema operativo in background.
+- I dati sono memorizzati localmente nel browser: usa periodicamente il backup JSON per conservarli o trasferirli su un altro dispositivo.

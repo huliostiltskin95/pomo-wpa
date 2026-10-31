@@ -1,4 +1,3 @@
-
 <!doctype html>
 <html lang="it">
 <head>
@@ -13,232 +12,78 @@
 </head>
 <body>
   <header class="topbar">
-    <a class="brand" href="./" aria-label="Tempo, pagina iniziale">
-      <span class="brand-mark" aria-hidden="true">t</span>
-      <span>tempo</span>
-    </a>
-    <div class="top-actions">
-      <span id="connection-status" class="quiet-status">Pronta</span>
-      <button id="install-button" class="button button-secondary hidden" type="button">Installa app</button>
-    </div>
+    <a class="brand" href="./" aria-label="Tempo, pagina iniziale"><span class="brand-mark" aria-hidden="true">t</span><span>tempo</span></a>
+    <div class="top-actions"><span id="connection-status" class="quiet-status">Pronta</span><button id="install-button" class="button button-secondary hidden" type="button">Installa app</button></div>
   </header>
 
   <main class="layout">
     <section class="intro">
       <p class="eyebrow">IL TUO TEMPO, CON INTENZIONE</p>
       <h1>Fai spazio alla concentrazione.</h1>
-      <p class="intro-copy">Programma una finestra di lavoro. Tempo avvierà i cicli quando l'app è aperta e l'orario previsto è arrivato.</p>
+      <p class="intro-copy">Programma le tue finestre di lavoro. Tempo avvierà i cicli all'orario previsto, se l'app è aperta.</p>
     </section>
 
     <section class="timer-card" aria-labelledby="timer-heading">
-      <div class="timer-topline">
-        <div>
-          <p class="eyebrow" id="timer-mode">NESSUNA SESSIONE ATTIVA</p>
-          <h2 id="timer-heading">Pronto quando vuoi</h2>
-        </div>
-        <span id="phase-pill" class="phase-pill neutral">In attesa</span>
-      </div>
-
+      <div class="timer-topline"><div><p class="eyebrow" id="timer-mode">NESSUNA SESSIONE ATTIVA</p><h2 id="timer-heading">Pronto quando vuoi</h2></div><span id="phase-pill" class="phase-pill neutral">In attesa</span></div>
       <div class="timer-display" id="timer-display" role="timer" aria-live="off">25:00</div>
       <p id="timer-caption" class="timer-caption">La prossima sessione apparirà qui.</p>
-
-      <div class="timer-track" aria-hidden="true">
-        <div id="timer-progress" class="timer-progress"></div>
-      </div>
-
-      <div class="timer-footer">
-        <span id="timer-session-label">Nessuna sessione in corso</span>
-        <span id="timer-end-label">—</span>
-      </div>
-
-      <!-- Accesso alla modalità Focus -->
-      <div class="timer-controls">
-        <button id="focus-mode-button" class="button button-primary" type="button">
-          Modalità Focus
-        </button>
-      </div>
-    </section>
-
-    <!-- Impostazioni notifiche -->
-    <section class="notification-card">
-      <div>
-        <p class="eyebrow">AVVISI</p>
-        <h2>Notifiche</h2>
-        <p id="notification-status" class="muted">
-          Le notifiche non sono ancora abilitate.
-        </p>
-      </div>
-
-      <button id="notification-button" class="button button-secondary" type="button">
-        Abilita notifiche
-      </button>
+      <div class="timer-track" aria-hidden="true"><div id="timer-progress" class="timer-progress"></div></div>
+      <div class="timer-footer"><span id="timer-session-label">Nessuna sessione in corso</span><span id="timer-end-label">—</span></div>
+      <div class="timer-controls"><button id="focus-button" class="button button-secondary" type="button">Modalità focus</button><button id="notification-button" class="button button-secondary" type="button">Attiva notifiche</button></div>
     </section>
 
     <section class="schedule-section">
-      <div class="section-heading">
-        <div>
-          <p class="eyebrow">PIANIFICAZIONE</p>
-          <h2>Le tue sessioni</h2>
-        </div>
-        <button id="new-session-button" class="button button-primary" type="button">＋ Nuova sessione</button>
-      </div>
-
-      <div class="date-toolbar">
-        <label for="filter-date">Mostra il giorno</label>
-        <input id="filter-date" type="date">
-        <button id="today-button" class="text-button" type="button">Oggi</button>
-      </div>
-
+      <div class="section-heading"><div><p class="eyebrow">PIANIFICAZIONE</p><h2>Le tue sessioni</h2></div><button id="new-session-button" class="button button-primary" type="button">＋ Nuova sessione</button></div>
+      <div class="date-toolbar"><label for="filter-date">Mostra il giorno</label><input id="filter-date" type="date"><button id="today-button" class="text-button" type="button">Oggi</button></div>
       <div id="sessions-list" class="sessions-list"></div>
-
-      <div id="empty-state" class="empty-state hidden">
-        <div class="empty-icon" aria-hidden="true">◷</div>
-        <h3>Nessuna sessione in programma</h3>
-        <p>Aggiungi una finestra di concentrazione per organizzare la giornata.</p>
-        <button id="empty-add-button" class="button button-secondary" type="button">Crea la prima sessione</button>
-      </div>
+      <div id="empty-state" class="empty-state hidden"><div class="empty-icon" aria-hidden="true">◷</div><h3>Nessuna sessione in programma</h3><p>Aggiungi una finestra di concentrazione per organizzare la giornata.</p><button id="empty-add-button" class="button button-secondary" type="button">Crea la prima sessione</button></div>
+      <div class="export-calendar-row"><p class="muted">Vuoi visualizzare il programma in un calendario esterno?</p><button id="export-ics-button" class="button button-secondary" type="button">Esporta calendario (.ics)</button></div>
     </section>
 
     <section class="settings-card">
-      <div>
-        <p class="eyebrow">PREFERENZE</p>
-        <h2>Impostazioni predefinite</h2>
-        <p class="muted">Si applicano alle nuove sessioni. Puoi modificare i valori per ogni singola sessione.</p>
-      </div>
-
+      <div><p class="eyebrow">PREFERENZE</p><h2>Impostazioni predefinite</h2><p class="muted">Si applicano alle nuove sessioni. Puoi modificarle per ogni sessione.</p></div>
       <form id="defaults-form" class="defaults-form">
-        <label>
-          Lavoro predefinito
-          <span class="input-with-suffix">
-            <input id="default-work" type="number" min="1" max="240" value="25" required>
-            <span>min</span>
-          </span>
-        </label>
-
-        <label>
-          Pausa predefinita
-          <span class="input-with-suffix">
-            <input id="default-break" type="number" min="1" max="90" value="5" required>
-            <span>min</span>
-          </span>
-        </label>
-
+        <label>Concentrazione predefinita<span class="input-with-suffix"><input id="default-work" type="number" min="1" max="240" value="25" required><span>min</span></span></label>
+        <label class="check-label"><input id="default-break-enabled" type="checkbox" checked><span>Inserisci pause automatiche</span></label>
+        <p class="ratio-note">Rapporto automatico 5:1: 25 minuti di lavoro corrispondono a 5 minuti di pausa.</p>
         <button class="button button-secondary" type="submit">Salva preferenze</button>
       </form>
     </section>
 
-    <section class="backup-card">
-      <div>
-        <p class="eyebrow">I TUOI DATI</p>
-        <h2>Backup e ripristino</h2>
-        <p class="muted">Le sessioni restano in questo browser. Esporta una copia JSON per trasferirle o conservarle.</p>
-      </div>
-
-      <div class="backup-actions">
-        <button id="export-button" class="button button-secondary" type="button">Esporta backup</button>
-        <label class="button button-secondary file-button">
-          Importa backup
-          <input id="import-input" type="file" accept=".json,application/json">
-        </label>
+    <section class="sound-card">
+      <div><p class="eyebrow">AMBIENTE</p><h2>Suoni di sottofondo</h2><p class="muted">Audio generato nel dispositivo: non richiede streaming né connessione Internet.</p></div>
+      <div class="sound-controls">
+        <label for="sound-select">Suono ambientale</label>
+        <select id="sound-select"><option value="off">Nessun suono</option><option value="white">Rumore bianco</option><option value="brown">Rumore marrone</option><option value="rain">Pioggia</option><option value="fire">Caminetto</option></select>
+        <label for="sound-volume">Volume <span id="volume-value">25%</span></label><input id="sound-volume" type="range" min="0" max="100" value="25">
+        <div class="sound-actions"><button id="sound-toggle" class="button button-secondary" type="button">Avvia suono</button><span id="sound-status" class="muted" aria-live="polite">Audio disattivato</span></div>
       </div>
     </section>
 
-    <aside class="notice">
-      <span class="notice-icon" aria-hidden="true">i</span>
-      <p>
-        <strong>Nota sull'avvio automatico.</strong>
-        La scheda deve essere aperta e il dispositivo attivo. Se il browser sospende la pagina o il computer va in stop, gli aggiornamenti visivi possono fermarsi; al ritorno, il timer si riallinea all'orario reale. Una PWA non può garantire l'avvio con l'app completamente chiusa su tutti i sistemi.
-      </p>
-    </aside>
+    <section class="backup-card"><div><p class="eyebrow">I TUOI DATI</p><h2>Backup e ripristino</h2><p class="muted">Le sessioni restano in questo browser. Esporta una copia JSON per trasferirle o conservarle.</p></div><div class="backup-actions"><button id="export-button" class="button button-secondary" type="button">Esporta backup</button><label class="button button-secondary file-button">Importa backup<input id="import-input" type="file" accept=".json,application/json"></label></div></section>
+
+    <aside class="notice"><span class="notice-icon" aria-hidden="true">i</span><p><strong>Nota sull'avvio automatico.</strong> La scheda deve essere aperta e il dispositivo attivo. Se il browser sospende la pagina o il computer va in stop, il timer si riallinea all'orario reale al ritorno. Una PWA non può garantire l'avvio con l'app completamente chiusa su tutti i sistemi.</p></aside>
   </main>
 
-  <!-- Finestra di creazione e modifica sessione -->
   <dialog id="session-dialog" class="session-dialog">
     <form id="session-form" method="dialog">
-      <div class="dialog-heading">
-        <div>
-          <p class="eyebrow">PIANIFICAZIONE</p>
-          <h2 id="dialog-title">Nuova sessione</h2>
-        </div>
-        <button id="close-dialog" class="icon-button" type="button" aria-label="Chiudi">×</button>
-      </div>
-
+      <div class="dialog-heading"><div><p class="eyebrow">PIANIFICAZIONE</p><h2 id="dialog-title">Nuova sessione</h2></div><button id="close-dialog" class="icon-button" type="button" aria-label="Chiudi">×</button></div>
       <input id="session-id" type="hidden">
-
-      <label class="field-label">
-        Nome della sessione
-        <input id="session-title" type="text" maxlength="80" placeholder="Es. Studio del greco" required>
-      </label>
-
-      <label class="field-label">
-        Data
-        <input id="session-date" type="date" required>
-      </label>
-
-      <div class="two-fields">
-        <label class="field-label">
-          Inizio
-          <input id="session-start" type="time" value="09:00" required>
-        </label>
-
-        <label class="field-label">
-          Fine
-          <input id="session-end" type="time" value="11:00" required>
-        </label>
-      </div>
-
-      <div class="two-fields">
-        <label class="field-label">
-          Lavoro (minuti)
-          <input id="session-work" type="number" min="1" max="240" value="25" required>
-        </label>
-
-        <label class="field-label">
-          Pausa (minuti)
-          <input id="session-break" type="number" min="1" max="90" value="5" required>
-        </label>
-      </div>
-
-      <p class="form-hint">Il timer alterna lavoro e pausa fino all'ora di fine. L'ultimo intervallo viene accorciato se necessario.</p>
+      <label class="field-label">Nome della sessione<input id="session-title" type="text" maxlength="80" placeholder="Es. Studio del greco" required></label>
+      <label class="field-label">Data<input id="session-date" type="date" required></label>
+      <div class="two-fields"><label class="field-label">Inizio<input id="session-start" type="time" value="09:00" required></label><label class="field-label">Fine<input id="session-end" type="time" value="11:00" required></label></div>
+      <label class="field-label">Durata di concentrazione<input id="session-work" type="number" min="1" max="240" value="25" required></label>
+      <label class="check-label dialog-check"><input id="session-break-enabled" type="checkbox" checked><span>Inserisci pause automatiche (rapporto 5:1)</span></label>
+      <p id="break-preview" class="form-hint">Con 25 minuti di concentrazione, la pausa sarà di 5 minuti.</p>
+      <div class="planned-summary"><h3>Altre sessioni già programmate</h3><div id="planned-summary-list" class="planned-summary-list">Nessun'altra sessione per questa data.</div></div>
+      <p class="form-hint">La sessione si svolge nell'intervallo indicato. L'ultimo intervallo viene accorciato se necessario.</p>
       <p id="form-error" class="form-error" role="alert"></p>
-
-      <div class="dialog-actions">
-        <button id="delete-session-button" class="button button-danger hidden" type="button">Elimina</button>
-        <span class="action-spacer"></span>
-        <button id="cancel-dialog" class="button button-secondary" type="button">Annulla</button>
-        <button class="button button-primary" type="submit">Salva sessione</button>
-      </div>
+      <div class="dialog-actions"><button id="delete-session-button" class="button button-danger hidden" type="button">Elimina</button><span class="action-spacer"></span><button id="cancel-dialog" class="button button-secondary" type="button">Annulla</button><button class="button button-primary" type="submit">Salva sessione</button></div>
     </form>
   </dialog>
 
-  <!-- Schermata a tutto schermo della modalità Focus -->
-  <div id="focus-overlay" class="focus-overlay hidden">
-    <div class="focus-content">
-      <p id="focus-phase" class="eyebrow">IN ATTESA</p>
-
-      <h1 id="focus-title">Pronto quando vuoi</h1>
-
-      <div id="focus-timer" class="focus-timer">25:00</div>
-
-      <p id="focus-caption" class="focus-caption">
-        La prossima sessione apparirà qui.
-      </p>
-
-      <div class="focus-track">
-        <div id="focus-progress" class="focus-progress"></div>
-      </div>
-
-      <p id="focus-end-label" class="focus-end-label"></p>
-
-      <button id="exit-focus-button" class="button button-secondary" type="button">
-        Esci dalla modalità Focus
-      </button>
-    </div>
-  </div>
-
-  <!-- Messaggi temporanei -->
+  <div id="focus-overlay" class="focus-overlay hidden" role="dialog" aria-modal="true" aria-label="Modalità focus"><button id="exit-focus-button" class="icon-button focus-exit" type="button" aria-label="Esci dalla modalità focus">×</button><p id="focus-label" class="eyebrow">CONCENTRAZIONE</p><h2 id="focus-title">Pronto quando vuoi</h2><div id="focus-display" class="focus-display">25:00</div><p id="focus-caption" class="timer-caption">Resta sul compito.</p><div class="focus-actions"><button id="focus-fullscreen-button" class="button button-secondary" type="button">Schermo intero</button><button id="focus-sound-button" class="button button-secondary" type="button">Avvia suono</button></div></div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-
   <script src="./app.js" defer></script>
 </body>
 </html>
