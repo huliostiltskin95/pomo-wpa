@@ -1,0 +1,12 @@
+.tempo-view { padding: 12px; }
+.tempo-view-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.tempo-view-heading h2 { margin: 0; }
+.tempo-timer { margin: 16px 0 24px; padding: 18px; border: 1px solid var(--background-modifier-border); border-radius: 12px; background: var(--background-secondary); }
+.tempo-eyebrow { color: var(--text-muted); font-size: .72em; font-weight: 700; letter-spacing: .08em; }
+.tempo-clock { margin: 8px 0; font-size: clamp(2.4rem, 12vw, 4rem); font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.tempo-session-title { font-size: 1.1em; font-weight: 600; }
+.tempo-muted, .tempo-session-time span, .tempo-session-details span { color: var(--text-muted); font-size: .85em; }
+.tempo-progress { height: 6px; margin-top: 16px; overflow: hidden; border-radius: 999px; background: var(--background-modifier-border); }
+.tempo-progress-fill { height: 100%; border-radius: inherit; background: var(--interactive-accent); transition: width .3s linear; }
+.tempo-session-row { display: grid; grid-template-columns: minmax(88px, auto) 1fr; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--background-modifier-border); }
+.tempo-session-time, .tempo-session-details { display: flex; flex-direction: column; gap: 3px; }
