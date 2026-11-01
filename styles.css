@@ -122,3 +122,10 @@ body{--tempo-nav-width:218px}
  .tempo-next-card,.tempo-statistics{padding:17px}
  .agenda-section,.schedule-section{margin-top:10px}
 }
+
+/* Interactive Markdown checklists */
+.tempo-md-check-row{display:flex;align-items:flex-start;gap:9px;max-width:100%;margin:5px 0;line-height:1.5;cursor:pointer;color:var(--text)}
+.tempo-md-check-row input{flex:none;width:17px;height:17px;margin:2px 0 0;accent-color:var(--accent);cursor:pointer}
+.tempo-md-check-row input:checked+span{text-decoration:line-through;color:var(--muted)}
+.tempo-md-check-row input:disabled{cursor:default}
+.tempo-md-check-row span{min-width:0;overflow-wrap:anywhere}
