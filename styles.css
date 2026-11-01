@@ -131,3 +131,4 @@ body{--tempo-nav-width:218px}
 .tempo-md-check-row span{min-width:0;overflow-wrap:anywhere}
 
 .dropbox-controls,.dropbox-controls>div{display:grid;gap:10px}.dropbox-controls input{width:100%;min-height:39px;border:1px solid var(--line);border-radius:9px;padding:8px 10px}.dropbox-controls .button{justify-self:start}.dropbox-controls .muted{margin:0}.dropbox-controls .hidden{display:none!important}
+\n.tempo-session-tasks{display:grid;gap:8px;margin-top:9px}.tempo-session-task{display:flex;gap:9px;align-items:center;font-size:12px}.tempo-session-task input{width:17px;height:17px;accent-color:var(--accent)}.tempo-session-task input:checked+span{text-decoration:line-through;color:var(--muted)}\n
