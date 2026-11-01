@@ -1,4 +1,4 @@
-import { localDateString, validSession, sessionBounds, escapeHtml, hasSessionOverlaps, timeToMinutes } from "./core/tempo-core.js";
+import { localDateString, validSession, sessionBounds, escapeHtml, hasSessionOverlaps, sessionDurationMinutes } from "./core/tempo-core.js";
 import { TASK_AREAS, TASK_PRIORITIES, TASK_STATUSES, parseTaskTags, normalizeTask, estimatedMinutesFromHours,
   hoursFromMinutes, plannedFocusMinutes, elapsedScheduledFocusMinutes, getTaskAttention,
   taskTagAncestors, taskHasTag, createTaskSession, focusMinutesInSession } from "./core/tempo-tasks.js";
@@ -40,7 +40,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
   const escape = value => escapeHtml(value);
   const format = value => hoursFromMinutes(value) + " h";
   const grossPlanned = (taskId, sessions) => sessions.filter(s => s.taskId === taskId)
-    .reduce((sum, s) => sum + Math.max(0, timeToMinutes(s.end) - timeToMinutes(s.start)), 0);
+    .reduce((sum, s) => sum + sessionDurationMinutes(s), 0);
   const markdown = (value, interactive = false) => {
     // Escape user input first. Only generated checkbox controls become HTML.
     const checkboxes = [];
@@ -315,11 +315,11 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
       const session = readPlan();
       if (!validSession(session)) throw new Error("Controlla data e ora di inizio.");
       const existing = getState().sessions.some(other =>
-        other.date === session.date && sessionBounds(other).start < sessionBounds(session).end &&
+        sessionBounds(other).start < sessionBounds(session).end &&
         sessionBounds(other).end > sessionBounds(session).start);
       const gross = estimatedMinutesFromHours(el.planHours.value);
       const net = focusMinutesInSession(session);
-      el.planPreview.textContent = "Termine previsto " + session.end + " · " + format(gross) +
+      el.planPreview.textContent = "Termine previsto " + session.end + (sessionDurationMinutes(session) <= 0 ? "" : (session.end <= session.start ? " (giorno successivo)" : "")) + " · " + format(gross) +
         " lorde · " + format(net) + " di concentrazione netta" + (session.breakEnabled ? " (pause incluse)." : " (senza pause).");
       el.planError.textContent = existing ? "Attenzione: l'intervallo si sovrappone a una sessione esistente." : "";
     } catch (error) {
