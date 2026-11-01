@@ -1,3 +1,7 @@
+export const sessionTaskIds = s => [...new Set([...(Array.isArray(s.taskIds)?s.taskIds:[]),...(s.taskId?[s.taskId]:[])])];
+export const sessionHasTask = (s,id) => sessionTaskIds(s).includes(id);
+export const withSessionTasks = (s,ids) => {const {taskId,...rest}=s;return {...rest,taskIds:[...new Set(ids)]};};
+export const sessionArea = (s,tasks) => s.area || tasks.find(t=>sessionHasTask(s,t.id))?.area || (TASK_AREAS.includes(s.title)?s.title:"Personale");
 import { sessionBounds, sessionDurationMinutes, timeToMinutes, pauseMinutes } from "./tempo-core.js";
 
 export const TASK_AREAS = Object.freeze(["Personale", "Lavoro", "Studio"]);
@@ -91,7 +95,7 @@ export function focusMinutesInSession(session) {
 }
 
 export function plannedFocusMinutes(taskId, sessions) {
-  return sessions.filter(session => session.taskId === taskId)
+  return sessions.filter(session => sessionHasTask(session, taskId))
     .reduce((sum, session) => sum + focusMinutesInSession(session), 0);
 }
 
@@ -120,7 +124,7 @@ export function createTaskSession(task, { id, date, start, focusMinutes, grossMi
   const end = String(Math.floor(endMinute / 60)).padStart(2, "0") + ":" +
     String(endMinute % 60).padStart(2, "0");
   // Date validation is done by the existing validSession before committing.
-  return { id, taskId: task.id, title: task.title, date, start, end, workMinutes, breakEnabled };
+  return { id, taskIds:[task.id], area:task.area, title:task.area, date, start, end, workMinutes, breakEnabled };
 }
 
 /**
@@ -130,7 +134,7 @@ export function createTaskSession(task, { id, date, start, focusMinutes, grossMi
  */
 export function getTaskAttention(task, sessions, now = new Date()) {
   if (!task || task.status === "done") return null;
-  const linked = sessions.filter(session => session.taskId === task.id);
+  const linked = sessions.filter(session => sessionHasTask(session, task.id));
   if (linked.some(session => sessionBounds(session).end > now)) return null;
   if (linked.length === 0) {
     return { kind: "unplanned", label: "Da pianificare", lastEnd: null };
@@ -144,6 +148,6 @@ export function getTaskAttention(task, sessions, now = new Date()) {
 
 /** Calendar blocks elapsed, not guaranteed attention or actual work. */
 export function elapsedScheduledFocusMinutes(taskId, sessions, now = new Date()) {
-  return sessions.filter(session => session.taskId === taskId && sessionBounds(session).end <= now)
+  return sessions.filter(session => sessionHasTask(session, taskId) && sessionBounds(session).end <= now)
     .reduce((sum, session) => sum + focusMinutesInSession(session), 0);
 }
