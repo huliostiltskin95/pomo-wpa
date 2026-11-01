@@ -117,7 +117,7 @@
       <label class="field-label">Stato dell’attività<select id="task-status">
         <option value="todo">Da fare</option><option value="in_progress">In corso</option><option value="done">Completata</option>
       </select></label>
-      <label class="field-label">Durata stimata di concentrazione (ore)
+      <label class="field-label">Durata lorda stimata dell’attività (ore)
         <input id="task-estimate" type="number" min="0.25" max="10000" step="0.25" placeholder="Facoltativa">
       </label>
       <label class="field-label">Scadenza (facoltativa)<input id="task-due-date" type="date"></label>
@@ -172,7 +172,7 @@
         <label class="field-label">Data<input id="task-plan-date" type="date" required></label>
         <label class="field-label">Ora di inizio<input id="task-plan-start" type="time" required></label>
       </div>
-      <label class="field-label">Ore nette da programmare
+      <label class="field-label">Ore lorde da programmare (pause comprese)
         <input id="task-plan-hours" type="number" min="0.25" max="10000" step="0.25" value="1" required>
       </label>
       <label class="field-label">Durata di ciascun focus (minuti)
