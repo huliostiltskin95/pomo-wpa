@@ -1,7 +1,7 @@
 import { localDateString, validSession, sessionBounds, escapeHtml, hasSessionOverlaps, sessionDurationMinutes } from "./core/tempo-core.js";
 import { TASK_AREAS, TASK_PRIORITIES, TASK_STATUSES, parseTaskTags, normalizeTask, estimatedMinutesFromHours,
   hoursFromMinutes, plannedFocusMinutes, elapsedScheduledFocusMinutes, getTaskAttention,
-  taskTagAncestors, taskHasTag, createTaskSession, focusMinutesInSession } from "./core/tempo-tasks.js";
+  taskTagAncestors, taskHasTag, createTaskSession, focusMinutesInSession, sessionHasTask, sessionTaskIds, withSessionTasks } from "./core/tempo-tasks.js";
 
 /**
  * PWA-only task manager. Tasks are separate from timed sessions; each scheduled
@@ -39,7 +39,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
   const findTask = id => tasks().find(task => task.id === id);
   const escape = value => escapeHtml(value);
   const format = value => hoursFromMinutes(value) + " h";
-  const grossPlanned = (taskId, sessions) => sessions.filter(s => s.taskId === taskId)
+  const grossPlanned = (taskId, sessions) => sessions.filter(s => sessionHasTask(s,taskId))
     .reduce((sum, s) => sum + sessionDurationMinutes(s), 0);
   const markdown = (value, interactive = false) => {
     // Escape user input first. Only generated checkbox controls become HTML.
@@ -67,7 +67,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
   const recorded = (taskId, state) => (state.history || []).filter(entry => entry.taskId === taskId).reduce((a,e)=>a+e.minutes,0);
   const elapsed = (taskId, state, now) => recorded(taskId,state) +
     elapsedScheduledFocusMinutes(taskId,state.sessions.filter(s=>!(state.history||[]).some(h=>h.sessionId===s.id)),now);
-  const getUpcoming = taskId => getState().sessions.filter(session => session.taskId === taskId &&
+  const getUpcoming = taskId => getState().sessions.filter(session => sessionHasTask(session,taskId) &&
     sessionBounds(session).end > new Date());
 
   function saveMutation(action) {
@@ -217,13 +217,8 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
       if (!saveMutation(state => {
         state.tasks = oldTask ? state.tasks.map(item => item.id === task.id ? task : item) :
           [...state.tasks, task];
-        if (cancelScheduled) state.sessions = state.sessions.filter(session =>
-          session.taskId !== task.id || sessionBounds(session).end <= new Date());
-        if (oldTask && oldTask.title !== task.title) {
-          state.sessions = state.sessions.map(session =>
-            session.taskId === task.id && session.title === oldTask.title
-              ? { ...session, title: task.title } : session);
-        }
+        if (cancelScheduled) state.sessions = state.sessions.map(session => sessionHasTask(session,task.id) && sessionBounds(session).end > new Date() ? withSessionTasks(session,sessionTaskIds(session).filter(id=>id!==task.id)):session);
+        if(oldTask && oldTask.area!==task.area) state.sessions=state.sessions.map(session=>sessionHasTask(session,task.id)&&sessionTaskIds(session).length===1?{...session,title:task.area,area:task.area}:session);
       })) return;
       el.dialog.close();
       showToast(oldTask ? "Attività aggiornata." : "Attività aggiunta.");
@@ -237,8 +232,8 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
     if (!oldTask || oldTask.status === "done" || newStatus !== "done") return false;
     const pending = getUpcoming(oldTask.id).length;
     if (!pending) return false;
-    return window.confirm("Questa attività ha " + pending + " sessioni in corso o future. Vuoi eliminarle?\n" +
-      "OK: elimina le sessioni non terminate. Annulla: conserva tutte le sessioni.\n" +
+    return window.confirm("Questa attività ha " + pending + " sessioni in corso o future. Vuoi scollegare la task?\n" +
+      "OK: scollega la task dalle sessioni. Annulla: conserva tutte le sessioni.\n" +
       "In entrambi i casi l'attività verrà segnata Completata.");
   }
 
@@ -250,24 +245,18 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
     if (saveMutation(state => {
       state.tasks = state.tasks.map(item => item.id === id
         ? { ...item, status, completed: status === "done" } : item);
-      if (cancelScheduled) state.sessions = state.sessions.filter(session =>
-        session.taskId !== id || sessionBounds(session).end <= new Date());
+      if(cancelScheduled)state.sessions=state.sessions.map(session=>sessionHasTask(session,id)&&sessionBounds(session).end>new Date()?withSessionTasks(session,sessionTaskIds(session).filter(x=>x!==id)):session);
     })) showToast("Stato impostato manualmente: " + statusLabels[status] + ".");
   }
 
   function deleteTask(id) {
     const task = findTask(id);
     if (!task) return;
-    if (!confirm("Eliminare «" + task.title + "»? Le sessioni ancora attive o future saranno cancellate; quelle passate resteranno come sessioni indipendenti.")) return;
+    if (!confirm("Eliminare «" + task.title + "»? Le sessioni rimarranno e saranno scollegate dalla task.")) return;
     if (saveMutation(state => {
       const now = new Date();
       state.tasks = state.tasks.filter(item => item.id !== id);
-      state.sessions = state.sessions.flatMap(session => {
-        if (session.taskId !== id) return [session];
-        if (sessionBounds(session).end > now) return [];
-        const { taskId, ...withoutTask } = session;
-        return [withoutTask];
-      });
+      state.sessions=state.sessions.map(session=>sessionHasTask(session,id)?withSessionTasks(session,sessionTaskIds(session).filter(x=>x!==id)):session);
     })) {
       el.dialog.close();
       showToast("Attività eliminata.");
