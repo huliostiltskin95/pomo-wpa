@@ -1,7 +1,8 @@
-import { dateTime, timeToMinutes, pauseMinutes } from "./tempo-core.js";
+import { sessionBounds, timeToMinutes, pauseMinutes } from "./tempo-core.js";
 
 export const TASK_AREAS = Object.freeze(["Personale", "Lavoro", "Studio"]);
 export const TASK_PRIORITIES = Object.freeze(["alta", "media", "bassa", "nessuna"]);
+export const TASK_STATUSES = Object.freeze(["todo", "in_progress", "done"]);
 
 export function parseTaskTags(value) {
   const values = Array.isArray(value) ? value : String(value || "").split(",");
@@ -36,7 +37,9 @@ export function normalizeTask(value) {
       description: String(value.description || ""),
       tags,
       estimateMinutes: Number(value.estimateMinutes),
-      completed: value.completed === true,
+      // Backward-compatible migration from the original completed boolean.
+      status: value.status === undefined ? (value.completed === true ? "done" : "todo") : value.status,
+      completed: (value.status === undefined ? value.completed === true : value.status === "done"),
       createdAt: typeof value.createdAt === "string" ? value.createdAt : ""
     };
     return validTask(task) ? task : null;
@@ -49,6 +52,7 @@ export function validTask(task) {
   return !!task && typeof task.id === "string" && task.id.length > 0 &&
     typeof task.title === "string" && task.title.length > 0 && task.title.length <= 120 &&
     TASK_AREAS.includes(task.area) && TASK_PRIORITIES.includes(task.priority) &&
+    TASK_STATUSES.includes(task.status) && task.completed === (task.status === "done") &&
     typeof task.description === "string" && task.description.length <= 10000 &&
     Array.isArray(task.tags) && task.tags.length <= 24 &&
     Number.isInteger(task.estimateMinutes) && task.estimateMinutes >= 15 && task.estimateMinutes <= 600000;
@@ -112,4 +116,29 @@ export function createTaskSession(task, { id, date, start, focusMinutes, workMin
     String(endMinute % 60).padStart(2, "0");
   // Date validation is done by the existing validSession before committing.
   return { id, taskId: task.id, title: task.title, date, start, end, workMinutes, breakEnabled };
+}
+
+/**
+ * Returns a persistent, non-destructive planning reminder. Session completion
+ * NEVER modifies task.status: only explicit user actions may do so.
+ * A future or currently active session suppresses the reminder.
+ */
+export function getTaskAttention(task, sessions, now = new Date()) {
+  if (!task || task.status === "done") return null;
+  const linked = sessions.filter(session => session.taskId === task.id);
+  if (linked.some(session => sessionBounds(session).end > now)) return null;
+  if (linked.length === 0) {
+    return { kind: "unplanned", label: "Da pianificare", lastEnd: null };
+  }
+  const lastEnd = linked.reduce((last, session) => {
+    const end = sessionBounds(session).end;
+    return !last || end > last ? end : last;
+  }, null);
+  return { kind: "reschedule", label: "Da riprogrammare", lastEnd };
+}
+
+/** Calendar blocks elapsed, not guaranteed attention or actual work. */
+export function elapsedScheduledFocusMinutes(taskId, sessions, now = new Date()) {
+  return sessions.filter(session => session.taskId === taskId && sessionBounds(session).end <= now)
+    .reduce((sum, session) => sum + focusMinutesInSession(session), 0);
 }

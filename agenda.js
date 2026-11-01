@@ -1,20 +1,22 @@
 import { localDateString, validSession, sessionBounds, escapeHtml, hasSessionOverlaps, timeToMinutes } from "./core/tempo-core.js";
-import { TASK_AREAS, TASK_PRIORITIES, parseTaskTags, normalizeTask, estimatedMinutesFromHours,
-  hoursFromMinutes, plannedFocusMinutes, taskTagAncestors, taskHasTag, createTaskSession } from "./core/tempo-tasks.js";
+import { TASK_AREAS, TASK_PRIORITIES, TASK_STATUSES, parseTaskTags, normalizeTask, estimatedMinutesFromHours,
+  hoursFromMinutes, plannedFocusMinutes, elapsedScheduledFocusMinutes, getTaskAttention,
+  taskTagAncestors, taskHasTag, createTaskSession } from "./core/tempo-tasks.js";
 
 /**
  * PWA-only task manager. Tasks are separate from timed sessions; each scheduled
  * block references its task through taskId and reuses the existing Pomodoro timer.
  */
-export function mountAgenda({ getState, persist, refresh, showToast }) {
+export function mountAgenda({ getState, persist, refresh, showToast, sendNotification }) {
   const $ = id => document.getElementById(id);
   const el = {
-    list: $("agenda-list"), empty: $("agenda-empty"), summary: $("agenda-summary"),
+    list: $("agenda-list"), empty: $("agenda-empty"), summary: $("agenda-summary"), alerts: $("agenda-alerts"),
     newButton: $("new-task-button"), areaFilter: $("agenda-area-filter"),
     statusFilter: $("agenda-status-filter"), tagFilter: $("agenda-tag-filter"),
     search: $("agenda-search"),
     dialog: $("task-dialog"), form: $("task-form"), dialogTitle: $("task-dialog-title"),
-    id: $("task-id"), title: $("task-title"), area: $("task-area"), priority: $("task-priority"),
+    id: $("task-id"), title: $("task-title"), area: $("task-area"), priority: $("task-priority"), status: $("task-status"),
+    saveAndPlan: $("task-save-plan"),
     estimate: $("task-estimate"), tags: $("task-tags"), description: $("task-description"),
     error: $("task-error"), deleteButton: $("task-delete-button"),
     closeButton: $("task-close-button"), cancelButton: $("task-cancel-button"),
@@ -26,6 +28,9 @@ export function mountAgenda({ getState, persist, refresh, showToast }) {
     planClose: $("task-plan-close"), planCancel: $("task-plan-cancel")
   };
   const priorityLabels = { alta: "Alta", media: "Media", bassa: "Bassa", nessuna: "Nessuna" };
+  const statusLabels = { todo: "Da fare", in_progress: "In corso", done: "Completata" };
+  const alertedEnds = new Set();
+  let lastReminderSignature = "";
   const uuid = () => typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
     ? crypto.randomUUID() : String(Date.now()) + "-" + Math.random().toString(36).slice(2);
   const tasks = () => getState().tasks;
@@ -51,6 +56,22 @@ export function mountAgenda({ getState, persist, refresh, showToast }) {
 
   function render() {
     const state = getState();
+    const now = new Date();
+    const attentions = new Map(state.tasks.map(task => [task.id, getTaskAttention(task, state.sessions, now)]));
+    lastReminderSignature = state.tasks.map(task => task.id + ":" + task.status + ":" + (attentions.get(task.id)?.kind || "scheduled")).join("|");
+    const missed = [...attentions.values()].filter(info => info?.kind === "reschedule").length;
+    const unplanned = [...attentions.values()].filter(info => info?.kind === "unplanned").length;
+    el.alerts.replaceChildren();
+    if (missed || unplanned) {
+      const message = document.createElement("p");
+      message.textContent = [missed ? `${missed} attività da riprogrammare` : "", unplanned ? `${unplanned} senza sessioni programmate` : ""].filter(Boolean).join(" · ") + ". Nessuna attività viene completata automaticamente.";
+      const action = document.createElement("button");
+      action.type = "button"; action.className = "button button-secondary";
+      action.textContent = "Mostra attività da organizzare";
+      action.addEventListener("click", () => { el.statusFilter.value = "attention"; render(); el.list.scrollIntoView({behavior:"smooth", block:"start"}); });
+      el.alerts.append(message, action);
+    }
+    el.alerts.classList.toggle("hidden", !missed && !unplanned);
     const tagSet = new Set();
     for (const task of state.tasks) for (const tag of taskTagAncestors(task.tags)) tagSet.add(tag);
     const selectedTag = el.tagFilter.value;
@@ -63,16 +84,21 @@ export function mountAgenda({ getState, persist, refresh, showToast }) {
     const query = el.search.value.trim().toLocaleLowerCase("it");
     const filtered = state.tasks.filter(task =>
       (!el.areaFilter.value || task.area === el.areaFilter.value) &&
-      (el.statusFilter.value === "all" || (el.statusFilter.value === "done") === task.completed) &&
+      (el.statusFilter.value === "all" ||
+       (el.statusFilter.value === "open" && task.status !== "done") ||
+       (el.statusFilter.value === "attention" && attentions.get(task.id)) ||
+       el.statusFilter.value === task.status) &&
       taskHasTag(task, el.tagFilter.value) &&
       (!query || (task.title + " " + task.description + " " + task.tags.join(" ")).toLocaleLowerCase("it").includes(query))
-    ).sort((a, b) => Number(a.completed) - Number(b.completed) ||
+    ).sort((a, b) => Number(a.status === "done") - Number(b.status === "done") ||
+      Number(!attentions.get(a.id)) - Number(!attentions.get(b.id)) ||
       TASK_PRIORITIES.indexOf(a.priority) - TASK_PRIORITIES.indexOf(b.priority) ||
       a.title.localeCompare(b.title, "it"));
 
-    const remaining = state.tasks.filter(task => !task.completed);
+    const remaining = state.tasks.filter(task => task.status !== "done");
     const allMinutes = remaining.reduce((sum, task) => sum + task.estimateMinutes, 0);
-    el.summary.textContent = state.tasks.length + " attività · " + remaining.length + " da completare · " + format(allMinutes) + " stimate";
+    el.summary.textContent = state.tasks.length + " attività · " + remaining.length + " aperte · " +
+      state.tasks.filter(task => task.status === "in_progress").length + " in corso · " + format(allMinutes) + " stimate";
     el.list.replaceChildren();
     el.empty.classList.toggle("hidden", filtered.length > 0);
     el.empty.querySelector("p").textContent = state.tasks.length
@@ -82,29 +108,40 @@ export function mountAgenda({ getState, persist, refresh, showToast }) {
     for (const task of filtered) {
       const planned = plannedFocusMinutes(task.id, state.sessions);
       const left = Math.max(0, task.estimateMinutes - planned);
+      const elapsed = elapsedScheduledFocusMinutes(task.id, state.sessions, now);
+      const attention = attentions.get(task.id);
       const card = document.createElement("article");
-      card.className = "task-item" + (task.completed ? " task-completed" : "");
+      card.className = "task-item" + (task.status === "done" ? " task-completed" : "") + (attention ? " task-needs-attention" : "");
       const badgeTags = task.tags.map(tag => '<button type="button" class="tag-chip" data-tag="' +
         escape(tag) + '" title="Filtra per questo tag">' + escape(tag.replaceAll("/", " › ")) + "</button>").join("");
       card.innerHTML = '<div class="task-item-head"><div class="task-item-heading"><span class="task-area">' +
         escape(task.area) + '</span><span class="task-priority priority-' + escape(task.priority) + '">' +
         escape(priorityLabels[task.priority]) + '</span></div><span class="task-status">' +
-        (task.completed ? "Completata" : "Da fare") + '</span></div>' +
+        statusLabels[task.status] + '</span></div>' +
         '<h3 class="task-title">' + escape(task.title) + '</h3>' +
+        (attention ? '<p class="task-reminder"><strong>' + attention.label + '.</strong> ' +
+          (attention.kind === "reschedule" ? "Le sessioni previste sono terminate, ma l’attività è ancora aperta. Puoi aggiungere altro tempo o completarla manualmente." :
+          "Non ci sono ancora sessioni previste. Puoi programmarne una quando vuoi.") + '</p>' : "") +
         (task.description ? '<p class="task-description">' + escape(task.description) + '</p>' : "") +
         (badgeTags ? '<div class="task-tags">' + badgeTags + '</div>' : "") +
         '<div class="task-estimate-line"><strong>' + format(task.estimateMinutes) +
         '</strong> stimate <span aria-hidden="true">·</span> ' + format(planned) +
-        ' pianificate <span aria-hidden="true">·</span> ' + format(left) + ' da pianificare</div>' +
+        ' pianificate <span aria-hidden="true">·</span> ' + format(elapsed) +
+        ' in sessioni trascorse <span aria-hidden="true">·</span> ' +
+        (planned > task.estimateMinutes ? format(planned - task.estimateMinutes) + ' oltre la stima' : format(left) + ' non ancora pianificate') + '</div>' +
         '<div class="task-progress" role="progressbar" aria-label="Tempo pianificato" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' +
         Math.min(100, Math.round(planned / task.estimateMinutes * 100)) + '"><span style="width:' +
         Math.min(100, planned / task.estimateMinutes * 100) + '%"></span></div>' +
         '<div class="task-actions"><button type="button" class="button button-secondary" data-task-edit="' + escape(task.id) + '">Modifica</button>' +
-        (task.completed ? "" : '<button type="button" class="button button-secondary" data-task-plan="' +
-        escape(task.id) + '">Programma</button><button type="button" class="button button-primary" data-task-now="' +
+        (task.status === "done" ? "" : '<button type="button" class="button button-secondary" data-task-plan="' +
+        escape(task.id) + '">' + (attention?.kind === "reschedule" ? "Riprogramma" : "Programma") +
+        '</button><button type="button" class="button button-primary" data-task-now="' +
         escape(task.id) + '">Avvia ora</button>') +
-        '<button type="button" class="text-button" data-task-complete="' + escape(task.id) + '">' +
-        (task.completed ? "Riapri" : "Completa") + '</button></div>';
+        '<label class="task-status-control">Stato <select data-task-status="' + escape(task.id) +
+        '" aria-label="Stato di ' + escape(task.title) + '">' +
+        TASK_STATUSES.map(status => '<option value="' + status + '"' + (task.status === status ? ' selected' : '') + '>' +
+        statusLabels[status] + '</option>').join('') + '</select></label></div>' +
+        '<p class="task-planning-note">Le ore trascorse sono calcolate dal calendario, non certificano il lavoro svolto. Solo tu decidi quando l’attività è completata.</p>';
       el.list.appendChild(card);
     }
   }
@@ -117,6 +154,7 @@ export function mountAgenda({ getState, persist, refresh, showToast }) {
     el.title.value = task?.title || "";
     el.area.value = task?.area || "Studio";
     el.priority.value = task?.priority || "media";
+    el.status.value = task?.status || "todo";
     el.estimate.value = task ? String(task.estimateMinutes / 60) : "1";
     el.tags.value = task?.tags.join(", ") || "";
     el.description.value = task?.description || "";
@@ -136,13 +174,17 @@ export function mountAgenda({ getState, persist, refresh, showToast }) {
         id: oldTask?.id || uuid(), title: el.title.value, area: el.area.value,
         priority: el.priority.value, estimateMinutes: minutes,
         tags: parseTaskTags(el.tags.value), description: el.description.value,
-        completed: oldTask?.completed || false,
+        status: el.status.value,
+        completed: el.status.value === "done",
         createdAt: oldTask?.createdAt || new Date().toISOString()
       });
       if (!task) throw new Error("Controlla titolo, area, priorità, descrizione e durata.");
+      const cancelScheduled = askCancelUpcomingOnCompletion(oldTask, task.status);
       if (!saveMutation(state => {
         state.tasks = oldTask ? state.tasks.map(item => item.id === task.id ? task : item) :
           [...state.tasks, task];
+        if (cancelScheduled) state.sessions = state.sessions.filter(session =>
+          session.taskId !== task.id || sessionBounds(session).end <= new Date());
         if (oldTask && oldTask.title !== task.title) {
           state.sessions = state.sessions.map(session =>
             session.taskId === task.id && session.title === oldTask.title
@@ -151,22 +193,32 @@ export function mountAgenda({ getState, persist, refresh, showToast }) {
       })) return;
       el.dialog.close();
       showToast(oldTask ? "Attività aggiornata." : "Attività aggiunta.");
+      if (event.submitter?.id === "task-save-plan" && task.status !== "done") openPlan(task.id);
     } catch (error) {
       el.error.textContent = error.message;
     }
   }
 
-  function toggleComplete(id) {
+  function askCancelUpcomingOnCompletion(oldTask, newStatus) {
+    if (!oldTask || oldTask.status === "done" || newStatus !== "done") return false;
+    const pending = getUpcoming(oldTask.id).length;
+    if (!pending) return false;
+    return window.confirm("Questa attività ha " + pending + " sessioni in corso o future. Vuoi eliminarle?\n" +
+      "OK: elimina le sessioni non terminate. Annulla: conserva tutte le sessioni.\n" +
+      "In entrambi i casi l'attività verrà segnata Completata.");
+  }
+
+  function setTaskStatus(id, status) {
     const task = findTask(id);
-    if (!task) return;
-    const upcoming = getUpcoming(id);
-    if (!task.completed && upcoming.length &&
-        !confirm("Completare l'attività? Le " + upcoming.length + " sessioni collegate non ancora terminate saranno rimosse; lo storico resterà disponibile.")) return;
+    if (!task || !TASK_STATUSES.includes(status)) return;
+    if (task.status === status) return;
+    const cancelScheduled = askCancelUpcomingOnCompletion(task, status);
     if (saveMutation(state => {
-      state.tasks = state.tasks.map(item => item.id === id ? { ...item, completed: !item.completed } : item);
-      if (!task.completed) state.sessions = state.sessions.filter(session =>
+      state.tasks = state.tasks.map(item => item.id === id
+        ? { ...item, status, completed: status === "done" } : item);
+      if (cancelScheduled) state.sessions = state.sessions.filter(session =>
         session.taskId !== id || sessionBounds(session).end <= new Date());
-    })) showToast(task.completed ? "Attività riaperta." : "Attività completata.");
+    })) showToast("Stato impostato manualmente: " + statusLabels[status] + ".");
   }
 
   function deleteTask(id) {
@@ -295,15 +347,36 @@ export function mountAgenda({ getState, persist, refresh, showToast }) {
   }
   for (const input of [el.areaFilter, el.statusFilter, el.tagFilter]) input.addEventListener("change", render);
   el.search.addEventListener("input", render);
+  el.list.addEventListener("change", event => {
+    const select = event.target.closest("select[data-task-status]");
+    if (select) setTaskStatus(select.dataset.taskStatus, select.value);
+  });
   el.list.addEventListener("click", event => {
     const button = event.target.closest("button");
     if (!button) return;
     if (button.dataset.taskEdit) openTask(button.dataset.taskEdit);
     else if (button.dataset.taskPlan) openPlan(button.dataset.taskPlan);
     else if (button.dataset.taskNow) startNow(button.dataset.taskNow);
-    else if (button.dataset.taskComplete) toggleComplete(button.dataset.taskComplete);
     else if (button.dataset.tag) { el.tagFilter.value = button.dataset.tag; render(); }
   });
+  function tick() {
+    const now = new Date();
+    if (typeof sendNotification === "function") {
+      for (const task of tasks()) {
+        const reminder = getTaskAttention(task, getState().sessions, now);
+        if (reminder?.kind !== "reschedule" || !reminder.lastEnd) continue;
+        const elapsed = now - reminder.lastEnd;
+        const key = task.id + ":" + reminder.lastEnd.getTime();
+        if (elapsed >= 0 && elapsed < 30000 && !alertedEnds.has(key)) {
+          alertedEnds.add(key);
+          void sendNotification("Tempo · attività ancora aperta", task.title + " · Programma un altro focus oppure segnala manualmente il completamento.");
+        }
+      }
+    }
+    const currentSignature = tasks().map(task => task.id + ":" + task.status + ":" +
+      (getTaskAttention(task, getState().sessions, now)?.kind || "scheduled")).join("|");
+    if (currentSignature !== lastReminderSignature) render();
+  }
   render();
-  return { render };
+  return { render, tick };
 }

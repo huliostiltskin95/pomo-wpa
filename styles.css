@@ -47,3 +47,16 @@
   .agenda-section .section-heading{gap:10px}
   .agenda-section .section-heading .button{white-space:nowrap}
 }
+
+
+/* Manual task lifecycle and persistent scheduling reminders */
+.agenda-alerts{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin:18px 0;padding:14px 16px;background:#fff7e9;border:1px solid #eddbb8;border-radius:13px}
+.agenda-alerts p{margin:0;color:#785720;font-size:12px;line-height:1.6}
+.agenda-alerts .button{white-space:normal;text-align:center}
+.task-needs-attention{border-color:#e1ca99}
+.task-reminder{margin:8px 0;padding:10px 12px;border-radius:9px;background:#fff7e9;color:#795720;font-size:12px;line-height:1.55}
+.task-reminder strong{font-weight:750}
+.task-status-control{display:flex;align-items:center;gap:8px;margin-left:auto;color:var(--muted);font-size:11px;font-weight:650}
+.task-status-control select{max-width:142px;min-height:35px;border:1px solid var(--line);border-radius:9px;padding:7px 9px;background:var(--surface);color:var(--text);font-size:12px;font-weight:650}
+.task-planning-note{margin:13px 0 0;color:var(--muted);font-size:10px;line-height:1.55}
+@media(max-width:650px){.task-status-control{margin-left:0}.agenda-alerts .button{width:100%}.task-dialog .dialog-actions .button{flex:1;min-width:110px}}

@@ -4,7 +4,10 @@ PWA installabile e utilizzabile offline per programmare finestre di concentrazio
 
 ## Funzioni
 
-- **Agenda attività (solo PWA):** task con area (Personale, Lavoro, Studio), priorità, descrizione, durata stimata in ore nette di focus e tag gerarchici (per esempio `Studio/Greco/Morfologia`). Filtri per area, stato, tag, ricerca e completamento.
+- **Agenda attività (solo PWA):** task con area (Personale, Lavoro, Studio), priorità, descrizione, durata stimata in ore nette di focus e tag gerarchici (per esempio `Studio/Greco/Morfologia`). Stati manuali `Da fare`, `In corso`, `Completata`; filtri per area, stato, tag e ricerca.
+- **Completamento esclusivamente manuale:** nessuna sessione, anche terminata o oltre la stima, può cambiare lo stato della task. Se un'attività viene completata mentre ha sessioni non terminate, l'utente sceglie esplicitamente se conservarle o eliminarle.
+- **Avvisi di Agenda:** attività senza sessioni contrassegnate `Da pianificare`; attività ancora aperte senza blocchi futuri dopo almeno una sessione contrassegnate `Da riprogrammare`. Pannello di avviso e filtro dedicato; notifica di fine ultimo blocco se già autorizzata. Gli avvisi non modificano task o programmazione.
+- Durante la creazione della task si può scegliere `Salva e programma` per passare direttamente alla prima sessione, mantenendo gli oggetti task e sessione separati.
 - **Pianificazione dalle task:** ogni attività può generare uno o più blocchi collegati alle normali sessioni Pomodoro; l’utente sceglie data, ora, durata netta in ore, intervalli di focus e pause facoltative. Il termine viene calcolato automaticamente; si impediscono sovrapposizioni e intervalli oltre mezzanotte. Il pulsante **Avvia ora** inserisce subito un blocco di focus, salvo conflitti.
 - Pianificazione di sessioni per data e intervallo orario, con riepilogo delle altre sessioni già presenti nella giornata.
 - Cicli di concentrazione e pausa con rapporto automatico 5:1 (ad esempio 25 + 5 minuti).
@@ -32,7 +35,7 @@ Il file `.ics` contiene anche i blocchi di attività programmati come normali se
 
 ## Aggiornamento dopo una modifica
 
-Il service worker usa la cache `tempo-pomodoro-v8`. Quando pubblichi una nuova versione, incrementa il numero della cache in `sw.js` (ad esempio `v9`) per forzare il rinnovo dei file memorizzati.
+Il service worker usa la cache `tempo-pomodoro-v9`. Quando pubblichi una nuova versione, incrementa il numero della cache in `sw.js` (ad esempio `v10`) per forzare il rinnovo dei file memorizzati.
 
 ## Limiti
 
@@ -40,7 +43,7 @@ Il service worker usa la cache `tempo-pomodoro-v8`. Quando pubblichi una nuova v
 - La riproduzione audio richiede un'interazione iniziale dell'utente e può essere sospesa dal sistema operativo in background.
 - I dati sono memorizzati localmente nel browser: usa periodicamente il backup JSON per conservarli o trasferirli su un altro dispositivo. Il backup versione 3 include task e sessioni e può leggere i vecchi backup versione 2 (senza task).
 - **Durata stimata = tempo netto di concentrazione**: pianificare 2 ore con focus 25 minuti e pause 5 minuti occupa 2 ore e 20 minuti sul calendario (4 pause tra 5 intervalli di focus).
-- Le attività completate rimuovono i blocchi futuri collegati, senza perdere lo storico; eliminare una task rimuove i blocchi futuri e scollega quelli passati.
+- Quando contrassegni manualmente una task come completata, puoi scegliere se conservare o annullare i blocchi non ancora terminati. Eliminare una task rimuove i blocchi futuri e scollega quelli passati.
 
 ## Architettura condivisa
 
@@ -79,3 +82,8 @@ La nuova Agenda task è una funzione esclusiva della PWA. L’integrazione Obsid
 ## Test automatici
 
 Il core condiviso è coperto da test Node.js per validazione di date e orari, rilevamento delle sovrapposizioni (incluse quelle annidate), rapporto lavoro/pausa e calcolo delle fasi Pomodoro. I test vengono eseguiti da GitHub Actions insieme al controllo sintattico della PWA e alla build del plugin Obsidian.
+
+
+## Stato delle attività e avvisi
+
+La durata stimata non determina la conclusione: l'attività può essere completata prima, dopo, oppure richiedere ulteriori sessioni. Anche la fine delle sessioni non marca mai la task come Completata o In corso: **lo stato cambia solo se lo imposti tu**. L'Agenda distingue le attività senza sessioni da quelle da riprogrammare perché l'ultima sessione è già terminata; non manda notifiche ripetute per i vecchi impegni. Se il browser dispone già del permesso, può segnalare con notifica la conclusione dell'ultimo blocco senza alterare alcun dato. Le notifiche, come i timer, non funzionano a PWA completamente chiusa.
