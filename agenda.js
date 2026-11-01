@@ -134,6 +134,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
         escape(priorityLabels[task.priority]) + '</span></div><span class="task-status">' +
         statusLabels[task.status] + '</span></div>' +
         '<h3 class="task-title">' + escape(task.title) + '</h3>' +
+        (task.dueDate ? '<p class="task-due">Scadenza: '+escape(task.dueDate)+'</p>' : '') +
         (attention ? '<p class="task-reminder"><strong>' + attention.label + '.</strong> ' +
           (attention.kind === "reschedule" ? "Le sessioni previste sono terminate, ma l’attività è ancora aperta. Puoi aggiungere altro tempo o completarla manualmente." :
           "Non ci sono ancora sessioni previste. Puoi programmarne una quando vuoi.") + '</p>' : "") +
@@ -407,7 +408,24 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
       return task;
     }).filter(Boolean);
   }
+  function suggestBulk(){
+    const names=tagNames();
+    const match=el.bulkInput.value.match(/(?:^|\s)#([^\s#]*)$/);
+    const suggestions=match ? names.filter(t=>t.toLocaleLowerCase("it").startsWith(match[1].toLocaleLowerCase("it"))).slice(0,6) : [];
+    const container=$("bulk-smart-suggestions");
+    container.replaceChildren();
+    for(const name of suggestions){
+      const btn=document.createElement("button");
+      btn.type="button";btn.className="tag-chip";btn.textContent="#"+name;
+      btn.addEventListener("click",()=>{
+        el.bulkInput.value=el.bulkInput.value.replace(/#([^\s#]*)$/,"#"+name);
+        el.bulkInput.focus();previewBulk();
+      });
+      container.appendChild(btn);
+    }
+  }
   function previewBulk(){
+    suggestBulk();
     try {const parsed=parseBulk();el.bulkPreview.textContent=parsed.length+" task riconosciute. "+parsed.slice(0,7).map(t=>t.title+" ["+t.area+"]"+(t.dueDate?" · "+t.dueDate:"")).join(" | ");el.bulkError.textContent="";}
     catch(e){el.bulkError.textContent=e.message;el.bulkPreview.textContent="Correggi la sintassi prima dell'importazione.";}
   }
