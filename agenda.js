@@ -39,6 +39,8 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
   const findTask = id => tasks().find(task => task.id === id);
   const escape = value => escapeHtml(value);
   const format = value => hoursFromMinutes(value) + " h";
+  const grossPlanned = (taskId, sessions) => sessions.filter(s => s.taskId === taskId)
+    .reduce((sum, s) => sum + Math.max(0, timeToMinutes(s.end) - timeToMinutes(s.start)), 0);
   const markdown = (value, interactive = false) => {
     // Escape user input first. Only generated checkbox controls become HTML.
     const checkboxes = [];
@@ -134,7 +136,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
       : "Aggiungi un'attività con una durata stimata e pianificala in agenda.";
 
     for (const task of filtered) {
-      const planned = plannedFocusMinutes(task.id, state.sessions);
+      const planned = grossPlanned(task.id, state.sessions);
       const left = Math.max(0, task.estimateMinutes - planned);
       const completedMinutes = elapsed(task.id, state, now);
       const attention = attentions.get(task.id);
@@ -156,8 +158,8 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
         (badgeTags ? '<div class="task-tags">' + badgeTags + '</div>' : "") +
         '<div class="task-estimate-line"><strong>' + (task.estimateMinutes == null ? 'Nessuna stima' : format(task.estimateMinutes)) +
         '</strong> stimate <span aria-hidden="true">·</span> ' + format(planned) +
-        ' pianificate <span aria-hidden="true">·</span> ' + format(completedMinutes) +
-        ' in sessioni registrate <span aria-hidden="true">·</span> ' +
+        ' lorde pianificate <span aria-hidden="true">·</span> ' + format(completedMinutes) +
+        ' nette in sessioni registrate <span aria-hidden="true">·</span> ' +
         (task.estimateMinutes == null ? 'stima libera' : planned > task.estimateMinutes ? format(planned - task.estimateMinutes) + ' oltre la stima' : format(left) + ' non ancora pianificate') + '</div>' +
         '<div class="task-progress" role="progressbar" aria-label="Tempo pianificato" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' +
         (task.estimateMinutes ? Math.min(100, Math.round(planned / task.estimateMinutes * 100)) : 0) + '"><span style="width:' +
@@ -283,7 +285,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
   function openPlan(id) {
     const task = findTask(id);
     if (!task || task.completed) return;
-    const remaining = Math.max(15, (task.estimateMinutes ?? 60) - plannedFocusMinutes(id, getState().sessions));
+    const remaining = Math.max(15, (task.estimateMinutes ?? 60) - grossPlanned(id, getState().sessions));
     const start = defaultStart();
     el.planForm.reset();
     el.planTaskId.value = task.id;
@@ -301,11 +303,11 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
   function readPlan() {
     const task = findTask(el.planTaskId.value);
     if (!task || task.completed) throw new Error("L'attività non è più disponibile.");
-    const focusMinutes = estimatedMinutesFromHours(el.planHours.value);
-    if (!Number.isFinite(focusMinutes)) throw new Error("Inserisci una durata in ore, a intervalli di 15 minuti.");
+    const grossMinutes = estimatedMinutesFromHours(el.planHours.value);
+    if (!Number.isFinite(grossMinutes)) throw new Error("Inserisci una durata lorda in ore, a intervalli di 15 minuti.");
     const workMinutes = Number(el.planWork.value);
     return createTaskSession(task, { id: uuid(), date: el.planDate.value,
-      start: el.planStart.value, focusMinutes, workMinutes, breakEnabled: el.planBreaks.checked });
+      start: el.planStart.value, grossMinutes, workMinutes, breakEnabled: el.planBreaks.checked });
   }
 
   function updatePreview() {
@@ -315,9 +317,10 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
       const existing = getState().sessions.some(other =>
         other.date === session.date && sessionBounds(other).start < sessionBounds(session).end &&
         sessionBounds(other).end > sessionBounds(session).start);
-      el.planPreview.textContent = "Termine previsto " + session.end + " · " +
-        format(estimatedMinutesFromHours(el.planHours.value)) +
-        " di concentrazione netta" + (session.breakEnabled ? ", pause comprese nell'orario." : ", senza pause.");
+      const gross = estimatedMinutesFromHours(el.planHours.value);
+      const net = session.breakEnabled ? gross - (gross - (gross % (session.workMinutes + Math.max(1, Math.round(session.workMinutes / 5))))) / (session.workMinutes + Math.max(1, Math.round(session.workMinutes / 5))) * Math.max(1, Math.round(session.workMinutes / 5)) - Math.max(0, (gross % (session.workMinutes + Math.max(1, Math.round(session.workMinutes / 5)))) - session.workMinutes) : gross;
+      el.planPreview.textContent = "Termine previsto " + session.end + " · " + format(gross) +
+        " lorde · " + format(net) + " di concentrazione netta" + (session.breakEnabled ? " (pause incluse)." : " (senza pause).");
       el.planError.textContent = existing ? "Attenzione: l'intervallo si sovrappone a una sessione esistente." : "";
     } catch (error) {
       el.planPreview.textContent = "Modifica durata, data e ora per calcolare il termine.";
@@ -351,7 +354,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
     const now = new Date();
     const start = String(now.getHours()).padStart(2, "0") + ":" +
       String(now.getMinutes()).padStart(2, "0");
-    const remaining = Math.max(15, (task.estimateMinutes ?? getState().defaults.workMinutes) - plannedFocusMinutes(id, getState().sessions));
+    const remaining = Math.max(15, (task.estimateMinutes ?? getState().defaults.workMinutes) - grossPlanned(id, getState().sessions));
     const focusMinutes = Math.min(remaining, getState().defaults.workMinutes);
     try {
       const session = createTaskSession(task, { id: uuid(), date: localDateString(now),
