@@ -110,9 +110,9 @@ export function createDropboxSync({getState,applyRemote,onStatus}){
     })().catch(e=>{status(e.message);throw e;}).finally(()=>{inFlight=null;});
     return inFlight;
   }
-  async function forceDownload(){
+  async function forceDownload(allowDirty=false){
     if(!auth.refreshToken||!meta.ready)throw new Error("Inizializza prima la sincronizzazione.");
-    if(meta.dirty)throw new Error("Modifiche locali non caricate: download bloccato per sicurezza.");
+    if(meta.dirty&&!allowDirty)throw new Error("Modifiche locali non caricate: download bloccato per sicurezza.");
     const item=await download();await applyRemote(item.file);meta.rev=item.rev;meta.dirty=false;storeMeta();status("Backup scaricato");
   }
   function disconnect(){clearTimeout(delay);auth={};meta={rev:null,dirty:false,ready:false};localStorage.removeItem(AUTH_KEY);localStorage.removeItem(META_KEY);status("Dropbox scollegato. Dati locali conservati.");}
