@@ -1,4 +1,4 @@
-# Tempo — Pomodoro
+# TEMPVS
 
 PWA installabile e utilizzabile offline per programmare finestre di concentrazione.
 
@@ -24,7 +24,7 @@ La pausa viene calcolata come `round(durata_concentrazione / 5)`, con una durata
 
 ## TickTick e calendari
 
-Il file `.ics` contiene anche i blocchi di attività programmati come normali sessioni. Non esporta task non programmate. Il file `.ics` contiene le sessioni programmate come eventi di calendario. Può essere importato in un'app calendario compatibile. TickTick può mostrare calendari locali su iOS/macOS e sottoscrivere calendari esterni tramite URL; l'esportazione locale da Tempo non crea da sola una sincronizzazione automatica o bidirezionale con TickTick. L'importazione non crea registrazioni native del timer Pomodoro di TickTick.
+Il file `.ics` contiene anche i blocchi di attività programmati come normali sessioni. Non esporta task non programmate. Il file `.ics` contiene le sessioni programmate come eventi di calendario. Può essere importato in un'app calendario compatibile. TickTick può mostrare calendari locali su iOS/macOS e sottoscrivere calendari esterni tramite URL; l'esportazione locale da TEMPVS non crea da sola una sincronizzazione automatica o bidirezionale con TickTick. L'importazione non crea registrazioni native del timer Pomodoro di TickTick.
 
 ## Installazione su GitHub Pages
 
