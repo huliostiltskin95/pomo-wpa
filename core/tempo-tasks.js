@@ -36,7 +36,8 @@ export function normalizeTask(value) {
       priority: value.priority,
       description: String(value.description || ""),
       tags,
-      estimateMinutes: Number(value.estimateMinutes),
+      estimateMinutes: value.estimateMinutes == null || value.estimateMinutes === "" ? null : Number(value.estimateMinutes),
+      dueDate: typeof value.dueDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.dueDate) ? value.dueDate : "",
       // Backward-compatible migration from the original completed boolean.
       status: value.status === undefined ? (value.completed === true ? "done" : "todo") : value.status,
       completed: (value.status === undefined ? value.completed === true : value.status === "done"),
@@ -55,18 +56,19 @@ export function validTask(task) {
     TASK_STATUSES.includes(task.status) && task.completed === (task.status === "done") &&
     typeof task.description === "string" && task.description.length <= 10000 &&
     Array.isArray(task.tags) && task.tags.length <= 24 &&
-    Number.isInteger(task.estimateMinutes) && task.estimateMinutes >= 15 && task.estimateMinutes <= 600000;
+    (task.estimateMinutes === null || (Number.isInteger(task.estimateMinutes) && task.estimateMinutes >= 15 && task.estimateMinutes <= 600000));
 }
 
 export function estimatedMinutesFromHours(hours) {
   const number = Number(hours);
+  if (hours === "" || hours === null || hours === undefined) return null;
   if (!Number.isFinite(number) || number < .25 || number > 10000) return NaN;
   const minutes = Math.round(number * 60);
   return minutes % 15 === 0 ? minutes : NaN;
 }
 
 export function hoursFromMinutes(minutes) {
-  return (Number(minutes) / 60).toLocaleString("it-IT", { maximumFractionDigits: 2 });
+  return (Number(minutes || 0) / 60).toLocaleString("it-IT", { maximumFractionDigits: 2 });
 }
 
 /** Focus time excludes pauses. No pause is added after the final focus minute. */
