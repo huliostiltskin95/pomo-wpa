@@ -39,15 +39,28 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
   const findTask = id => tasks().find(task => task.id === id);
   const escape = value => escapeHtml(value);
   const format = value => hoursFromMinutes(value) + " h";
-  const markdown = value => {
-    // Escape first: Markdown must never inject arbitrary HTML or script.
-    let s = escape(value);
+  const markdown = (value, interactive = false) => {
+    // Escape user input first. Only generated checkbox controls become HTML.
+    const checkboxes = [];
+    let s = String(value || "").split("\n").map((line, lineIndex) => {
+      const match = line.match(/^(\s*)[-*] \[([ xX])\] (.*)$/);
+      if (!match) return escape(line);
+      const checked = match[2].toLowerCase() === "x";
+      const token = "TEMPOCHECKBOX" + lineIndex + "ENDTOKEN";
+      checkboxes.push({ token, lineIndex, checked, label: escape(match[3]), depth: match[1].length });
+      return token;
+    }).join("\n");
     s = s.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, label, url) =>
-      '<a href="' + url.replace(/&amp;/g, "&") .replace(/"/g, "%22") + '" target="_blank" rel="noopener noreferrer">' + label + '</a>');
+      '<a href="' + url.replace(/&amp;/g, "&").replace(/"/g, "%22") + '" target="_blank" rel="noopener noreferrer">' + label + '</a>');
     s = s.replace(/^### (.+)$/gm, '<h5>$1</h5>').replace(/^## (.+)$/gm, '<h4>$1</h4>').replace(/^# (.+)$/gm, '<h3>$1</h3>');
     s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/\*(.+?)\*/g, '<em>$1</em>').replace(/`([^`]+)`/g, '<code>$1</code>');
     s = s.replace(/^[-*] (.+)$/gm, '• $1');
-    return s.replace(/\n/g, '<br>');
+    s = s.replace(/\n/g, '<br>');
+    for (const item of checkboxes) {
+      const control = '<label class="tempo-md-check-row" style="margin-left:' + Math.min(48, item.depth * 8) + 'px"><input type="checkbox" data-md-line="' + item.lineIndex + '"' + (item.checked ? ' checked' : '') + (interactive ? '' : ' disabled') + '><span>' + item.label + '</span></label>';
+      s = s.replace(item.token, control);
+    }
+    return s;
   };
   const recorded = (taskId, state) => (state.history || []).filter(entry => entry.taskId === taskId).reduce((a,e)=>a+e.minutes,0);
   const elapsed = (taskId, state, now) => recorded(taskId,state) +
@@ -126,6 +139,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
       const completedMinutes = elapsed(task.id, state, now);
       const attention = attentions.get(task.id);
       const card = document.createElement("article");
+      card.dataset.taskId = task.id;
       card.className = "task-item" + (task.status === "done" ? " task-completed" : "") + (attention ? " task-needs-attention" : "");
       const badgeTags = task.tags.map(tag => '<button type="button" class="tag-chip" data-tag="' +
         escape(tag) + '" title="Filtra per questo tag">' + escape(tag.replaceAll("/", " › ")) + "</button>").join("");
@@ -138,7 +152,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
         (attention ? '<p class="task-reminder"><strong>' + attention.label + '.</strong> ' +
           (attention.kind === "reschedule" ? "Le sessioni previste sono terminate, ma l’attività è ancora aperta. Puoi aggiungere altro tempo o completarla manualmente." :
           "Non ci sono ancora sessioni previste. Puoi programmarne una quando vuoi.") + '</p>' : "") +
-        (task.description ? '<div class="task-description markdown-preview">' + markdown(task.description) + '</div>' : "") +
+        (task.description ? '<div class="task-description markdown-preview">' + markdown(task.description, true) + '</div>' : "") +
         (badgeTags ? '<div class="task-tags">' + badgeTags + '</div>' : "") +
         '<div class="task-estimate-line"><strong>' + (task.estimateMinutes == null ? 'Nessuna stima' : format(task.estimateMinutes)) +
         '</strong> stimate <span aria-hidden="true">·</span> ' + format(planned) +
@@ -454,6 +468,23 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
   for (const input of [el.areaFilter, el.statusFilter, el.tagFilter]) input.addEventListener("change", render);
   el.search.addEventListener("input", render);
   el.list.addEventListener("change", event => {
+    const checkbox = event.target.closest('input[type="checkbox"][data-md-line]');
+    if (checkbox) {
+      const card = checkbox.closest(".task-item");
+      const index = Number(checkbox.dataset.mdLine);
+      const id = card?.dataset.taskId;
+      const task = findTask(id);
+      const lines = task?.description.split("\n");
+      const match = lines?.[index]?.match(/^(\s*[-*] \[)[ xX](\] .*)$/);
+      if (!match) { checkbox.checked = !checkbox.checked; return; }
+      lines[index] = match[1] + (checkbox.checked ? "x" : " ") + match[2];
+      const state = getState(), oldTasks = state.tasks;
+      state.tasks = state.tasks.map(item => item.id === id ? {...item, description:lines.join("\n")} : item);
+      if (!persist()) { state.tasks = oldTasks; checkbox.checked = !checkbox.checked; return; }
+      showToast("Checklist aggiornata.");
+      return;
+    }
+
     const select = event.target.closest("select[data-task-status]");
     if (select) setTaskStatus(select.dataset.taskStatus, select.value);
   });
