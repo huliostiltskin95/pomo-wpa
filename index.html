@@ -36,7 +36,7 @@
       <div class="section-heading">
         <div><p class="eyebrow">ORGANIZZAZIONE</p><h2 id="agenda-heading">Agenda</h2>
           <p class="muted">Attività, stime e blocchi di concentrazione programmati.</p></div>
-        <button id="new-task-button" class="button button-primary" type="button">＋ Nuova task</button>
+        <div class="agenda-extra-actions"><button id="bulk-task-button" class="button button-secondary" type="button">Inserimento multiplo</button><button id="manage-tags-button" class="button button-secondary" type="button">Gestisci tag</button><button id="new-task-button" class="button button-primary" type="button">＋ Nuova task</button></div>
       </div>
       <div class="agenda-toolbar">
         <label>Area<select id="agenda-area-filter">
@@ -109,16 +109,18 @@
         <option value="todo">Da fare</option><option value="in_progress">In corso</option><option value="done">Completata</option>
       </select></label>
       <label class="field-label">Durata stimata di concentrazione (ore)
-        <input id="task-estimate" type="number" min="0.25" max="10000" step="0.25" value="1" required>
+        <input id="task-estimate" type="number" min="0.25" max="10000" step="0.25" placeholder="Facoltativa">
       </label>
+      <label class="field-label">Scadenza (facoltativa)<input id="task-due-date" type="date"></label>
       <p class="form-hint">La durata è una stima, non un limite. Puoi aggiungere sessioni quando vuoi. Il completamento resta sempre manuale.</p>
       <label class="field-label">Tag gerarchici
         <input id="task-tags" type="text" placeholder="Studio/Greco/Verbi, Studio/Didattica">
       </label>
       <p class="form-hint">Separa i tag con una virgola e i livelli con /; ad esempio Studio/Greco/Morfologia.</p>
-      <label class="field-label">Descrizione
+      <label class="field-label">Descrizione (Markdown)
         <textarea id="task-description" maxlength="10000" rows="5" placeholder="Note, istruzioni, materiali e risultati attesi…"></textarea>
       </label>
+      <div id="task-markdown-preview" class="markdown-preview" aria-label="Anteprima Markdown"></div>
       <p id="task-error" class="form-error" role="alert"></p>
       <div class="dialog-actions">
         <button type="button" id="task-delete-button" class="button button-danger hidden">Elimina</button>
@@ -130,6 +132,28 @@
     </form>
   </dialog>
 
+  <dialog id="bulk-dialog" class="session-dialog task-dialog">
+    <form id="bulk-form">
+      <div class="dialog-heading"><h2>Inserimento multiplo</h2><button id="bulk-close" type="button" class="icon-button" aria-label="Chiudi">×</button></div>
+      <p class="form-hint">Una task per riga. #tag, *scadenza, @durata, ^area. Esempio: Studiare Platone #greco *domani @1h30m ^Studio</p>
+      <textarea id="bulk-input" rows="9" placeholder="Correggere verifiche #scuola *domani @2h ^Lavoro"></textarea>
+      <datalist id="bulk-suggestions"></datalist>
+      <div id="bulk-preview" class="planned-summary" aria-live="polite"></div>
+      <p id="bulk-error" class="form-error" role="alert"></p>
+      <div class="dialog-actions"><span class="action-spacer"></span><button type="button" id="bulk-cancel" class="button button-secondary">Annulla</button><button type="submit" class="button button-primary">Importa task</button></div>
+    </form>
+  </dialog>
+  <dialog id="tags-dialog" class="session-dialog task-dialog">
+    <form id="tags-form">
+      <div class="dialog-heading"><h2>Rinomina o unisci tag</h2><button id="tags-close" type="button" class="icon-button" aria-label="Chiudi">×</button></div>
+      <label class="field-label">Tag esistente<select id="tags-source" required></select></label>
+      <label class="field-label">Nuovo nome o tag di destinazione<input id="tags-target" list="tags-suggestions" required placeholder="Studio/Greco"></label>
+      <datalist id="tags-suggestions"></datalist>
+      <p class="form-hint">Aggiorna tutte le attività; i tag duplicati vengono eliminati. I discendenti del tag selezionato vengono trasferiti.</p>
+      <p id="tags-error" class="form-error" role="alert"></p>
+      <div class="dialog-actions"><span class="action-spacer"></span><button id="tags-cancel" type="button" class="button button-secondary">Annulla</button><button type="submit" class="button button-primary">Applica a tutte le task</button></div>
+    </form>
+  </dialog>
   <dialog id="task-plan-dialog" class="session-dialog task-dialog" aria-labelledby="task-plan-title">
     <form id="task-plan-form">
       <div class="dialog-heading"><h2 id="task-plan-title">Programma attività</h2>
