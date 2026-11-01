@@ -1,5 +1,5 @@
-const CACHE_NAME = "tempo-pomodoro-v12";
-const APP_SHELL = ["./", "./index.html", "./styles.css", "./app.js", "./tempo-ui.js", "./agenda.js", "./core/tempo-tasks.js", "./core/tempo-core.js", "./core/tempo-audio.js", "./manifest.webmanifest", "./icon.svg", "./icon-192.png", "./icon-512.png"];
+const CACHE_NAME = "tempo-pomodoro-v13";
+const APP_SHELL = ["./", "./index.html", "./styles.css", "./app.js", "./tempo-ui.js", "./agenda.js", "./core/tempo-tasks.js", "./core/tempo-core.js", "./core/tempo-audio.js", "./core/tempo-dropbox.js", "./manifest.webmanifest", "./icon.svg", "./icon-192.png", "./icon-512.png"];
 self.addEventListener("install", event => {
   event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(APP_SHELL.filter(Boolean))).then(() => self.skipWaiting()));
 });
