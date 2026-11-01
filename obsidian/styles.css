@@ -14,3 +14,7 @@
 .tempo-session-row { grid-template-columns: minmax(88px, auto) 1fr auto; }
 .tempo-remove-session { align-self: center; border: 0; border-radius: 6px; padding: 2px 9px; color: var(--text-muted); background: transparent; cursor: pointer; }
 .tempo-remove-session:hover { color: var(--text-error); background: var(--background-modifier-hover); }
+
+.tempo-sound-controls { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:12px 0 20px; }
+.tempo-sound-controls h3, .tempo-sound-controls p { flex-basis:100%; margin:4px 0; }
+.tempo-sound-controls input[type="range"] { width:100px; }

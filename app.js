@@ -1,3 +1,4 @@
+import { TempoAmbientAudio } from "./core/tempo-audio.js";
 import { localDateString, timeToMinutes, dateTime, formatTime, formatDate, escapeHtml, clampInt, pauseMinutes, normalizeSession, validSession, sessionBounds, getSessionStatus, getPhase, mmss, getActiveSession as findActiveSession, getNextSession as findNextSession, hasSessionOverlaps } from "./core/tempo-core.js";
 
 (() => {
@@ -16,11 +17,22 @@ import { localDateString, timeToMinutes, dateTime, formatTime, formatDate, escap
   let lastActiveSessionTitle = "";
   let toastTimeout = null;
   let swRegistration = null;
-  let audioContext = null;
-  let soundNodes = [];
-  let soundMasterNode = null;
   let soundPlaying = false;
-  let soundTimer = null;
+  let selectedSound = "off";
+  let soundPhaseKey = null;
+  const ambient = new TempoAmbientAudio(playing => {
+    soundPlaying = playing;
+    els.soundToggle.textContent = playing ? "Ferma suono" : "Avvia suono";
+    els.focusSoundButton.textContent = playing ? "Ferma suono" : "Avvia suono";
+    els.soundStatus.textContent = playing ? "Suono attivo durante la concentrazione" : "Audio disattivato";
+  });
+  function syncFocusAudio(now = new Date()) {
+    const session = getActiveSession(now);
+    const phase = session ? getPhase(session, now) : null;
+    const key = phase?.kind === "work" ? `${session.id}:${phase.start.getTime()}` : null;
+    if (soundPlaying && key !== soundPhaseKey) ambient.stop(.9);
+    soundPhaseKey = key;
+  }
 
   function loadState(){
     try{
@@ -36,6 +48,7 @@ import { localDateString, timeToMinutes, dateTime, formatTime, formatDate, escap
   async function sendNotification(title,body){if(!("Notification" in window)||Notification.permission!=="granted")return;try{if(swRegistration)await swRegistration.showNotification(title,{body,icon:"./icon.svg",tag:"tempo-"+Date.now(),renotify:false});else new Notification(title,{body,icon:"./icon.svg"});}catch(error){console.warn("Notifica non disponibile:",error);}}
   function notifyPhaseChange(session,phase){const key=`${session.id}:${phase.kind}:${phase.start.getTime()}`;if(key===lastPhaseKey)return;const wasSet=Boolean(lastPhaseKey);lastPhaseKey=key;if(wasSet){const title=phase.kind==="work"?"Concentrazione":"Pausa";const body=phase.kind==="work"?`Riprendi: ${session.title}`:`È il momento di una pausa · ${session.title}`;showToast(body);sendNotification(title,body);}}
   function renderTimer(now=new Date()){
+    syncFocusAudio(now);
     const active=getActiveSession(now);
     if(active){if(lastActiveSessionId!==active.id){if(lastActiveSessionId)sendNotification("Sessione terminata",`Hai concluso: ${lastActiveSessionTitle}`);const sessionStart=sessionBounds(active).start;if(now>=sessionStart&&now-sessionStart<60000)sendNotification("Sessione iniziata",`È il momento di concentrarti: ${active.title}`);lastActiveSessionId=active.id;lastActiveSessionTitle=active.title;}const phase=getPhase(active,now);els.timerMode.textContent=phase.kind==="work"?"SESSIONE IN CORSO":"PAUSA IN CORSO";els.timerHeading.textContent=active.title;els.phasePill.textContent=phase.label;els.phasePill.className=`phase-pill ${phase.kind}`;els.timerDisplay.textContent=mmss(phase.remaining);els.timerCaption.textContent=phase.kind==="work"?`Concentrazione fino alle ${formatTime(phase.end)}`:`La pausa termina alle ${formatTime(phase.end)}`;els.timerProgress.style.width=`${phase.progress}%`;els.timerProgress.style.background=phase.kind==="work"?"var(--accent)":"var(--green)";els.timerSessionLabel.textContent=`${active.start}–${active.end} · ${active.title}`;els.timerEndLabel.textContent=`Fine sessione ${formatTime(phase.sessionEnd)}`;notifyPhaseChange(active,phase);document.title=`${mmss(phase.remaining)} · ${phase.label} — Tempo`;renderFocus(phase,active);return;}
     lastPhaseKey="";if(lastActiveSessionId){sendNotification("Sessione terminata",`Hai concluso: ${lastActiveSessionTitle}`);lastActiveSessionId=null;lastActiveSessionTitle="";}const next=getNextSession(now);els.phasePill.textContent=next?"In programma":"In attesa";els.phasePill.className="phase-pill neutral";els.timerProgress.style.width="0%";els.timerProgress.style.background="var(--accent)";els.timerSessionLabel.textContent=next?next.title:"Nessuna sessione in corso";
@@ -111,23 +124,34 @@ import { localDateString, timeToMinutes, dateTime, formatTime, formatDate, escap
   function icsDate(date,time){return `${date.replace(/-/g,"")}T${time.replace(":","")}00`;}
   function exportIcs(){if(!state.sessions.length){showToast("Non ci sono sessioni da esportare.");return;}const lines=["BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//Tempo Pomodoro//IT","CALSCALE:GREGORIAN","METHOD:PUBLISH","X-WR-CALNAME:Tempo - Sessioni di concentrazione"];state.sessions.slice().sort((a,b)=>`${a.date} ${a.start}`.localeCompare(`${b.date} ${b.start}`)).forEach(s=>{const uid=`${s.id}@tempo-pomodoro`,desc=`Concentrazione: ${s.workMinutes} min. ${s.breakEnabled?`Pause automatiche: ${pauseMinutes(s.workMinutes)} min (rapporto 5:1).`:"Pause disattivate."}`;lines.push("BEGIN:VEVENT",`UID:${icsEscape(uid)}`,`DTSTAMP:${new Date().toISOString().replace(/[-:]/g,"").replace(/\.\d{3}/,"")}`,`DTSTART:${icsDate(s.date,s.start)}`,`DTEND:${icsDate(s.date,s.end)}`,`SUMMARY:${icsEscape("Concentrazione: "+s.title)}`,`DESCRIPTION:${icsEscape(desc)}`,"END:VEVENT");});lines.push("END:VCALENDAR");downloadFile(lines.join("\r\n"),"text/calendar;charset=utf-8",`tempo-sessioni-${localDateString()}.ics`);showToast("Calendario esportato in formato iCalendar.");}
 
-  // Ambient audio generated locally with Web Audio API (works offline).
-  function makeNoiseBuffer(ctx,seconds=4){const length=Math.floor(ctx.sampleRate*seconds),buffer=ctx.createBuffer(1,length,ctx.sampleRate),data=buffer.getChannelData(0);for(let i=0;i<length;i++)data[i]=Math.random()*2-1;return buffer;}
-  function stopSound(){soundNodes.forEach(node=>{try{node.stop?.();}catch{}try{node.disconnect?.();}catch{}});soundNodes=[];soundMasterNode=null;if(soundTimer)clearInterval(soundTimer);soundTimer=null;soundPlaying=false;els.soundToggle.textContent="Avvia suono";els.soundStatus.textContent="Audio disattivato";els.focusSoundButton.textContent="Avvia suono";}
-  function startSound(){const kind=els.soundSelect.value;if(kind==="off"){showToast("Seleziona prima un suono.");return;}const AudioCtx=window.AudioContext||window.webkitAudioContext;if(!AudioCtx){showToast("Audio non supportato da questo browser.");return;}if(!audioContext)audioContext=new AudioCtx();audioContext.resume();stopSound();const master=audioContext.createGain();soundMasterNode=master;master.gain.value=Number(els.soundVolume.value)/100;master.connect(audioContext.destination);const buffer=makeNoiseBuffer(audioContext,4);
-    const source=audioContext.createBufferSource();source.buffer=buffer;source.loop=true;let filter=audioContext.createBiquadFilter();filter.type="lowpass";filter.frequency.value=kind==="white"?16000:kind==="brown"?220:kind==="rain"?4200:700;source.connect(filter);filter.connect(master);source.start();soundNodes.push(source,filter,master);
-    if(kind==="rain"){const lfo=audioContext.createOscillator(),depth=audioContext.createGain();lfo.frequency.value=.13;depth.gain.value=1100;lfo.connect(depth);depth.connect(filter.frequency);lfo.start();soundNodes.push(lfo,depth);}
-    if(kind==="fire"){filter.type="lowpass";filter.frequency.value=950;const crackle=()=>{if(!soundPlaying)return;const osc=audioContext.createBufferSource(),gain=audioContext.createGain(),hp=audioContext.createBiquadFilter();osc.buffer=makeNoiseBuffer(audioContext,.08);hp.type="highpass";hp.frequency.value=1800;gain.gain.setValueAtTime(.0001,audioContext.currentTime);gain.gain.linearRampToValueAtTime(.10,audioContext.currentTime+.008);gain.gain.exponentialRampToValueAtTime(.0001,audioContext.currentTime+.07);osc.connect(hp);hp.connect(gain);gain.connect(master);osc.start();osc.stop(audioContext.currentTime+.08);};soundTimer=setInterval(crackle,450+Math.random()*900);}
-    soundPlaying=true;els.soundToggle.textContent="Ferma suono";els.soundStatus.textContent=`In riproduzione: ${els.soundSelect.options[els.soundSelect.selectedIndex].text}`;els.focusSoundButton.textContent="Ferma suono";
+  // Playback is user-initiated and strictly limited to the current work phase.
+  function stopSound() { ambient.stop(.9); }
+  async function startSound() {
+    const session = getActiveSession();
+    const phase = session ? getPhase(session) : null;
+    if (!phase || phase.kind !== "work") {
+      showToast("Il suono può essere avviato soltanto durante la concentrazione.");
+      return;
+    }
+    const kind = els.soundSelect.value;
+    if (kind === "off") { showToast("Seleziona prima un suono."); return; }
+    soundPhaseKey = `${session.id}:${phase.start.getTime()}`;
+    selectedSound = kind;
+    const started = await ambient.start(kind, Number(els.soundVolume.value) / 100);
+    if (!started) showToast("Impossibile avviare l’audio su questo dispositivo.");
+    syncFocusAudio();
   }
-  function toggleSound(){if(soundPlaying)stopSound();else startSound();}
-  function updateVolume(){els.volumeValue.textContent=`${els.soundVolume.value}%`;if(audioContext&&soundPlaying){const master=soundMasterNode;if(master)master.gain.setTargetAtTime(Number(els.soundVolume.value)/100,audioContext.currentTime,.05);}}
+  function toggleSound() { if (soundPlaying) stopSound(); else void startSound(); }
+  function updateVolume() {
+    els.volumeValue.textContent = `${els.soundVolume.value}%`;
+    ambient.setVolume(Number(els.soundVolume.value) / 100);
+  }
   async function enableNotifications(){if(!("Notification" in window)){showToast("Le notifiche non sono supportate da questo browser.");return;}if(!swRegistration){showToast("Attendi il completamento della registrazione dell'app, poi riprova.");return;}const permission=await Notification.requestPermission();els.notificationButton.textContent=permission==="granted"?"Notifiche attive":"Attiva notifiche";showToast(permission==="granted"?"Notifiche attivate.":"Permesso per le notifiche non concesso.");}
   async function enterFocus(){els.focusOverlay.classList.remove("hidden");document.body.classList.add("focus-open");try{if(document.documentElement.requestFullscreen)await document.documentElement.requestFullscreen();}catch(error){console.info("Fullscreen non disponibile senza gesto o permesso.",error);}}
   async function exitFocus(){els.focusOverlay.classList.add("hidden");document.body.classList.remove("focus-open");if(document.fullscreenElement)try{await document.exitFullscreen();}catch{}}
 
-  els.newSessionButton.addEventListener("click",openNewDialog);els.emptyAddButton.addEventListener("click",openNewDialog);els.sessionForm.addEventListener("submit",saveSession);els.closeDialog.addEventListener("click",()=>els.dialog.close());els.cancelDialog.addEventListener("click",()=>els.dialog.close());els.deleteButton.addEventListener("click",()=>deleteSession(els.sessionId.value));els.filterDate.addEventListener("change",renderSessions);els.todayButton.addEventListener("click",()=>{els.filterDate.value=localDateString();renderSessions();});els.sessionsList.addEventListener("click",event=>{const edit=event.target.closest("[data-edit]"),del=event.target.closest("[data-delete]");if(edit)openEditDialog(edit.dataset.edit);if(del)deleteSession(del.dataset.delete);});els.defaultsForm.addEventListener("submit",saveDefaults);els.exportButton.addEventListener("click",exportBackup);els.importInput.addEventListener("change",()=>importBackup(els.importInput.files[0]));els.sessionWork.addEventListener("input",updateBreakPreview);els.sessionBreakEnabled.addEventListener("change",updateBreakPreview);els.sessionDate.addEventListener("change",updatePlannedSummary);els.focusButton.addEventListener("click",enterFocus);els.exitFocusButton.addEventListener("click",exitFocus);els.focusFullscreenButton.addEventListener("click",async()=>{try{if(!document.fullscreenElement)await document.documentElement.requestFullscreen();else await document.exitFullscreen();}catch{showToast("Schermo intero non disponibile in questo browser.");}});els.notificationButton.addEventListener("click",enableNotifications);els.soundToggle.addEventListener("click",toggleSound);els.focusSoundButton.addEventListener("click",toggleSound);els.soundSelect.addEventListener("change",()=>{if(soundPlaying){stopSound();startSound();}});els.soundVolume.addEventListener("input",updateVolume);els.exportIcsButton.addEventListener("click",exportIcs);
-  window.addEventListener("beforeinstallprompt",event=>{event.preventDefault();deferredInstallPrompt=event;els.installButton.classList.remove("hidden");});els.installButton.addEventListener("click",async()=>{if(!deferredInstallPrompt){showToast("Per installare, usa il menu del browser e scegli ‘Installa app’ o ‘Aggiungi alla schermata Home’. ");return;}const prompt=deferredInstallPrompt;deferredInstallPrompt=null;await prompt.prompt();const choice=await prompt.userChoice;if(choice?.outcome==="accepted")els.installButton.classList.add("hidden");});window.addEventListener("online",()=>{els.connectionStatus.textContent="Online";});window.addEventListener("offline",()=>{els.connectionStatus.textContent="Offline";});document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")renderAll();});window.addEventListener("focus",renderAll);document.addEventListener("keydown",event=>{if(event.key==="Escape"&&!els.focusOverlay.classList.contains("hidden"))exitFocus();});
+  els.newSessionButton.addEventListener("click",openNewDialog);els.emptyAddButton.addEventListener("click",openNewDialog);els.sessionForm.addEventListener("submit",saveSession);els.closeDialog.addEventListener("click",()=>els.dialog.close());els.cancelDialog.addEventListener("click",()=>els.dialog.close());els.deleteButton.addEventListener("click",()=>deleteSession(els.sessionId.value));els.filterDate.addEventListener("change",renderSessions);els.todayButton.addEventListener("click",()=>{els.filterDate.value=localDateString();renderSessions();});els.sessionsList.addEventListener("click",event=>{const edit=event.target.closest("[data-edit]"),del=event.target.closest("[data-delete]");if(edit)openEditDialog(edit.dataset.edit);if(del)deleteSession(del.dataset.delete);});els.defaultsForm.addEventListener("submit",saveDefaults);els.exportButton.addEventListener("click",exportBackup);els.importInput.addEventListener("change",()=>importBackup(els.importInput.files[0]));els.sessionWork.addEventListener("input",updateBreakPreview);els.sessionBreakEnabled.addEventListener("change",updateBreakPreview);els.sessionDate.addEventListener("change",updatePlannedSummary);els.focusButton.addEventListener("click",enterFocus);els.exitFocusButton.addEventListener("click",exitFocus);els.focusFullscreenButton.addEventListener("click",async()=>{try{if(!document.fullscreenElement)await document.documentElement.requestFullscreen();else await document.exitFullscreen();}catch{showToast("Schermo intero non disponibile in questo browser.");}});els.notificationButton.addEventListener("click",enableNotifications);els.soundToggle.addEventListener("click",toggleSound);els.focusSoundButton.addEventListener("click",toggleSound);els.soundSelect.addEventListener("change",()=>{if(soundPlaying){ambient.stop(0);void startSound();}});els.soundVolume.addEventListener("input",updateVolume);els.exportIcsButton.addEventListener("click",exportIcs);
+  window.addEventListener("beforeinstallprompt",event=>{event.preventDefault();deferredInstallPrompt=event;els.installButton.classList.remove("hidden");});els.installButton.addEventListener("click",async()=>{if(!deferredInstallPrompt){showToast("Per installare, usa il menu del browser e scegli ‘Installa app’ o ‘Aggiungi alla schermata Home’. ");return;}const prompt=deferredInstallPrompt;deferredInstallPrompt=null;await prompt.prompt();const choice=await prompt.userChoice;if(choice?.outcome==="accepted")els.installButton.classList.add("hidden");});window.addEventListener("online",()=>{els.connectionStatus.textContent="Online";});window.addEventListener("offline",()=>{els.connectionStatus.textContent="Offline";});document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")renderAll();});window.addEventListener("focus",renderAll);window.addEventListener("pagehide",()=>ambient.stop(0));document.addEventListener("keydown",event=>{if(event.key==="Escape"&&!els.focusOverlay.classList.contains("hidden"))exitFocus();});
   els.filterDate.value=localDateString();els.connectionStatus.textContent=navigator.onLine?"Pronta":"Offline";els.notificationButton.textContent=("Notification" in window&&Notification.permission==="granted")?"Notifiche attive":"Attiva notifiche";renderAll();setInterval(()=>renderTimer(),1000);setInterval(()=>renderSessions(),15000);
   if("serviceWorker" in navigator&&(location.protocol==="https:"||location.hostname==="localhost")){window.addEventListener("load",()=>{navigator.serviceWorker.register("./sw.js").then(reg=>{swRegistration=reg;els.connectionStatus.textContent=navigator.onLine?"Pronta · offline disponibile":"Offline";}).catch(error=>console.warn("Service worker non registrato:",error));});}
 })();

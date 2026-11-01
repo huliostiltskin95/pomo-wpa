@@ -1,3 +1,4 @@
+import { TempoAmbientAudio } from "../core/tempo-audio.js";
 import { ItemView, Modal, Notice, Plugin, PluginSettingTab, Setting, WorkspaceLeaf } from "obsidian";
 import { DEFAULTS, getActiveSession, getNextSession, getPhase, localDateString, mmss, normalizeSession, pauseMinutes, sessionBounds, validSession } from "../core/tempo-core.js";
 
@@ -11,6 +12,31 @@ type TempoData = { sessions: TempoSession[]; defaults: { workMinutes: number; br
 
 export default class TempoPlugin extends Plugin {
   data: TempoData = { sessions: [], defaults: { ...DEFAULTS } };
+  ambient = new TempoAmbientAudio(() => this.refreshViews());
+  soundKind = "brown";
+  soundVolume = 25;
+  private soundPhaseKey: string | null = null;
+
+  syncFocusAudio(now = new Date()) {
+    const session = getActiveSession(this.data.sessions, now);
+    const phase = session ? getPhase(session, now) : null;
+    const key = phase?.kind === "work" ? `${session!.id}:${phase.start.getTime()}` : null;
+    if (this.ambient.playing && key !== this.soundPhaseKey) this.ambient.stop(.9);
+    this.soundPhaseKey = key;
+  }
+  async toggleSound() {
+    if (this.ambient.playing) { this.ambient.stop(.9); return; }
+    const active = getActiveSession(this.data.sessions, new Date());
+    if (!active || getPhase(active).kind !== "work") {
+      new Notice("Il suono è disponibile soltanto durante la concentrazione.");
+      return;
+    }
+    this.soundPhaseKey = `${active.id}:${getPhase(active).start.getTime()}`;
+    if (!(await this.ambient.start(this.soundKind, this.soundVolume / 100))) {
+      new Notice("Impossibile avviare il suono sul dispositivo.");
+    }
+    this.syncFocusAudio();
+  }
 
   async onload() {
     await this.loadTempoData();
@@ -19,10 +45,10 @@ export default class TempoPlugin extends Plugin {
     this.addCommand({ id: "open-tempo", name: "Apri agenda Tempo", callback: () => this.activateView() });
     this.addCommand({ id: "add-tempo-session", name: "Programma sessione Tempo", callback: () => new SessionModal(this.app, this).open() });
     this.addSettingTab(new TempoSettingTab(this.app, this));
-    this.registerInterval(window.setInterval(() => this.refreshViews(), 1000));
+    this.registerInterval(window.setInterval(() => { this.syncFocusAudio(); this.refreshViews(); }, 1000));
   }
 
-  onunload() { this.app.workspace.detachLeavesOfType(VIEW_TYPE); }
+  onunload() { this.ambient.destroy(); this.app.workspace.detachLeavesOfType(VIEW_TYPE); }
 
   async loadTempoData() {
     const saved = await this.loadData() as Partial<TempoData> | null;
@@ -37,7 +63,7 @@ export default class TempoPlugin extends Plugin {
     };
   }
 
-  async saveTempoData() { await this.saveData(this.data); this.refreshViews(); }
+  async saveTempoData() { await this.saveData(this.data); this.syncFocusAudio(); this.refreshViews(); }
   refreshViews() { this.app.workspace.getLeavesOfType(VIEW_TYPE).forEach(leaf => (leaf.view as TempoView).render()); }
 
   async activateView() {
@@ -104,6 +130,27 @@ class TempoView extends ItemView {
       timer.createEl("div", { cls: "tempo-clock", text: `${String(this.plugin.data.defaults.workMinutes).padStart(2,"0")}:00` });
       timer.createEl("div", { cls: "tempo-muted", text: "Programma una sessione per iniziare." });
     }
+
+    const sound = root.createDiv("tempo-sound-controls");
+    sound.createEl("h3", { text: "Suoni di sottofondo" });
+    const soundSelect = sound.createEl("select", { attr: { "aria-label": "Suono ambientale" } });
+    for (const [value, label] of [["white", "Rumore bianco"], ["brown", "Rumore marrone"], ["rain", "Pioggia"], ["fire", "Caminetto"]]) {
+      const option = soundSelect.createEl("option", { text: label, value });
+      option.selected = this.plugin.soundKind === value;
+    }
+    soundSelect.addEventListener("change", () => {
+      this.plugin.soundKind = soundSelect.value;
+      if (this.plugin.ambient.playing) { this.plugin.ambient.stop(0); void this.plugin.toggleSound(); }
+    });
+    const volume = sound.createEl("input", { type: "range", attr: { min: "0", max: "100", "aria-label": "Volume" } });
+    volume.value = String(this.plugin.soundVolume);
+    volume.addEventListener("input", () => {
+      this.plugin.soundVolume = Number(volume.value);
+      this.plugin.ambient.setVolume(this.plugin.soundVolume / 100);
+    });
+    const soundButton = sound.createEl("button", { text: this.plugin.ambient.playing ? "Ferma suono" : "Avvia suono" });
+    soundButton.addEventListener("click", () => void this.plugin.toggleSound());
+    sound.createEl("p", { cls: "tempo-muted", text: "Audio continuo durante il focus, dissolvenza alla pausa. L'avvio richiede un clic." });
 
     root.createEl("h3", { text: "Sessioni programmate" });
     const upcoming = this.plugin.data.sessions.filter(s => sessionBounds(s).end > now).slice(0, 12);
