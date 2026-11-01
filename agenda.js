@@ -40,7 +40,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
   const escape = value => escapeHtml(value);
   const format = value => hoursFromMinutes(value) + " h";
   const grossPlanned = (taskId, sessions) => sessions.filter(s => sessionHasTask(s,taskId))
-    .reduce((sum, s) => sum + sessionDurationMinutes(s), 0);
+    .reduce((sum, s) => sum + sessionDurationMinutes(s) / Math.max(1,sessionTaskIds(s).length), 0);
   const markdown = (value, interactive = false) => {
     // Escape user input first. Only generated checkbox controls become HTML.
     const checkboxes = [];
@@ -126,9 +126,9 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
       a.title.localeCompare(b.title, "it"));
 
     const remaining = state.tasks.filter(task => task.status !== "done");
-    const allMinutes = remaining.reduce((sum, task) => sum + task.estimateMinutes, 0);
+    const allMinutes = remaining.reduce((sum, task) => sum + (task.estimateMinutes || 0), 0);\n    const areaStats = TASK_AREAS.map(area => { const areaTasks = remaining.filter(t=>t.area===area); const estimated = areaTasks.reduce((sum,t)=>sum+(t.estimateMinutes||0),0); const blocks = state.sessions.filter(s=>(s.area||s.title)===area); const scheduled=blocks.reduce((sum,s)=>sum+sessionDurationMinutes(s),0); const elapsed=blocks.filter(s=>sessionBounds(s).end<=now).reduce((sum,s)=>sum+sessionDurationMinutes(s),0); return area+": "+format(estimated)+" stimate · "+format(scheduled)+" programmate · "+format(elapsed)+" trascorse"; }).join(" | ");
     el.summary.textContent = state.tasks.length + " attività · " + remaining.length + " aperte · " +
-      state.tasks.filter(task => task.status === "in_progress").length + " in corso · " + format(allMinutes) + " stimate";
+      state.tasks.filter(task => task.status === "in_progress").length + " in corso · " + format(allMinutes) + " stimate · " + areaStats;
     el.list.replaceChildren();
     el.empty.classList.toggle("hidden", filtered.length > 0);
     el.empty.querySelector("p").textContent = state.tasks.length
