@@ -74,3 +74,51 @@
 #bulk-preview{overflow-wrap:anywhere;font-size:12px;line-height:1.6}
 .task-due{margin:6px 0;color:var(--muted);font-size:11px}
 @media(max-width:650px){.agenda-extra-actions{justify-content:flex-start}.agenda-extra-actions .button{white-space:normal}}
+
+/* Tempo responsive app-shell redesign: view switching never unmounts the timer. */
+body{--tempo-nav-width:218px}
+#tempo-navigation{position:fixed;z-index:12;top:72px;bottom:0;left:0;width:var(--tempo-nav-width);display:flex;flex-direction:column;gap:6px;padding:25px 13px;background:var(--surface);border-right:1px solid var(--line)}
+.tempo-nav-link{display:flex;align-items:center;gap:12px;min-height:43px;padding:9px 14px;border-radius:11px;color:var(--muted);font-size:13px;font-weight:700;text-decoration:none}
+.tempo-nav-link:hover{background:var(--surface-soft);color:var(--text)}
+.tempo-nav-link.active{background:var(--accent-soft);color:var(--accent)}
+.tempo-nav-icon{display:inline-flex;width:20px;justify-content:center;font-size:19px;font-weight:500}
+.layout{margin-left:max(calc(var(--tempo-nav-width) + 36px),calc((100vw - 820px + var(--tempo-nav-width))/2));margin-right:auto;width:min(calc(100% - var(--tempo-nav-width) - 78px),820px)}
+.tempo-view-section[hidden]{display:none!important}
+.tempo-next-card,.tempo-statistics{margin-top:26px;padding:22px;border:1px solid var(--line);border-radius:17px;background:var(--surface)}
+.tempo-next-card .section-heading{margin-bottom:12px}
+.tempo-upcoming{display:grid;gap:0;color:var(--muted);font-size:13px}
+.tempo-upcoming-row{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;padding:12px 0;border-top:1px solid var(--line)}
+.tempo-upcoming-row strong{color:var(--accent);font-size:12px}
+.tempo-stat-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:24px}
+.tempo-stat-item{display:grid;gap:10px;padding:20px;background:var(--surface-soft);border-radius:13px}
+.tempo-stat-item span{color:var(--muted);font-size:12px}
+.tempo-stat-item strong{font-size:28px;letter-spacing:-.04em;font-variant-numeric:tabular-nums}
+.tempo-stat-footnote{margin:18px 0 0;color:var(--muted);font-size:12px;line-height:1.6}
+.tempo-original-action{display:none!important}
+.tempo-add-menu{position:relative}
+.tempo-add-options{position:absolute;z-index:8;right:0;top:calc(100% + 8px);min-width:190px;display:grid;gap:4px;padding:7px;background:var(--surface);border:1px solid var(--line);border-radius:11px;box-shadow:0 14px 32px rgba(30,44,68,.14)}
+.tempo-add-options button{padding:10px 12px;background:transparent;border:0;border-radius:7px;text-align:left;color:var(--text);font-size:12px;cursor:pointer}
+.tempo-add-options button:hover{background:var(--surface-soft)}
+.tempo-task-expand{margin:2px 0 0;padding:4px 0;border:0;background:transparent;color:var(--accent);font-weight:700;font-size:12px}
+.task-item:not(.tempo-task-expanded) .task-description,.task-item:not(.tempo-task-expanded) .task-tags,.task-item:not(.tempo-task-expanded) .task-estimate-line,.task-item:not(.tempo-task-expanded) .task-progress,.task-item:not(.tempo-task-expanded) .task-actions,.task-item:not(.tempo-task-expanded) .task-planning-note,.task-item:not(.tempo-task-expanded) .task-reminder{display:none!important}
+.task-item{padding:15px 18px}
+.task-title{margin:9px 0 2px;font-size:15px}
+.task-item-head{align-items:center}
+.task-item .task-due{margin:4px 0;color:var(--muted)}
+.tempo-task-session-link{display:inline-flex;align-items:center}
+#tempo-navigation a:focus-visible,.tempo-task-expand:focus-visible,.tempo-add-options button:focus-visible{outline:3px solid #9bb5ff;outline-offset:2px}
+@media(max-width:1000px){
+ body{--tempo-nav-width:185px}
+ .layout{margin-left:calc(var(--tempo-nav-width) + 25px);width:calc(100% - var(--tempo-nav-width) - 50px)}
+}
+@media(max-width:720px){
+ #tempo-navigation{top:auto;bottom:0;right:0;width:100%;height:67px;padding:5px 4px calc(5px + env(safe-area-inset-bottom,0px));flex-direction:row;justify-content:space-around;border-right:0;border-top:1px solid var(--line);box-shadow:0 -4px 18px rgba(25,35,50,.045)}
+ .tempo-nav-link{flex:1;min-width:0;min-height:53px;gap:3px;padding:4px 1px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:10px;border-radius:8px}
+ .tempo-nav-icon{font-size:19px;line-height:1.2}
+ .layout{margin:0 auto;padding-bottom:calc(100px + env(safe-area-inset-bottom,0px));width:min(100% - 28px,820px)}
+ .tempo-stat-grid{gap:10px}
+ .tempo-stat-item{padding:15px}
+ .tempo-stat-item strong{font-size:22px}
+ .tempo-next-card,.tempo-statistics{padding:17px}
+ .agenda-section,.schedule-section{margin-top:10px}
+}
