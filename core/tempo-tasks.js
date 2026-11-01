@@ -96,7 +96,7 @@ export function focusMinutesInSession(session) {
 
 export function plannedFocusMinutes(taskId, sessions) {
   return sessions.filter(session => sessionHasTask(session, taskId))
-    .reduce((sum, session) => sum + focusMinutesInSession(session), 0);
+    .reduce((sum, session) => sum + focusMinutesInSession(session) / Math.max(1,sessionTaskIds(session).length), 0);
 }
 
 export function taskTagAncestors(tags) {
@@ -149,5 +149,5 @@ export function getTaskAttention(task, sessions, now = new Date()) {
 /** Calendar blocks elapsed, not guaranteed attention or actual work. */
 export function elapsedScheduledFocusMinutes(taskId, sessions, now = new Date()) {
   return sessions.filter(session => sessionHasTask(session, taskId) && sessionBounds(session).end <= now)
-    .reduce((sum, session) => sum + focusMinutesInSession(session), 0);
+    .reduce((sum, session) => sum + focusMinutesInSession(session) / Math.max(1,sessionTaskIds(session).length), 0);
 }
