@@ -1,6 +1,6 @@
 import { TempoAmbientAudio } from "./core/tempo-audio.js";
 import { mountAgenda } from "./agenda.js";
-import { normalizeTask } from "./core/tempo-tasks.js";
+import { normalizeTask, focusMinutesInSession } from "./core/tempo-tasks.js";
 import { localDateString, timeToMinutes, dateTime, formatTime, formatDate, escapeHtml, clampInt, pauseMinutes, normalizeSession, validSession, sessionBounds, getSessionStatus, getPhase, mmss, getActiveSession as findActiveSession, getNextSession as findNextSession, getAmbientFocusMode, hasSessionOverlaps } from "./core/tempo-core.js";
 
 (() => {
@@ -55,6 +55,7 @@ import { localDateString, timeToMinutes, dateTime, formatTime, formatDate, escap
           return {
             sessions: parsed.sessions.filter(validSession).map(normalizeSession),
             tasks: [...tasksById.values()],
+            history: Array.isArray(parsed.history) ? parsed.history.filter(validHistory) : [],
             defaults: {
               workMinutes: clampInt(parsed.defaults?.workMinutes, 1, 240, 25),
               breakEnabled: parsed.defaults?.breakEnabled !== undefined ? Boolean(parsed.defaults.breakEnabled) : true
@@ -63,7 +64,13 @@ import { localDateString, timeToMinutes, dateTime, formatTime, formatDate, escap
         }
       }
     } catch (error) { console.warn("Impossibile leggere i dati locali.", error); }
-    return { sessions: [], tasks: [], defaults: { ...DEFAULTS } };
+    return { sessions: [], tasks: [], history: [], defaults: { ...DEFAULTS } };
+  }
+  function validHistory(h){return h && typeof h.sessionId==="string" && typeof h.minutes==="number" && Number.isFinite(h.minutes) && h.minutes>=0 && typeof h.taskId==="string" && typeof h.date==="string";}
+  function archivePast(session){
+    if(!session || sessionBounds(session).end > new Date()) return;
+    if((state.history||[]).some(h=>h.sessionId===session.id))return;
+    state.history = [...(state.history||[]), {sessionId:session.id,taskId:session.taskId||"",date:session.date,minutes:focusMinutesInSession(session),title:session.title}];
   }
   function persist(){try{localStorage.setItem(STORAGE_KEY,JSON.stringify(state));return true;}catch(error){showToast("Non è stato possibile salvare i dati nel browser.");return false;}}
   function getActiveSession(now=new Date()){return findActiveSession(state.sessions,now);}
@@ -96,17 +103,19 @@ import { localDateString, timeToMinutes, dateTime, formatTime, formatDate, escap
     const start=dateTime(session.date,session.start),end=dateTime(session.date,session.end);
     const overlaps=state.sessions.some(s=>{if(s.id===session.id||s.date!==session.date)return false;const bounds=sessionBounds(s);return start<bounds.end&&end>bounds.start;});
     if(overlaps){els.formError.textContent="Questa sessione si sovrappone a un'altra sessione dello stesso giorno.";return;}
-    const previous=state.sessions;
+    const previous=state.sessions, previousHistory=state.history;
+    if(existingSession)archivePast(existingSession);
     state.sessions=existingId?state.sessions.map(s=>s.id===existingId?session:s):[...state.sessions,session];
-    if(!persist()){state.sessions=previous;return;}
+    if(!persist()){state.sessions=previous;state.history=previousHistory;return;}
     els.filterDate.value=session.date;els.dialog.close();renderAll();showToast(existingId?"Sessione aggiornata.":"Sessione aggiunta all'agenda.");
   }
   function deleteSession(id){
     const session=state.sessions.find(item=>item.id===id);
     if(!session||!window.confirm(`Eliminare la sessione “${session.title}”?`))return;
-    const previous=state.sessions;
+    const previous=state.sessions, previousHistory=state.history;
+    archivePast(session);
     state.sessions=state.sessions.filter(item=>item.id!==id);
-    if(!persist()){state.sessions=previous;return;}
+    if(!persist()){state.sessions=previous;state.history=previousHistory;return;}
     if(els.dialog.open)els.dialog.close();renderAll();showToast("Sessione eliminata.");
   }
   function saveDefaults(event){
@@ -119,7 +128,7 @@ import { localDateString, timeToMinutes, dateTime, formatTime, formatDate, escap
     renderTimer();showToast("Preferenze salvate.");
   }
   function downloadFile(content,type,filename){const blob=new Blob([content],{type}),url=URL.createObjectURL(blob),link=document.createElement("a");link.href=url;link.download=filename;document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}
-  function exportBackup(){downloadFile(JSON.stringify({app:"Tempo Pomodoro",version:3,exportedAt:new Date().toISOString(),defaults:state.defaults,sessions:state.sessions,tasks:state.tasks},null,2),"application/json",`tempo-backup-${localDateString()}.json`);showToast("Backup esportato.");}
+  function exportBackup(){downloadFile(JSON.stringify({app:"Tempo Pomodoro",version:4,exportedAt:new Date().toISOString(),defaults:state.defaults,sessions:state.sessions,tasks:state.tasks,history:state.history || []},null,2),"application/json",`tempo-backup-${localDateString()}.json`);showToast("Backup esportato.");}
   async function importBackup(file) {
     if (!file) return;
     const previous = state;
@@ -137,6 +146,8 @@ import { localDateString, timeToMinutes, dateTime, formatTime, formatDate, escap
       if (incomingTasks.some(task => !task)) throw new Error("Il backup contiene attività non valide");
       if (new Set(incomingTasks.map(task => task.id)).size !== incomingTasks.length)
         throw new Error("Il backup contiene identificativi di attività duplicati");
+      const history = Array.isArray(data.history) ? data.history : [];
+      if(history.some(h=>!validHistory(h)))throw new Error("Lo storico del backup non è valido");
       const defaults = {
         workMinutes: clampInt(data.defaults?.workMinutes, 1, 240, 25),
         breakEnabled: data.defaults?.breakEnabled !== undefined ? Boolean(data.defaults.breakEnabled) : true
@@ -144,10 +155,12 @@ import { localDateString, timeToMinutes, dateTime, formatTime, formatDate, escap
       const replace = window.confirm("Sostituire tutti i dati attuali con quelli del backup? Premi Annulla per unire attività e sessioni.");
       let mergedTasks = incomingTasks;
       let mergedSessions = sessions;
+      let mergedHistory = history;
       if (!replace) {
         const tasksById = new Map([...state.tasks, ...incomingTasks].map(task => [task.id, task]));
         const sessionsById = new Map([...state.sessions, ...sessions].map(session => [session.id, session]));
         mergedTasks = [...tasksById.values()];
+        mergedHistory = [...new Map([...(state.history||[]),...history].map(h=>[h.sessionId,h])).values()];
         mergedSessions = [...sessionsById.values()];
         if (hasSessionOverlaps(mergedSessions))
           throw new Error("Unione non valida: le sessioni si sovrappongono.");
@@ -159,7 +172,7 @@ import { localDateString, timeToMinutes, dateTime, formatTime, formatDate, escap
         const { taskId, ...standalone } = session;
         return standalone;
       });
-      state = { sessions: mergedSessions, tasks: mergedTasks, defaults: replace ? defaults : state.defaults };
+      state = { sessions: mergedSessions, tasks: mergedTasks, history: mergedHistory, defaults: replace ? defaults : state.defaults };
       if (!persist()) { state = previous; return; }
       els.filterDate.value = localDateString();
       renderAll();
