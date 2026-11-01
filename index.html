@@ -85,6 +85,15 @@
       </div>
     </section>
 
+    <section class="backup-card" aria-labelledby="dropbox-heading">
+      <div><p class="eyebrow">SINCRONIZZAZIONE</p><h2 id="dropbox-heading">Dropbox</h2><p class="muted">Archivio privato delle attività e sessioni. All'apertura scarica i cambiamenti remoti; dopo le modifiche carica il backup. Se entrambe le copie cambiano, blocca la sovrascrittura.</p><p id="dropbox-status" class="muted" role="status" aria-live="polite">Dropbox non collegato</p></div>
+      <div class="dropbox-controls">
+        <div id="dropbox-setup"><label class="field-label" for="dropbox-key">Dropbox App key<input id="dropbox-key" type="text" autocomplete="off" spellcheck="false" placeholder="App key dalla Dropbox App Console"></label><button class="button button-primary" id="dropbox-connect" type="button">Collega Dropbox</button><p class="muted">Crea un'app Dropbox con accesso App folder e permessi files.content.read, files.content.write. Registra come Redirect URI l'indirizzo esatto della PWA.</p></div>
+        <div id="dropbox-initial" class="hidden"><p class="muted">Prima sincronizzazione: scegli quale archivio conservare. Esporta prima un backup JSON.</p><button class="button button-primary" id="dropbox-initial-upload" type="button">Carica archivio locale</button><button class="button button-secondary" id="dropbox-initial-download" type="button">Scarica archivio Dropbox</button></div>
+        <div id="dropbox-actions" class="hidden"><button class="button button-secondary" id="dropbox-sync" type="button">Sincronizza ora</button><button class="button button-secondary" id="dropbox-download" type="button">Scarica backup</button></div>
+        <button id="dropbox-disconnect" class="button button-secondary" type="button">Scollega Dropbox</button>
+      </div>
+    </section>
     <section class="backup-card"><div><p class="eyebrow">I TUOI DATI</p><h2>Backup e ripristino</h2><p class="muted">Attività, tag, stime e sessioni restano in questo browser. Il backup JSON conserva tutti i dati.</p></div><div class="backup-actions"><button id="export-button" class="button button-secondary" type="button">Esporta backup</button><label class="button button-secondary file-button">Importa backup<input id="import-input" type="file" accept=".json,application/json"></label></div></section>
 
     <aside class="notice"><span class="notice-icon" aria-hidden="true">i</span><p><strong>Nota sull'avvio automatico.</strong> La scheda deve essere aperta e il dispositivo attivo. Se il browser sospende la pagina o il computer va in stop, il timer si riallinea all'orario reale al ritorno. Una PWA non può garantire l'avvio con l'app completamente chiusa su tutti i sistemi.</p></aside>
