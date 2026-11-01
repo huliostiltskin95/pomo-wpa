@@ -1,7 +1,7 @@
 import { localDateString, validSession, sessionBounds, escapeHtml, hasSessionOverlaps, timeToMinutes } from "./core/tempo-core.js";
 import { TASK_AREAS, TASK_PRIORITIES, TASK_STATUSES, parseTaskTags, normalizeTask, estimatedMinutesFromHours,
   hoursFromMinutes, plannedFocusMinutes, elapsedScheduledFocusMinutes, getTaskAttention,
-  taskTagAncestors, taskHasTag, createTaskSession } from "./core/tempo-tasks.js";
+  taskTagAncestors, taskHasTag, createTaskSession, focusMinutesInSession } from "./core/tempo-tasks.js";
 
 /**
  * PWA-only task manager. Tasks are separate from timed sessions; each scheduled
@@ -318,7 +318,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
         other.date === session.date && sessionBounds(other).start < sessionBounds(session).end &&
         sessionBounds(other).end > sessionBounds(session).start);
       const gross = estimatedMinutesFromHours(el.planHours.value);
-      const net = session.breakEnabled ? gross - (gross - (gross % (session.workMinutes + Math.max(1, Math.round(session.workMinutes / 5))))) / (session.workMinutes + Math.max(1, Math.round(session.workMinutes / 5))) * Math.max(1, Math.round(session.workMinutes / 5)) - Math.max(0, (gross % (session.workMinutes + Math.max(1, Math.round(session.workMinutes / 5)))) - session.workMinutes) : gross;
+      const net = focusMinutesInSession(session);
       el.planPreview.textContent = "Termine previsto " + session.end + " · " + format(gross) +
         " lorde · " + format(net) + " di concentrazione netta" + (session.breakEnabled ? " (pause incluse)." : " (senza pause).");
       el.planError.textContent = existing ? "Attenzione: l'intervallo si sovrappone a una sessione esistente." : "";
