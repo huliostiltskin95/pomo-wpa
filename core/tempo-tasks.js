@@ -108,8 +108,11 @@ export function taskHasTag(task, ancestor) {
   return !ancestor || task.tags.some(tag => tag === ancestor || tag.startsWith(ancestor + "/"));
 }
 
-export function createTaskSession(task, { id, date, start, focusMinutes, workMinutes, breakEnabled }) {
-  const duration = wallMinutesForFocus(focusMinutes, workMinutes, breakEnabled);
+export function createTaskSession(task, { id, date, start, focusMinutes, grossMinutes, workMinutes, breakEnabled }) {
+  // A gross duration is an exact calendar interval; breaks occur inside it.
+  // focusMinutes remains supported for existing callers and plugins.
+  const duration = grossMinutes === undefined ? wallMinutesForFocus(focusMinutes, workMinutes, breakEnabled) : grossMinutes;
+  if (!Number.isInteger(duration) || duration < 1) throw new Error("Durata lorda non valida.");
   const startMinute = timeToMinutes(start);
   if (!Number.isFinite(duration) || !Number.isFinite(startMinute)) throw new Error("Data o durata non valida.");
   if (startMinute + duration >= 24 * 60) throw new Error("La sessione deve concludersi prima di mezzanotte.");
