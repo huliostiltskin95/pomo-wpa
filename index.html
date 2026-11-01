@@ -32,6 +32,30 @@
       <div class="timer-controls"><button id="focus-button" class="button button-secondary" type="button">Modalità focus</button><button id="notification-button" class="button button-secondary" type="button">Attiva notifiche</button></div>
     </section>
 
+    <section id="agenda" class="agenda-section" aria-labelledby="agenda-heading">
+      <div class="section-heading">
+        <div><p class="eyebrow">ORGANIZZAZIONE</p><h2 id="agenda-heading">Agenda</h2>
+          <p class="muted">Attività, stime e blocchi di concentrazione programmati.</p></div>
+        <button id="new-task-button" class="button button-primary" type="button">＋ Nuova task</button>
+      </div>
+      <div class="agenda-toolbar">
+        <label>Area<select id="agenda-area-filter">
+          <option value="">Tutte</option><option>Personale</option><option>Lavoro</option><option>Studio</option>
+        </select></label>
+        <label>Stato<select id="agenda-status-filter">
+          <option value="open">Da fare</option><option value="all">Tutte</option><option value="done">Completate</option>
+        </select></label>
+        <label>Tag<select id="agenda-tag-filter"><option value="">Tutti i tag</option></select></label>
+        <label class="agenda-search-label">Cerca<input id="agenda-search" type="search" placeholder="Cerca un'attività"></label>
+      </div>
+      <p id="agenda-summary" class="agenda-summary" aria-live="polite"></p>
+      <div id="agenda-list" class="agenda-list"></div>
+      <div id="agenda-empty" class="empty-state hidden">
+        <div class="empty-icon" aria-hidden="true">☷</div><h3>Nessuna attività</h3>
+        <p>Aggiungi un'attività con una durata stimata e pianificala in agenda.</p>
+      </div>
+    </section>
+
     <section class="schedule-section">
       <div class="section-heading"><div><p class="eyebrow">PIANIFICAZIONE</p><h2>Le tue sessioni</h2></div><button id="new-session-button" class="button button-primary" type="button">＋ Nuova sessione</button></div>
       <div class="date-toolbar"><label for="filter-date">Mostra il giorno</label><input id="filter-date" type="date"><button id="today-button" class="text-button" type="button">Oggi</button></div>
@@ -60,10 +84,74 @@
       </div>
     </section>
 
-    <section class="backup-card"><div><p class="eyebrow">I TUOI DATI</p><h2>Backup e ripristino</h2><p class="muted">Le sessioni restano in questo browser. Esporta una copia JSON per trasferirle o conservarle.</p></div><div class="backup-actions"><button id="export-button" class="button button-secondary" type="button">Esporta backup</button><label class="button button-secondary file-button">Importa backup<input id="import-input" type="file" accept=".json,application/json"></label></div></section>
+    <section class="backup-card"><div><p class="eyebrow">I TUOI DATI</p><h2>Backup e ripristino</h2><p class="muted">Attività, tag, stime e sessioni restano in questo browser. Il backup JSON conserva tutti i dati.</p></div><div class="backup-actions"><button id="export-button" class="button button-secondary" type="button">Esporta backup</button><label class="button button-secondary file-button">Importa backup<input id="import-input" type="file" accept=".json,application/json"></label></div></section>
 
     <aside class="notice"><span class="notice-icon" aria-hidden="true">i</span><p><strong>Nota sull'avvio automatico.</strong> La scheda deve essere aperta e il dispositivo attivo. Se il browser sospende la pagina o il computer va in stop, il timer si riallinea all'orario reale al ritorno. Una PWA non può garantire l'avvio con l'app completamente chiusa su tutti i sistemi.</p></aside>
   </main>
+
+  <dialog id="task-dialog" class="session-dialog task-dialog" aria-labelledby="task-dialog-title">
+    <form id="task-form">
+      <div class="dialog-heading"><h2 id="task-dialog-title">Nuova attività</h2>
+        <button id="task-close-button" class="icon-button" type="button" aria-label="Chiudi">×</button></div>
+      <input type="hidden" id="task-id">
+      <label class="field-label">Titolo<input id="task-title" type="text" maxlength="120" placeholder="Es. Preparare lezione di storia" required></label>
+      <div class="two-fields">
+        <label class="field-label">Area<select id="task-area" required>
+          <option>Personale</option><option>Lavoro</option><option selected>Studio</option>
+        </select></label>
+        <label class="field-label">Priorità<select id="task-priority">
+          <option value="alta">Alta</option><option value="media" selected>Media</option>
+          <option value="bassa">Bassa</option><option value="nessuna">Nessuna</option>
+        </select></label>
+      </div>
+      <label class="field-label">Durata stimata di concentrazione (ore)
+        <input id="task-estimate" type="number" min="0.25" max="10000" step="0.25" value="1" required>
+      </label>
+      <p class="form-hint">Ore nette di lavoro, senza pause. Sono ammessi incrementi di 15 minuti.</p>
+      <label class="field-label">Tag gerarchici
+        <input id="task-tags" type="text" placeholder="Studio/Greco/Verbi, Studio/Didattica">
+      </label>
+      <p class="form-hint">Separa i tag con una virgola e i livelli con /; ad esempio Studio/Greco/Morfologia.</p>
+      <label class="field-label">Descrizione
+        <textarea id="task-description" maxlength="10000" rows="5" placeholder="Note, istruzioni, materiali e risultati attesi…"></textarea>
+      </label>
+      <p id="task-error" class="form-error" role="alert"></p>
+      <div class="dialog-actions">
+        <button type="button" id="task-delete-button" class="button button-danger hidden">Elimina</button>
+        <span class="action-spacer"></span>
+        <button type="button" id="task-cancel-button" class="button button-secondary">Annulla</button>
+        <button type="submit" class="button button-primary">Salva attività</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="task-plan-dialog" class="session-dialog task-dialog" aria-labelledby="task-plan-title">
+    <form id="task-plan-form">
+      <div class="dialog-heading"><h2 id="task-plan-title">Programma attività</h2>
+        <button id="task-plan-close" class="icon-button" type="button" aria-label="Chiudi">×</button></div>
+      <input type="hidden" id="task-plan-id">
+      <div class="two-fields">
+        <label class="field-label">Data<input id="task-plan-date" type="date" required></label>
+        <label class="field-label">Ora di inizio<input id="task-plan-start" type="time" required></label>
+      </div>
+      <label class="field-label">Ore nette da programmare
+        <input id="task-plan-hours" type="number" min="0.25" max="10000" step="0.25" value="1" required>
+      </label>
+      <label class="field-label">Durata di ciascun focus (minuti)
+        <input id="task-plan-work" type="number" min="1" max="240" value="25" required>
+      </label>
+      <label class="check-label"><input id="task-plan-breaks" type="checkbox" checked>
+        <span>Inserisci pause automatiche (rapporto 5:1)</span></label>
+      <p id="task-plan-preview" class="planned-summary" aria-live="polite"></p>
+      <p class="form-hint">L'intervallo viene inserito tra le sessioni esistenti. Il timer segue l'orario reale quando la PWA è aperta.</p>
+      <p id="task-plan-error" class="form-error" role="alert"></p>
+      <div class="dialog-actions">
+        <span class="action-spacer"></span>
+        <button type="button" id="task-plan-cancel" class="button button-secondary">Annulla</button>
+        <button type="submit" class="button button-primary">Programma focus</button>
+      </div>
+    </form>
+  </dialog>
 
   <dialog id="session-dialog" class="session-dialog">
     <form id="session-form" method="dialog">

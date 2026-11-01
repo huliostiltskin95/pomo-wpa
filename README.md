@@ -4,6 +4,8 @@ PWA installabile e utilizzabile offline per programmare finestre di concentrazio
 
 ## Funzioni
 
+- **Agenda attività (solo PWA):** task con area (Personale, Lavoro, Studio), priorità, descrizione, durata stimata in ore nette di focus e tag gerarchici (per esempio `Studio/Greco/Morfologia`). Filtri per area, stato, tag, ricerca e completamento.
+- **Pianificazione dalle task:** ogni attività può generare uno o più blocchi collegati alle normali sessioni Pomodoro; l’utente sceglie data, ora, durata netta in ore, intervalli di focus e pause facoltative. Il termine viene calcolato automaticamente; si impediscono sovrapposizioni e intervalli oltre mezzanotte. Il pulsante **Avvia ora** inserisce subito un blocco di focus, salvo conflitti.
 - Pianificazione di sessioni per data e intervallo orario, con riepilogo delle altre sessioni già presenti nella giornata.
 - Cicli di concentrazione e pausa con rapporto automatico 5:1 (ad esempio 25 + 5 minuti).
 - Possibilità di disattivare completamente le pause per ogni sessione o come preferenza predefinita.
@@ -19,7 +21,7 @@ La pausa viene calcolata come `round(durata_concentrazione / 5)`, con una durata
 
 ## TickTick e calendari
 
-Il file `.ics` contiene le sessioni programmate come eventi di calendario. Può essere importato in un'app calendario compatibile. TickTick può mostrare calendari locali su iOS/macOS e sottoscrivere calendari esterni tramite URL; l'esportazione locale da Tempo non crea da sola una sincronizzazione automatica o bidirezionale con TickTick. L'importazione non crea registrazioni native del timer Pomodoro di TickTick.
+Il file `.ics` contiene anche i blocchi di attività programmati come normali sessioni. Non esporta task non programmate. Il file `.ics` contiene le sessioni programmate come eventi di calendario. Può essere importato in un'app calendario compatibile. TickTick può mostrare calendari locali su iOS/macOS e sottoscrivere calendari esterni tramite URL; l'esportazione locale da Tempo non crea da sola una sincronizzazione automatica o bidirezionale con TickTick. L'importazione non crea registrazioni native del timer Pomodoro di TickTick.
 
 ## Installazione su GitHub Pages
 
@@ -30,17 +32,19 @@ Il file `.ics` contiene le sessioni programmate come eventi di calendario. Può 
 
 ## Aggiornamento dopo una modifica
 
-Il service worker usa la cache `tempo-pomodoro-v5`. Quando pubblichi una nuova versione, incrementa il numero della cache in `sw.js` (ad esempio `v4`) per forzare il rinnovo dei file memorizzati.
+Il service worker usa la cache `tempo-pomodoro-v8`. Quando pubblichi una nuova versione, incrementa il numero della cache in `sw.js` (ad esempio `v9`) per forzare il rinnovo dei file memorizzati.
 
 ## Limiti
 
 - Una PWA statica non può garantire timer, notifiche o avvio di sessioni con l'app completamente chiusa o il dispositivo in sospensione.
 - La riproduzione audio richiede un'interazione iniziale dell'utente e può essere sospesa dal sistema operativo in background.
-- I dati sono memorizzati localmente nel browser: usa periodicamente il backup JSON per conservarli o trasferirli su un altro dispositivo.
+- I dati sono memorizzati localmente nel browser: usa periodicamente il backup JSON per conservarli o trasferirli su un altro dispositivo. Il backup versione 3 include task e sessioni e può leggere i vecchi backup versione 2 (senza task).
+- **Durata stimata = tempo netto di concentrazione**: pianificare 2 ore con focus 25 minuti e pause 5 minuti occupa 2 ore e 20 minuti sul calendario (4 pause tra 5 intervalli di focus).
+- Le attività completate rimuovono i blocchi futuri collegati, senza perdere lo storico; eliminare una task rimuove i blocchi futuri e scollega quelli passati.
 
 ## Architettura condivisa
 
-La logica indipendente dalla piattaforma è in `core/tempo-core.js`: validazione e normalizzazione delle sessioni, calcolo delle pause, individuazione delle sessioni attive/prossime e calcolo della fase Pomodoro. La PWA importa direttamente questo modulo ES; il service worker include il modulo nella cache offline.
+La gestione delle attività PWA è in `agenda.js` e `core/tempo-tasks.js`; **non è integrata nel plugin Obsidian**. La logica indipendente dalla piattaforma è in `core/tempo-core.js`: validazione e normalizzazione delle sessioni, calcolo delle pause, individuazione delle sessioni attive/prossime e calcolo della fase Pomodoro. La PWA importa direttamente questo modulo ES; il service worker include il modulo nella cache offline.
 
 La cartella `obsidian/` contiene l'integrazione iniziale per Obsidian. Il plugin usa lo stesso core, ma salva i propri dati tramite l'API di persistenza di Obsidian (`data.json` del plugin). I dati PWA in `localStorage` e quelli Obsidian sono separati: non c'è sincronizzazione automatica tra i due ambienti.
 
@@ -69,7 +73,7 @@ Poi abilita **Tempo — Pomodoro** da **Impostazioni → Plugin comunitari**. Pe
 - Elenco delle sessioni future e possibilità di eliminarle.
 - Preferenze predefinite persistenti e comandi Obsidian per aprire il pannello o creare una sessione.
 
-Questa è la prima integrazione funzionante, non ancora una parità completa con la PWA: backup JSON, esportazione iCalendar, notifiche native, suoni ambientali, modalità focus e modifica delle sessioni non sono ancora implementati nel plugin.
+La nuova Agenda task è una funzione esclusiva della PWA. L’integrazione Obsidian non viene modificata in questa fase.
 
 
 ## Test automatici

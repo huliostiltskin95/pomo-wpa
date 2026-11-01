@@ -17,6 +17,8 @@ jobs:
       - name: Check PWA JavaScript syntax
         run: |
           node --check app.js
+          node --check agenda.js
+          node --check core/tempo-tasks.js
           node --check core/tempo-core.js
           node --check core/tempo-audio.js
           node --experimental-default-type=module --test tests/*.test.js
