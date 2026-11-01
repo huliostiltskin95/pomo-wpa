@@ -13,7 +13,9 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
     list: $("agenda-list"), empty: $("agenda-empty"), summary: $("agenda-summary"), alerts: $("agenda-alerts"),
     newButton: $("new-task-button"), areaFilter: $("agenda-area-filter"),
     statusFilter: $("agenda-status-filter"), tagFilter: $("agenda-tag-filter"),
-    search: $("agenda-search"),
+    search: $("agenda-search"), dueDate: $("task-due-date"), markdownPreview: $("task-markdown-preview"),
+    bulkButton: $("bulk-task-button"), bulkDialog: $("bulk-dialog"), bulkForm: $("bulk-form"), bulkInput: $("bulk-input"), bulkPreview: $("bulk-preview"), bulkError: $("bulk-error"),
+    tagsButton: $("manage-tags-button"), tagsDialog: $("tags-dialog"), tagsForm: $("tags-form"), tagsSource: $("tags-source"), tagsTarget: $("tags-target"), tagsError: $("tags-error"),
     dialog: $("task-dialog"), form: $("task-form"), dialogTitle: $("task-dialog-title"),
     id: $("task-id"), title: $("task-title"), area: $("task-area"), priority: $("task-priority"), status: $("task-status"),
     saveAndPlan: $("task-save-plan"),
@@ -37,6 +39,19 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
   const findTask = id => tasks().find(task => task.id === id);
   const escape = value => escapeHtml(value);
   const format = value => hoursFromMinutes(value) + " h";
+  const markdown = value => {
+    // Escape first: Markdown must never inject arbitrary HTML or script.
+    let s = escape(value);
+    s = s.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, label, url) =>
+      '<a href="' + url.replace(/&amp;/g, "&") .replace(/"/g, "%22") + '" target="_blank" rel="noopener noreferrer">' + label + '</a>');
+    s = s.replace(/^### (.+)$/gm, '<h5>$1</h5>').replace(/^## (.+)$/gm, '<h4>$1</h4>').replace(/^# (.+)$/gm, '<h3>$1</h3>');
+    s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/\*(.+?)\*/g, '<em>$1</em>').replace(/`([^`]+)`/g, '<code>$1</code>');
+    s = s.replace(/^[-*] (.+)$/gm, '• $1');
+    return s.replace(/\n/g, '<br>');
+  };
+  const recorded = (taskId, state) => (state.history || []).filter(entry => entry.taskId === taskId).reduce((a,e)=>a+e.minutes,0);
+  const elapsed = (taskId, state, now) => recorded(taskId,state) +
+    elapsedScheduledFocusMinutes(taskId,state.sessions.filter(s=>!(state.history||[]).some(h=>h.sessionId===s.id)),now);
   const getUpcoming = taskId => getState().sessions.filter(session => session.taskId === taskId &&
     sessionBounds(session).end > new Date());
 
@@ -108,7 +123,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
     for (const task of filtered) {
       const planned = plannedFocusMinutes(task.id, state.sessions);
       const left = Math.max(0, task.estimateMinutes - planned);
-      const elapsed = elapsedScheduledFocusMinutes(task.id, state.sessions, now);
+      const completedMinutes = elapsed(task.id, state, now);
       const attention = attentions.get(task.id);
       const card = document.createElement("article");
       card.className = "task-item" + (task.status === "done" ? " task-completed" : "") + (attention ? " task-needs-attention" : "");
@@ -122,16 +137,16 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
         (attention ? '<p class="task-reminder"><strong>' + attention.label + '.</strong> ' +
           (attention.kind === "reschedule" ? "Le sessioni previste sono terminate, ma l’attività è ancora aperta. Puoi aggiungere altro tempo o completarla manualmente." :
           "Non ci sono ancora sessioni previste. Puoi programmarne una quando vuoi.") + '</p>' : "") +
-        (task.description ? '<p class="task-description">' + escape(task.description) + '</p>' : "") +
+        (task.description ? '<div class="task-description markdown-preview">' + markdown(task.description) + '</div>' : "") +
         (badgeTags ? '<div class="task-tags">' + badgeTags + '</div>' : "") +
-        '<div class="task-estimate-line"><strong>' + format(task.estimateMinutes) +
+        '<div class="task-estimate-line"><strong>' + (task.estimateMinutes == null ? 'Nessuna stima' : format(task.estimateMinutes)) +
         '</strong> stimate <span aria-hidden="true">·</span> ' + format(planned) +
-        ' pianificate <span aria-hidden="true">·</span> ' + format(elapsed) +
-        ' in sessioni trascorse <span aria-hidden="true">·</span> ' +
-        (planned > task.estimateMinutes ? format(planned - task.estimateMinutes) + ' oltre la stima' : format(left) + ' non ancora pianificate') + '</div>' +
+        ' pianificate <span aria-hidden="true">·</span> ' + format(completedMinutes) +
+        ' in sessioni registrate <span aria-hidden="true">·</span> ' +
+        (task.estimateMinutes == null ? 'stima libera' : planned > task.estimateMinutes ? format(planned - task.estimateMinutes) + ' oltre la stima' : format(left) + ' non ancora pianificate') + '</div>' +
         '<div class="task-progress" role="progressbar" aria-label="Tempo pianificato" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' +
-        Math.min(100, Math.round(planned / task.estimateMinutes * 100)) + '"><span style="width:' +
-        Math.min(100, planned / task.estimateMinutes * 100) + '%"></span></div>' +
+        (task.estimateMinutes ? Math.min(100, Math.round(planned / task.estimateMinutes * 100)) : 0) + '"><span style="width:' +
+        (task.estimateMinutes ? Math.min(100, planned / task.estimateMinutes * 100) : 0) + '%"></span></div>' +
         '<div class="task-actions"><button type="button" class="button button-secondary" data-task-edit="' + escape(task.id) + '">Modifica</button>' +
         (task.status === "done" ? "" : '<button type="button" class="button button-secondary" data-task-plan="' +
         escape(task.id) + '">' + (attention?.kind === "reschedule" ? "Riprogramma" : "Programma") +
@@ -141,7 +156,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
         '" aria-label="Stato di ' + escape(task.title) + '">' +
         TASK_STATUSES.map(status => '<option value="' + status + '"' + (task.status === status ? ' selected' : '') + '>' +
         statusLabels[status] + '</option>').join('') + '</select></label></div>' +
-        '<p class="task-planning-note">Le ore trascorse sono calcolate dal calendario, non certificano il lavoro svolto. Solo tu decidi quando l’attività è completata.</p>';
+        '<p class="task-planning-note">Tempo registrato in base ai blocchi trascorsi (non verifica l’attenzione effettiva). Le sessioni rimosse restano nello storico. Il completamento è manuale.</p>';
       el.list.appendChild(card);
     }
   }
@@ -155,9 +170,11 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
     el.area.value = task?.area || "Studio";
     el.priority.value = task?.priority || "media";
     el.status.value = task?.status || "todo";
-    el.estimate.value = task ? String(task.estimateMinutes / 60) : "1";
+    el.estimate.value = task?.estimateMinutes == null ? "" : String(task.estimateMinutes / 60);
+    el.dueDate.value = task?.dueDate || "";
     el.tags.value = task?.tags.join(", ") || "";
     el.description.value = task?.description || "";
+    el.markdownPreview.innerHTML = markdown(el.description.value);
     el.error.textContent = "";
     el.deleteButton.classList.toggle("hidden", !task);
     el.dialog.showModal();
@@ -168,11 +185,11 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
     event.preventDefault();
     try {
       const minutes = estimatedMinutesFromHours(el.estimate.value);
-      if (!Number.isFinite(minutes)) throw new Error("La durata deve essere in ore, con incrementi di 15 minuti (es. 1,5).");
+      if (Number.isNaN(minutes)) throw new Error("La durata deve essere in ore, con incrementi di 15 minuti (es. 1,5).");
       const oldTask = findTask(el.id.value);
       const task = normalizeTask({
         id: oldTask?.id || uuid(), title: el.title.value, area: el.area.value,
-        priority: el.priority.value, estimateMinutes: minutes,
+        priority: el.priority.value, estimateMinutes: minutes, dueDate: el.dueDate.value,
         tags: parseTaskTags(el.tags.value), description: el.description.value,
         status: el.status.value,
         completed: el.status.value === "done",
@@ -251,7 +268,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
   function openPlan(id) {
     const task = findTask(id);
     if (!task || task.completed) return;
-    const remaining = Math.max(15, task.estimateMinutes - plannedFocusMinutes(id, getState().sessions));
+    const remaining = Math.max(15, (task.estimateMinutes ?? 60) - plannedFocusMinutes(id, getState().sessions));
     const start = defaultStart();
     el.planForm.reset();
     el.planTaskId.value = task.id;
@@ -319,7 +336,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
     const now = new Date();
     const start = String(now.getHours()).padStart(2, "0") + ":" +
       String(now.getMinutes()).padStart(2, "0");
-    const remaining = Math.max(15, task.estimateMinutes - plannedFocusMinutes(id, getState().sessions));
+    const remaining = Math.max(15, (task.estimateMinutes ?? getState().defaults.workMinutes) - plannedFocusMinutes(id, getState().sessions));
     const focusMinutes = Math.min(remaining, getState().defaults.workMinutes);
     try {
       const session = createTaskSession(task, { id: uuid(), date: localDateString(now),
@@ -333,6 +350,77 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
     }
   }
 
+
+  el.description.addEventListener("input", () => { el.markdownPreview.innerHTML = markdown(el.description.value); });
+  const tagNames = () => [...new Set(tasks().flatMap(t => taskTagAncestors(t.tags)))].sort((a,b)=>a.localeCompare(b,"it"));
+  function openTags() {
+    const names=tagNames(); el.tagsSource.replaceChildren(...names.map(t=>new Option(t,t)));
+    $("tags-suggestions").replaceChildren(...names.map(t=>new Option(t,t)));
+    el.tagsError.textContent="";el.tagsTarget.value="";el.tagsDialog.showModal();
+  }
+  el.tagsButton.addEventListener("click",openTags);
+  $("tags-close").addEventListener("click",()=>el.tagsDialog.close());
+  $("tags-cancel").addEventListener("click",()=>el.tagsDialog.close());
+  el.tagsForm.addEventListener("submit",event=>{
+    event.preventDefault();
+    try {
+      const source=el.tagsSource.value, target=parseTaskTags(el.tagsTarget.value)[0];
+      if (!source||!target) throw Error("Seleziona origine e destinazione.");
+      if(target===source||target.startsWith(source+"/")) throw Error("Destinazione non valida: non può coincidere con il tag origine o essere un suo discendente.");
+      if(!confirm("Aggiornare tutte le task che contengono "+source+"?"))return;
+      if(saveMutation(state=>{state.tasks=state.tasks.map(t=>({...t,tags:parseTaskTags(t.tags.map(tag=>tag===source||tag.startsWith(source+"/")?target+tag.slice(source.length):tag))}));})){
+        el.tagsDialog.close();showToast("Tag aggiornati in tutte le attività.");
+      }
+    }catch(e){el.tagsError.textContent=e.message;}
+  });
+  const due = value => {
+    if(!value)return "";
+    const base=new Date();base.setHours(12,0,0,0);
+    if(value==="oggi")return localDateString(base);
+    if(value==="domani"){base.setDate(base.getDate()+1);return localDateString(base);}
+    if(/^\d{4}-\d{2}-\d{2}$/.test(value)){
+      const d=new Date(value+"T12:00:00");
+      if(!Number.isFinite(d.getTime())||localDateString(d)!==value)throw Error("Data non valida: "+value);
+      return value;
+    }
+    throw Error("Scadenza non riconosciuta: "+value);
+  };
+  function parseBulk() {
+    return el.bulkInput.value.split(/\r?\n/).map((line,index)=>{
+      if(!line.trim())return null;
+      const tags=[], values={dueDate:"",estimateMinutes:null,area:"Studio"};
+      const title=line.replace(/(^|\s)([#*@^])([^\s]+)/g,(_,space,symbol,value)=>{
+        if(symbol==="#")tags.push(value);
+        if(symbol==="*")values.dueDate=due(value.toLowerCase());
+        if(symbol==="^"){const area=TASK_AREAS.find(a=>a.toLowerCase()===value.toLowerCase());if(!area)throw Error("Riga "+(index+1)+": area sconosciuta: "+value);values.area=area;}
+        if(symbol==="@"){
+          const m=value.match(/^(?:(\d+(?:[.,]\d+)?)h)?(?:(\d+)m)?$/i);
+          if(!m||(!m[1]&&!m[2]))throw Error("Riga "+(index+1)+": durata non valida: "+value);
+          const minutes=Math.round(Number((m[1]||"0").replace(",","."))*60)+Number(m[2]||0);
+          if(minutes<15||minutes%15||minutes>600000)throw Error("Riga "+(index+1)+": usa multipli di 15 minuti.");
+          values.estimateMinutes=minutes;
+        }
+        return space;
+      }).trim();
+      const task=normalizeTask({...values,id:uuid(),title,tags:parseTaskTags(tags),priority:"media",description:"",status:"todo",createdAt:new Date().toISOString()});
+      if(!task)throw Error("Riga "+(index+1)+": task non valida.");
+      return task;
+    }).filter(Boolean);
+  }
+  function previewBulk(){
+    try {const parsed=parseBulk();el.bulkPreview.textContent=parsed.length+" task riconosciute. "+parsed.slice(0,7).map(t=>t.title+" ["+t.area+"]"+(t.dueDate?" · "+t.dueDate:"")).join(" | ");el.bulkError.textContent="";}
+    catch(e){el.bulkError.textContent=e.message;el.bulkPreview.textContent="Correggi la sintassi prima dell'importazione.";}
+  }
+  el.bulkButton.addEventListener("click",()=>{el.bulkInput.value="";previewBulk();el.bulkDialog.showModal();});
+  el.bulkInput.addEventListener("input",previewBulk);
+  $("bulk-close").addEventListener("click",()=>el.bulkDialog.close());
+  $("bulk-cancel").addEventListener("click",()=>el.bulkDialog.close());
+  el.bulkForm.addEventListener("submit",event=>{
+    event.preventDefault();
+    try{const parsed=parseBulk();if(!parsed.length)throw Error("Inserisci almeno una task.");
+      if(saveMutation(state=>{state.tasks=[...state.tasks,...parsed];})){el.bulkDialog.close();showToast(parsed.length+" task importate.");}
+    }catch(e){el.bulkError.textContent=e.message;}
+  });
   el.newButton.addEventListener("click", () => openTask());
   el.form.addEventListener("submit", saveTask);
   el.deleteButton.addEventListener("click", () => deleteTask(el.id.value));
