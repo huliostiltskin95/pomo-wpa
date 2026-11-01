@@ -104,7 +104,9 @@ export function createDropboxSync({getState,applyRemote,onStatus}){
         const before=JSON.stringify(getState());const rev=await upload(meta.rev);
         meta.rev=rev;meta.dirty=JSON.stringify(getState())!==before;storeMeta();status(meta.dirty?"Altre modifiche da caricare":"Backup Dropbox aggiornato");
       } else if(remote.rev!==meta.rev){
-        const item=await download();await applyRemote(item.file);
+        const item=await download();
+        if(meta.dirty)throw new Error("Modifiche locali durante il download: sostituzione bloccata.");
+        await applyRemote(item.file);
         meta.rev=item.rev;meta.dirty=false;storeMeta();status("Dati aggiornati da Dropbox");
       }else status("Dropbox sincronizzato");
     })().catch(e=>{status(e.message);throw e;}).finally(()=>{inFlight=null;});
