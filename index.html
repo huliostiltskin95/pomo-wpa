@@ -195,7 +195,7 @@
     <form id="session-form" method="dialog">
       <div class="dialog-heading"><div><p class="eyebrow">PIANIFICAZIONE</p><h2 id="dialog-title">Nuova sessione</h2></div><button id="close-dialog" class="icon-button" type="button" aria-label="Chiudi">×</button></div>
       <input id="session-id" type="hidden">
-      <label class="field-label">Nome della sessione<input id="session-title" type="text" maxlength="80" placeholder="Es. Studio del greco" required></label>
+      <label class="field-label">Area della sessione<select id="session-title"><option>Studio</option><option>Lavoro</option><option>Personale</option></select></label><div class="planned-summary"><h3>Task associate (facoltative)</h3><div id="session-task-picker" class="tempo-session-tasks"></div></div>
       <label class="field-label">Data<input id="session-date" type="date" required></label>
       <div class="two-fields"><label class="field-label">Inizio<input id="session-start" type="time" value="09:00" required></label><label class="field-label">Fine<input id="session-end" type="time" value="11:00" required></label></div>
       <label class="field-label">Durata di concentrazione<input id="session-work" type="number" min="1" max="240" value="25" required></label>
