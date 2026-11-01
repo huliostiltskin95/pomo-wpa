@@ -101,9 +101,9 @@ import { localDateString, timeToMinutes, dateTime, formatTime, formatDate, escap
     const existingSession=state.sessions.find(s=>s.id===existingId);
     const session={id:existingId||(crypto.randomUUID?crypto.randomUUID():`${Date.now()}-${Math.random().toString(16).slice(2)}`),title:els.sessionTitle.value.trim(),date:els.sessionDate.value,start:els.sessionStart.value,end:els.sessionEnd.value,workMinutes:Number(els.sessionWork.value),breakEnabled:els.sessionBreakEnabled.checked,...(existingSession?.taskId?{taskId:existingSession.taskId}:{})};
     if(!session.title){els.formError.textContent="Inserisci un nome per la sessione.";return;}
-    if(!validSession(session)){els.formError.textContent="Controlla gli orari: la fine deve essere successiva all'inizio e la durata deve essere valida.";return;}
-    const start=dateTime(session.date,session.start),end=dateTime(session.date,session.end);
-    const overlaps=state.sessions.some(s=>{if(s.id===session.id||s.date!==session.date)return false;const bounds=sessionBounds(s);return start<bounds.end&&end>bounds.start;});
+    if(!validSession(session)){els.formError.textContent="Controlla gli orari e la durata della sessione.";return;}
+    const {start,end}=sessionBounds(session);
+    const overlaps=state.sessions.some(s=>{if(s.id===session.id)return false;const bounds=sessionBounds(s);return start<bounds.end&&end>bounds.start;});
     if(overlaps){els.formError.textContent="Questa sessione si sovrappone a un'altra sessione dello stesso giorno.";return;}
     const previous=state.sessions, previousHistory=state.history;
     if(existingSession)archivePast(existingSession);
@@ -185,8 +185,8 @@ import { localDateString, timeToMinutes, dateTime, formatTime, formatDate, escap
     } finally { els.importInput.value = ""; }
   }
   function icsEscape(value){return String(value).replace(/\\/g,"\\\\").replace(/;/g,"\\;").replace(/,/g,"\\,").replace(/\r?\n/g,"\\n");}
-  function icsDate(date,time){return `${date.replace(/-/g,"")}T${time.replace(":","")}00`;}
-  function exportIcs(){if(!state.sessions.length){showToast("Non ci sono sessioni da esportare.");return;}const lines=["BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//Tempo Pomodoro//IT","CALSCALE:GREGORIAN","METHOD:PUBLISH","X-WR-CALNAME:Tempo - Sessioni di concentrazione"];state.sessions.slice().sort((a,b)=>`${a.date} ${a.start}`.localeCompare(`${b.date} ${b.start}`)).forEach(s=>{const uid=`${s.id}@tempo-pomodoro`,desc=`Concentrazione: ${s.workMinutes} min. ${s.breakEnabled?`Pause automatiche: ${pauseMinutes(s.workMinutes)} min (rapporto 5:1).`:"Pause disattivate."}`;lines.push("BEGIN:VEVENT",`UID:${icsEscape(uid)}`,`DTSTAMP:${new Date().toISOString().replace(/[-:]/g,"").replace(/\.\d{3}/,"")}`,`DTSTART:${icsDate(s.date,s.start)}`,`DTEND:${icsDate(s.date,s.end)}`,`SUMMARY:${icsEscape("Concentrazione: "+s.title)}`,`DESCRIPTION:${icsEscape(desc)}`,"END:VEVENT");});lines.push("END:VCALENDAR");downloadFile(lines.join("\r\n"),"text/calendar;charset=utf-8",`tempo-sessioni-${localDateString()}.ics`);showToast("Calendario esportato in formato iCalendar.");}
+  function icsDate(date){return `${localDateString(date).replace(/-/g,"")}T${String(date.getHours()).padStart(2,"0")}${String(date.getMinutes()).padStart(2,"0")}00`;}
+  function exportIcs(){if(!state.sessions.length){showToast("Non ci sono sessioni da esportare.");return;}const lines=["BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//Tempo Pomodoro//IT","CALSCALE:GREGORIAN","METHOD:PUBLISH","X-WR-CALNAME:Tempo - Sessioni di concentrazione"];state.sessions.slice().sort((a,b)=>`${a.date} ${a.start}`.localeCompare(`${b.date} ${b.start}`)).forEach(s=>{const bounds=sessionBounds(s),uid=`${s.id}@tempo-pomodoro`,desc=`Concentrazione: ${s.workMinutes} min. ${s.breakEnabled?`Pause automatiche: ${pauseMinutes(s.workMinutes)} min (rapporto 5:1).`:"Pause disattivate."}`;lines.push("BEGIN:VEVENT",`UID:${icsEscape(uid)}`,`DTSTAMP:${new Date().toISOString().replace(/[-:]/g,"").replace(/\.\d{3}/,"")}`,`DTSTART:${icsDate(bounds.start)}`,`DTEND:${icsDate(bounds.end)}`,`SUMMARY:${icsEscape("Concentrazione: "+s.title)}`,`DESCRIPTION:${icsEscape(desc)}`,"END:VEVENT");});lines.push("END:VCALENDAR");downloadFile(lines.join("\r\n"),"text/calendar;charset=utf-8",`tempo-sessioni-${localDateString()}.ics`);showToast("Calendario esportato in formato iCalendar.");}
 
   // Playback is user-initiated and strictly limited to the current work phase.
   function stopSound() { ambient.stop(.9); }
