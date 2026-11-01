@@ -1,5 +1,5 @@
 import { TempoAmbientAudio } from "./core/tempo-audio.js";
-import { localDateString, timeToMinutes, dateTime, formatTime, formatDate, escapeHtml, clampInt, pauseMinutes, normalizeSession, validSession, sessionBounds, getSessionStatus, getPhase, mmss, getActiveSession as findActiveSession, getNextSession as findNextSession, hasSessionOverlaps } from "./core/tempo-core.js";
+import { localDateString, timeToMinutes, dateTime, formatTime, formatDate, escapeHtml, clampInt, pauseMinutes, normalizeSession, validSession, sessionBounds, getSessionStatus, getPhase, mmss, getActiveSession as findActiveSession, getNextSession as findNextSession, getAmbientFocusMode, hasSessionOverlaps } from "./core/tempo-core.js";
 
 (() => {
   "use strict";
@@ -18,8 +18,6 @@ import { localDateString, timeToMinutes, dateTime, formatTime, formatDate, escap
   let toastTimeout = null;
   let swRegistration = null;
   let soundPlaying = false;
-  let selectedSound = "off";
-  let soundPhaseKey = null;
   const ambient = new TempoAmbientAudio(playing => {
     soundPlaying = playing;
     els.soundToggle.textContent = playing ? "Ferma suono" : "Avvia suono";
@@ -27,13 +25,17 @@ import { localDateString, timeToMinutes, dateTime, formatTime, formatDate, escap
     els.soundStatus.textContent = playing ? "Suono attivo durante la concentrazione" : "Audio disattivato";
   });
   function syncFocusAudio(now = new Date()) {
-    const session = getActiveSession(now);
-    const phase = session ? getPhase(session, now) : null;
-    const key = phase?.kind === "work" ? `${session.id}:${phase.start.getTime()}` : null;
-    if (soundPlaying && key !== soundPhaseKey) ambient.stop(.9);
-    soundPhaseKey = key;
+    if (!ambient.playing) return;
+    const mode = getAmbientFocusMode(state.sessions, now);
+    if (mode === "finished") {
+      ambient.stop(.9);
+    } else {
+      ambient.setAudible(mode === "focus");
+      els.soundStatus.textContent = mode === "focus"
+        ? "Suono attivo durante la concentrazione"
+        : "In pausa · ripresa automatica al prossimo focus";
+    }
   }
-
   function loadState(){
     try{
       let raw=localStorage.getItem(STORAGE_KEY);if(!raw)raw=localStorage.getItem(OLD_STORAGE_KEY);
@@ -135,8 +137,6 @@ import { localDateString, timeToMinutes, dateTime, formatTime, formatDate, escap
     }
     const kind = els.soundSelect.value;
     if (kind === "off") { showToast("Seleziona prima un suono."); return; }
-    soundPhaseKey = `${session.id}:${phase.start.getTime()}`;
-    selectedSound = kind;
     const started = await ambient.start(kind, Number(els.soundVolume.value) / 100);
     if (!started) showToast("Impossibile avviare l’audio su questo dispositivo.");
     syncFocusAudio();
@@ -150,7 +150,7 @@ import { localDateString, timeToMinutes, dateTime, formatTime, formatDate, escap
   async function enterFocus(){els.focusOverlay.classList.remove("hidden");document.body.classList.add("focus-open");try{if(document.documentElement.requestFullscreen)await document.documentElement.requestFullscreen();}catch(error){console.info("Fullscreen non disponibile senza gesto o permesso.",error);}}
   async function exitFocus(){els.focusOverlay.classList.add("hidden");document.body.classList.remove("focus-open");if(document.fullscreenElement)try{await document.exitFullscreen();}catch{}}
 
-  els.newSessionButton.addEventListener("click",openNewDialog);els.emptyAddButton.addEventListener("click",openNewDialog);els.sessionForm.addEventListener("submit",saveSession);els.closeDialog.addEventListener("click",()=>els.dialog.close());els.cancelDialog.addEventListener("click",()=>els.dialog.close());els.deleteButton.addEventListener("click",()=>deleteSession(els.sessionId.value));els.filterDate.addEventListener("change",renderSessions);els.todayButton.addEventListener("click",()=>{els.filterDate.value=localDateString();renderSessions();});els.sessionsList.addEventListener("click",event=>{const edit=event.target.closest("[data-edit]"),del=event.target.closest("[data-delete]");if(edit)openEditDialog(edit.dataset.edit);if(del)deleteSession(del.dataset.delete);});els.defaultsForm.addEventListener("submit",saveDefaults);els.exportButton.addEventListener("click",exportBackup);els.importInput.addEventListener("change",()=>importBackup(els.importInput.files[0]));els.sessionWork.addEventListener("input",updateBreakPreview);els.sessionBreakEnabled.addEventListener("change",updateBreakPreview);els.sessionDate.addEventListener("change",updatePlannedSummary);els.focusButton.addEventListener("click",enterFocus);els.exitFocusButton.addEventListener("click",exitFocus);els.focusFullscreenButton.addEventListener("click",async()=>{try{if(!document.fullscreenElement)await document.documentElement.requestFullscreen();else await document.exitFullscreen();}catch{showToast("Schermo intero non disponibile in questo browser.");}});els.notificationButton.addEventListener("click",enableNotifications);els.soundToggle.addEventListener("click",toggleSound);els.focusSoundButton.addEventListener("click",toggleSound);els.soundSelect.addEventListener("change",()=>{if(soundPlaying){ambient.stop(0);void startSound();}});els.soundVolume.addEventListener("input",updateVolume);els.exportIcsButton.addEventListener("click",exportIcs);
+  els.newSessionButton.addEventListener("click",openNewDialog);els.emptyAddButton.addEventListener("click",openNewDialog);els.sessionForm.addEventListener("submit",saveSession);els.closeDialog.addEventListener("click",()=>els.dialog.close());els.cancelDialog.addEventListener("click",()=>els.dialog.close());els.deleteButton.addEventListener("click",()=>deleteSession(els.sessionId.value));els.filterDate.addEventListener("change",renderSessions);els.todayButton.addEventListener("click",()=>{els.filterDate.value=localDateString();renderSessions();});els.sessionsList.addEventListener("click",event=>{const edit=event.target.closest("[data-edit]"),del=event.target.closest("[data-delete]");if(edit)openEditDialog(edit.dataset.edit);if(del)deleteSession(del.dataset.delete);});els.defaultsForm.addEventListener("submit",saveDefaults);els.exportButton.addEventListener("click",exportBackup);els.importInput.addEventListener("change",()=>importBackup(els.importInput.files[0]));els.sessionWork.addEventListener("input",updateBreakPreview);els.sessionBreakEnabled.addEventListener("change",updateBreakPreview);els.sessionDate.addEventListener("change",updatePlannedSummary);els.focusButton.addEventListener("click",enterFocus);els.exitFocusButton.addEventListener("click",exitFocus);els.focusFullscreenButton.addEventListener("click",async()=>{try{if(!document.fullscreenElement)await document.documentElement.requestFullscreen();else await document.exitFullscreen();}catch{showToast("Schermo intero non disponibile in questo browser.");}});els.notificationButton.addEventListener("click",enableNotifications);els.soundToggle.addEventListener("click",toggleSound);els.focusSoundButton.addEventListener("click",toggleSound);els.soundSelect.addEventListener("change",()=>{if(soundPlaying){const kind=els.soundSelect.value;if(kind==="off"){stopSound();return;}const audible=getAmbientFocusMode(state.sessions)==="focus";void ambient.start(kind,Number(els.soundVolume.value)/100,audible).then(ok=>{if(!ok)showToast("Impossibile cambiare suono.");syncFocusAudio();});}});els.soundVolume.addEventListener("input",updateVolume);els.exportIcsButton.addEventListener("click",exportIcs);
   window.addEventListener("beforeinstallprompt",event=>{event.preventDefault();deferredInstallPrompt=event;els.installButton.classList.remove("hidden");});els.installButton.addEventListener("click",async()=>{if(!deferredInstallPrompt){showToast("Per installare, usa il menu del browser e scegli ‘Installa app’ o ‘Aggiungi alla schermata Home’. ");return;}const prompt=deferredInstallPrompt;deferredInstallPrompt=null;await prompt.prompt();const choice=await prompt.userChoice;if(choice?.outcome==="accepted")els.installButton.classList.add("hidden");});window.addEventListener("online",()=>{els.connectionStatus.textContent="Online";});window.addEventListener("offline",()=>{els.connectionStatus.textContent="Offline";});document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")renderAll();});window.addEventListener("focus",renderAll);window.addEventListener("pagehide",()=>ambient.stop(0));document.addEventListener("keydown",event=>{if(event.key==="Escape"&&!els.focusOverlay.classList.contains("hidden"))exitFocus();});
   els.filterDate.value=localDateString();els.connectionStatus.textContent=navigator.onLine?"Pronta":"Offline";els.notificationButton.textContent=("Notification" in window&&Notification.permission==="granted")?"Notifiche attive":"Attiva notifiche";renderAll();setInterval(()=>renderTimer(),1000);setInterval(()=>renderSessions(),15000);
   if("serviceWorker" in navigator&&(location.protocol==="https:"||location.hostname==="localhost")){window.addEventListener("load",()=>{navigator.serviceWorker.register("./sw.js").then(reg=>{swRegistration=reg;els.connectionStatus.textContent=navigator.onLine?"Pronta · offline disponibile":"Offline";}).catch(error=>console.warn("Service worker non registrato:",error));});}

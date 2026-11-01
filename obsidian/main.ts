@@ -1,6 +1,6 @@
 import { TempoAmbientAudio } from "../core/tempo-audio.js";
 import { ItemView, Modal, Notice, Plugin, PluginSettingTab, Setting, WorkspaceLeaf } from "obsidian";
-import { DEFAULTS, getActiveSession, getNextSession, getPhase, localDateString, mmss, normalizeSession, pauseMinutes, sessionBounds, validSession } from "../core/tempo-core.js";
+import { DEFAULTS, getActiveSession, getNextSession, getPhase, getAmbientFocusMode, localDateString, mmss, normalizeSession, pauseMinutes, sessionBounds, validSession } from "../core/tempo-core.js";
 
 const VIEW_TYPE = "tempo-agenda-view";
 
@@ -15,14 +15,11 @@ export default class TempoPlugin extends Plugin {
   ambient = new TempoAmbientAudio(() => this.refreshViews());
   soundKind = "brown";
   soundVolume = 25;
-  private soundPhaseKey: string | null = null;
-
   syncFocusAudio(now = new Date()) {
-    const session = getActiveSession(this.data.sessions, now);
-    const phase = session ? getPhase(session, now) : null;
-    const key = phase?.kind === "work" ? `${session!.id}:${phase.start.getTime()}` : null;
-    if (this.ambient.playing && key !== this.soundPhaseKey) this.ambient.stop(.9);
-    this.soundPhaseKey = key;
+    if (!this.ambient.playing) return;
+    const mode = getAmbientFocusMode(this.data.sessions, now);
+    if (mode === "finished") this.ambient.stop(.9);
+    else this.ambient.setAudible(mode === "focus");
   }
   async toggleSound() {
     if (this.ambient.playing) { this.ambient.stop(.9); return; }
@@ -31,7 +28,6 @@ export default class TempoPlugin extends Plugin {
       new Notice("Il suono è disponibile soltanto durante la concentrazione.");
       return;
     }
-    this.soundPhaseKey = `${active.id}:${getPhase(active).start.getTime()}`;
     if (!(await this.ambient.start(this.soundKind, this.soundVolume / 100))) {
       new Notice("Impossibile avviare il suono sul dispositivo.");
     }
@@ -140,7 +136,13 @@ class TempoView extends ItemView {
     }
     soundSelect.addEventListener("change", () => {
       this.plugin.soundKind = soundSelect.value;
-      if (this.plugin.ambient.playing) { this.plugin.ambient.stop(0); void this.plugin.toggleSound(); }
+      if (this.plugin.ambient.playing) {
+        const audible = getAmbientFocusMode(this.plugin.data.sessions) === "focus";
+        void this.plugin.ambient.start(this.plugin.soundKind, this.plugin.soundVolume / 100, audible).then(ok => {
+          if (!ok) new Notice("Impossibile cambiare suono.");
+          this.plugin.syncFocusAudio();
+        });
+      }
     });
     const volume = sound.createEl("input", { type: "range", attr: { min: "0", max: "100", "aria-label": "Volume" } });
     volume.value = String(this.plugin.soundVolume);
@@ -150,7 +152,7 @@ class TempoView extends ItemView {
     });
     const soundButton = sound.createEl("button", { text: this.plugin.ambient.playing ? "Ferma suono" : "Avvia suono" });
     soundButton.addEventListener("click", () => void this.plugin.toggleSound());
-    sound.createEl("p", { cls: "tempo-muted", text: "Audio continuo durante il focus, dissolvenza alla pausa. L'avvio richiede un clic." });
+    sound.createEl("p", { cls: "tempo-muted", text: "Attiva una volta: il suono riprende automaticamente dopo le pause, finché resta una sessione prevista." });
 
     root.createEl("h3", { text: "Sessioni programmate" });
     const upcoming = this.plugin.data.sessions.filter(s => sessionBounds(s).end > now).slice(0, 12);

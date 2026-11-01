@@ -109,3 +109,17 @@ export function hasSessionOverlaps(sessions) {
   }
   return false;
 }
+
+/**
+ * Determines whether armed ambient audio should be audible, temporarily muted,
+ * or stopped because no further scheduled focus remains.
+ */
+export function getAmbientFocusMode(sessions, now = new Date()) {
+  const active = getActiveSession(sessions, now);
+  if (active) {
+    const phase = getPhase(active, now);
+    if (phase.kind === "work") return "focus";
+    if (phase.end.getTime() < sessionBounds(active).end.getTime()) return "waiting";
+  }
+  return getNextSession(sessions, now) ? "waiting" : "finished";
+}

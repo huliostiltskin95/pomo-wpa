@@ -18,6 +18,7 @@ jobs:
         run: |
           node --check app.js
           node --check core/tempo-core.js
+          node --check core/tempo-audio.js
           node --experimental-default-type=module --test tests/*.test.js
       - name: Install Obsidian plugin build dependencies
         working-directory: obsidian

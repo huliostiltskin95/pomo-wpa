@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { getPhase, hasSessionOverlaps, pauseMinutes, validSession, mmss } from "../core/tempo-core.js";
+import { getPhase, getAmbientFocusMode, hasSessionOverlaps, pauseMinutes, validSession, mmss } from "../core/tempo-core.js";
 
 const session = (id, start, end, date = "2026-10-31") => ({
   id, title: id, date, start, end, workMinutes: 25, breakEnabled: true
@@ -38,4 +38,21 @@ test("calculates a Pomodoro phase from absolute time", () => {
 test("formats timer values without negative or fractional seconds", () => {
   assert.equal(mmss(65.9), "01:05");
   assert.equal(mmss(-1), "00:00");
+});
+
+test("ambient audio resumes after breaks within one session", () => {
+  const s = session("timer", "09:00", "10:00");
+  const at = (hour, minute) => new Date(2026, 9, 31, hour, minute);
+  assert.equal(getAmbientFocusMode([s], at(9, 10)), "focus");
+  assert.equal(getAmbientFocusMode([s], at(9, 27)), "waiting");
+  assert.equal(getAmbientFocusMode([s], at(9, 30)), "focus");
+  assert.equal(getAmbientFocusMode([s], at(9, 56)), "finished");
+});
+test("ambient audio stays armed between scheduled sessions, then stops", () => {
+  const sessions = [session("first", "09:00", "09:30"), session("second", "10:00", "10:30")];
+  const at = (hour, minute) => new Date(2026, 9, 31, hour, minute);
+  assert.equal(getAmbientFocusMode(sessions, at(9, 26)), "waiting");
+  assert.equal(getAmbientFocusMode(sessions, at(9, 45)), "waiting");
+  assert.equal(getAmbientFocusMode(sessions, at(10, 0)), "focus");
+  assert.equal(getAmbientFocusMode(sessions, at(10, 30)), "finished");
 });

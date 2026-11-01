@@ -1,7 +1,8 @@
 /**
  * Tempo ambient sound engine. Local Web Audio synthesis, no network required.
  * Playback is started only by a user action; scheduling never bypasses browser
- * autoplay policies. A focus-phase boundary always fades playback to silence.
+ * autoplay policies. Focus breaks mute and suspend the graph; the next focus
+ * automatically resumes the same source without requiring another gesture.
  */
 export class TempoAmbientAudio {
   constructor(onChange = () => {}) {
@@ -10,8 +11,10 @@ export class TempoAmbientAudio {
     this.master = null;
     this.nodes = [];
     this.crackleTimer = null;
-    this.cleanupTimer = null;
+    this.pendingCleanups = new Map();
     this.playing = false;
+    this.audible = false;
+    this.muteTimer = null;
     this.kind = "off";
     this.volume = .25;
     this.generation = 0;
@@ -25,11 +28,11 @@ export class TempoAmbientAudio {
   }
   setVolume(value) {
     this.volume = Math.max(0, Math.min(1, Number(value) || 0));
-    if (this.playing && this.master && this.context) {
+    if (this.playing && this.audible && this.master && this.context) {
       this.master.gain.setTargetAtTime(this.volume, this.context.currentTime, .05);
     }
   }
-  async start(kind, volume = this.volume) {
+  async start(kind, volume = this.volume, audible = true) {
     if (!["white", "brown", "rain", "fire"].includes(kind)) return false;
     const Context = globalThis.AudioContext || globalThis.webkitAudioContext;
     if (!Context) return false;
@@ -40,7 +43,8 @@ export class TempoAmbientAudio {
       await this.context.resume();
       const context = this.context;
       const master = context.createGain();
-      master.gain.value = this.volume;
+      this.audible = Boolean(audible);
+      master.gain.value = this.audible ? this.volume : 0;
       master.connect(context.destination);
       this.master = master;
       this.kind = kind;
@@ -69,7 +73,7 @@ export class TempoAmbientAudio {
       if (kind === "fire") {
         const generation = this.generation;
         const crackle = () => {
-          if (!this.playing || this.generation !== generation) return;
+          if (!this.playing || !this.audible || this.generation !== generation) return;
           const click = context.createBufferSource();
           const gain = context.createGain();
           const hp = context.createBiquadFilter();
@@ -89,20 +93,57 @@ export class TempoAmbientAudio {
         };
         this.crackleTimer = setInterval(crackle, 650);
       }
+      if (!this.audible) void context.suspend().catch(() => {});
       return true;
     } catch (error) {
       this.stop(0);
       return false;
     }
   }
+  /**
+   * Keep user consent and sound selection armed while muting the graph.
+   * Suspend the AudioContext after fading to save CPU during long breaks.
+   */
+  setAudible(enabled, fadeSeconds = .9) {
+    if (!this.playing || !this.context || !this.master) return;
+    const audible = Boolean(enabled);
+    if (this.audible === audible) return;
+    this.audible = audible;
+    if (this.muteTimer !== null) clearTimeout(this.muteTimer);
+    this.muteTimer = null;
+    const generation = this.generation;
+    const context = this.context;
+    const master = this.master;
+    const apply = () => {
+      if (!this.playing || this.generation !== generation || this.master !== master) return;
+      if (this.audible !== audible) return;
+      const now = context.currentTime;
+      const duration = Math.max(0, audible ? .35 : fadeSeconds);
+      master.gain.cancelScheduledValues(now);
+      master.gain.setValueAtTime(master.gain.value, now);
+      master.gain.linearRampToValueAtTime(audible ? this.volume : 0, now + duration);
+      if (!audible) {
+        this.muteTimer = setTimeout(() => {
+          this.muteTimer = null;
+          if (this.playing && !this.audible && this.generation === generation && this.master === master) {
+            void context.suspend().catch(() => {});
+          }
+        }, duration * 1000 + 90);
+      }
+    };
+    if (audible) void context.resume().then(apply).catch(() => {});
+    else apply();
+  }
   stop(fadeSeconds = .9) {
     ++this.generation;
     this.playing = false;
+    this.audible = false;
+    if (this.muteTimer !== null) clearTimeout(this.muteTimer);
+    this.muteTimer = null;
     this.kind = "off";
     if (this.crackleTimer !== null) clearInterval(this.crackleTimer);
     this.crackleTimer = null;
-    if (this.cleanupTimer !== null) clearTimeout(this.cleanupTimer);
-    this.cleanupTimer = null;
+    // Keep previous fade cleanups alive if a new sound starts immediately.
     const nodes = this.nodes;
     const master = this.master;
     this.nodes = [];
@@ -118,12 +159,21 @@ export class TempoAmbientAudio {
       master.gain.cancelScheduledValues(now);
       master.gain.setValueAtTime(master.gain.value, now);
       master.gain.linearRampToValueAtTime(0, now + fadeSeconds);
-      this.cleanupTimer = setTimeout(() => { cleanup(); this.cleanupTimer = null; }, fadeSeconds * 1000 + 80);
+      const timer = setTimeout(() => {
+        cleanup();
+        this.pendingCleanups.delete(timer);
+      }, fadeSeconds * 1000 + 80);
+      this.pendingCleanups.set(timer, cleanup);
     } else cleanup();
     this.onChange(false, "off");
   }
   destroy() {
     this.stop(0);
+    for (const [timer, cleanup] of this.pendingCleanups) {
+      clearTimeout(timer);
+      cleanup();
+    }
+    this.pendingCleanups.clear();
     if (this.context) this.context.close().catch(() => {});
     this.context = null;
   }
