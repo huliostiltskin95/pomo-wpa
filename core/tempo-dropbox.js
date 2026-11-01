@@ -14,11 +14,11 @@ async function fail(response){if(response.ok)return response;let body="";try{bod
 export function createDropboxSync({getState,applyRemote,onStatus}){
   let auth=read(AUTH_KEY),meta=read(META_KEY,{rev:null,dirty:false,ready:false});
   let inFlight=null,delay=null;
-  const status=(message)=>onStatus(message,{connected:Boolean(auth.refreshToken),dirty:meta.dirty,ready:meta.ready});
+  const status=(message,phase="idle")=>onStatus(message,{connected:Boolean(auth.refreshToken),dirty:meta.dirty,ready:meta.ready,phase,busy:["checking","uploading","downloading"].includes(phase)});
   const storeMeta=()=>write(META_KEY,meta);
   const storeAuth=()=>write(AUTH_KEY,auth);
   const snapshot=()=>({app:"Tempo Pomodoro",version:4,exportedAt:new Date().toISOString(),...getState()});
-  function changed(){meta.dirty=true;storeMeta();status("Modifiche locali da caricare");clearTimeout(delay);if(meta.ready&&auth.refreshToken)delay=setTimeout(()=>{sync().catch(e=>status(e.message));},2500);}
+  function changed(){meta.dirty=true;storeMeta();status("Modifiche locali in attesa di caricamento","pending");clearTimeout(delay);if(meta.ready&&auth.refreshToken)delay=setTimeout(()=>{sync().catch(e=>status(e.message));},2500);}
   async function connect(appKey){
     appKey=(appKey||auth.appKey||"").trim();
     if(!/^[a-z0-9]{8,}$/i.test(appKey))throw new Error("Inserisci una App key Dropbox valida.");
@@ -75,14 +75,17 @@ export function createDropboxSync({getState,applyRemote,onStatus}){
   async function firstSync(direction){
     if(!auth.refreshToken)throw new Error("Collega prima Dropbox.");
     if(meta.ready)throw new Error("Sincronizzazione già inizializzata.");
+    status("Verifica del backup Dropbox in corso…","checking");
     const remote=await metadata();
     if(direction==="download"){
       if(!remote)throw new Error("Nessun backup presente su Dropbox.");
+      status("Scaricamento del backup Dropbox…","downloading");
       const item=await download();await applyRemote(item.file);
       meta.rev=item.rev;meta.dirty=false;meta.ready=true;storeMeta();status("Archivio scaricato da Dropbox");return;
     }
     if(direction==="upload"){
       if(remote)throw new Error("Dropbox contiene già un backup. Scaricalo prima o risolvi il conflitto.");
+      status("Caricamento del primo backup Dropbox…","uploading");
       meta.rev=await upload(null);meta.dirty=false;meta.ready=true;storeMeta();status("Archivio iniziale caricato su Dropbox");return;
     }
     throw new Error("Operazione iniziale non riconosciuta.");
@@ -91,30 +94,35 @@ export function createDropboxSync({getState,applyRemote,onStatus}){
     if(inFlight)return inFlight;
     inFlight=(async()=>{
       if(!auth.refreshToken||!meta.ready)return;
-      if(!navigator.onLine){status("Offline: modifiche conservate in locale");return;}
+      if(!navigator.onLine){status("Offline: modifiche conservate in locale","pending");return;}
+      status("Verifica delle modifiche su Dropbox…","checking");
       const remote=await metadata();
       if(!remote){
         if(meta.rev)throw new Error("Backup remoto rimosso: caricamento bloccato.");
         if(!meta.dirty)return;
+        status("Caricamento del backup Dropbox…","uploading");
         const before=JSON.stringify(getState());const rev=await upload(null);
         meta.rev=rev;meta.dirty=JSON.stringify(getState())!==before;storeMeta();status("Backup Dropbox aggiornato");return;
       }
       if(meta.dirty){
         if(remote.rev!==meta.rev)throw new Error("Conflitto Dropbox: archivio remoto cambiato. Dati locali protetti.");
+        status("Caricamento delle modifiche su Dropbox…","uploading");
         const before=JSON.stringify(getState());const rev=await upload(meta.rev);
         meta.rev=rev;meta.dirty=JSON.stringify(getState())!==before;storeMeta();status(meta.dirty?"Altre modifiche da caricare":"Backup Dropbox aggiornato");
       } else if(remote.rev!==meta.rev){
+        status("Scaricamento delle modifiche da Dropbox…","downloading");
         const item=await download();
         if(meta.dirty)throw new Error("Modifiche locali durante il download: sostituzione bloccata.");
         await applyRemote(item.file);
         meta.rev=item.rev;meta.dirty=false;storeMeta();status("Dati aggiornati da Dropbox");
       }else status("Dropbox sincronizzato");
-    })().catch(e=>{status(e.message);throw e;}).finally(()=>{inFlight=null;});
+    })().catch(e=>{status(e.message,"error");throw e;}).finally(()=>{inFlight=null;});
     return inFlight;
   }
   async function forceDownload(allowDirty=false){
     if(!auth.refreshToken||!meta.ready)throw new Error("Inizializza prima la sincronizzazione.");
     if(meta.dirty&&!allowDirty)throw new Error("Modifiche locali non caricate: download bloccato per sicurezza.");
+    status("Scaricamento del backup Dropbox…","downloading");
     const item=await download();await applyRemote(item.file);meta.rev=item.rev;meta.dirty=false;storeMeta();status("Backup scaricato");
   }
   function disconnect(){clearTimeout(delay);auth={};meta={rev:null,dirty:false,ready:false};localStorage.removeItem(AUTH_KEY);localStorage.removeItem(META_KEY);status("Dropbox scollegato. Dati locali conservati.");}
