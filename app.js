@@ -1,5 +1,6 @@
 import { TempoAmbientAudio } from "./core/tempo-audio.js";
 import { mountAgenda } from "./agenda.js";
+import { createDropboxSync } from "./core/tempo-dropbox.js";
 import { normalizeTask, focusMinutesInSession } from "./core/tempo-tasks.js";
 import { localDateString, timeToMinutes, dateTime, formatTime, formatDate, escapeHtml, clampInt, pauseMinutes, normalizeSession, validSession, sessionBounds, getSessionStatus, getPhase, mmss, getActiveSession as findActiveSession, getNextSession as findNextSession, getAmbientFocusMode, hasSessionOverlaps } from "./core/tempo-core.js";
 
@@ -14,6 +15,7 @@ import { localDateString, timeToMinutes, dateTime, formatTime, formatDate, escap
   };
   let state = loadState();
   let agenda = null;
+  let dropbox = null;
   let deferredInstallPrompt = null;
   let lastPhaseKey = "";
   let lastActiveSessionId = null;
@@ -72,7 +74,7 @@ import { localDateString, timeToMinutes, dateTime, formatTime, formatDate, escap
     if((state.history||[]).some(h=>h.sessionId===session.id))return;
     state.history = [...(state.history||[]), {sessionId:session.id,taskId:session.taskId||"",date:session.date,minutes:focusMinutesInSession(session),title:session.title}];
   }
-  function persist(){try{localStorage.setItem(STORAGE_KEY,JSON.stringify(state));return true;}catch(error){showToast("Non è stato possibile salvare i dati nel browser.");return false;}}
+  function persist(){try{localStorage.setItem(STORAGE_KEY,JSON.stringify(state));dropbox?.changed();return true;}catch(error){showToast("Non è stato possibile salvare i dati nel browser.");return false;}}
   function getActiveSession(now=new Date()){return findActiveSession(state.sessions,now);}
   function getNextSession(now=new Date()){return findNextSession(state.sessions,now);}
   function showToast(message){els.toast.textContent=message;els.toast.classList.add("show");clearTimeout(toastTimeout);toastTimeout=setTimeout(()=>els.toast.classList.remove("show"),3200);}
@@ -213,6 +215,43 @@ import { localDateString, timeToMinutes, dateTime, formatTime, formatDate, escap
   els.newSessionButton.addEventListener("click",openNewDialog);els.emptyAddButton.addEventListener("click",openNewDialog);els.sessionForm.addEventListener("submit",saveSession);els.closeDialog.addEventListener("click",()=>els.dialog.close());els.cancelDialog.addEventListener("click",()=>els.dialog.close());els.deleteButton.addEventListener("click",()=>deleteSession(els.sessionId.value));els.filterDate.addEventListener("change",renderSessions);els.todayButton.addEventListener("click",()=>{els.filterDate.value=localDateString();renderSessions();});els.sessionsList.addEventListener("click",event=>{const edit=event.target.closest("[data-edit]"),del=event.target.closest("[data-delete]");if(edit)openEditDialog(edit.dataset.edit);if(del)deleteSession(del.dataset.delete);});els.defaultsForm.addEventListener("submit",saveDefaults);els.exportButton.addEventListener("click",exportBackup);els.importInput.addEventListener("change",()=>importBackup(els.importInput.files[0]));els.sessionWork.addEventListener("input",updateBreakPreview);els.sessionBreakEnabled.addEventListener("change",updateBreakPreview);els.sessionDate.addEventListener("change",updatePlannedSummary);els.focusButton.addEventListener("click",enterFocus);els.exitFocusButton.addEventListener("click",exitFocus);els.focusFullscreenButton.addEventListener("click",async()=>{try{if(!document.fullscreenElement)await document.documentElement.requestFullscreen();else await document.exitFullscreen();}catch{showToast("Schermo intero non disponibile in questo browser.");}});els.notificationButton.addEventListener("click",enableNotifications);els.soundToggle.addEventListener("click",toggleSound);els.focusSoundButton.addEventListener("click",toggleSound);els.soundSelect.addEventListener("change",()=>{if(soundPlaying){const kind=els.soundSelect.value;if(kind==="off"){stopSound();return;}const audible=getAmbientFocusMode(state.sessions)==="focus";void ambient.start(kind,Number(els.soundVolume.value)/100,audible).then(ok=>{if(!ok)showToast("Impossibile cambiare suono.");syncFocusAudio();});}});els.soundVolume.addEventListener("input",updateVolume);els.exportIcsButton.addEventListener("click",exportIcs);
   window.addEventListener("beforeinstallprompt",event=>{event.preventDefault();deferredInstallPrompt=event;els.installButton.classList.remove("hidden");});els.installButton.addEventListener("click",async()=>{if(!deferredInstallPrompt){showToast("Per installare, usa il menu del browser e scegli ‘Installa app’ o ‘Aggiungi alla schermata Home’. ");return;}const prompt=deferredInstallPrompt;deferredInstallPrompt=null;await prompt.prompt();const choice=await prompt.userChoice;if(choice?.outcome==="accepted")els.installButton.classList.add("hidden");});window.addEventListener("online",()=>{els.connectionStatus.textContent="Online";});window.addEventListener("offline",()=>{els.connectionStatus.textContent="Offline";});document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")renderAll();});window.addEventListener("focus",renderAll);window.addEventListener("pagehide",()=>ambient.stop(0));document.addEventListener("keydown",event=>{if(event.key==="Escape"&&!els.focusOverlay.classList.contains("hidden"))exitFocus();});
   agenda = mountAgenda({ getState:()=>state, persist, refresh:renderAll, showToast, sendNotification });
+
+  function validateCloudBackup(data) {
+    if(!data||!Array.isArray(data.sessions)||!Array.isArray(data.tasks)||!Array.isArray(data.history))throw new Error("Backup Dropbox non valido.");
+    const sessions=data.sessions.map(normalizeSession);
+    if(sessions.some(s=>!validSession(s))||new Set(sessions.map(s=>s.id)).size!==sessions.length||hasSessionOverlaps(sessions))throw new Error("Sessioni Dropbox non valide.");
+    const tasks=data.tasks.map(normalizeTask);
+    if(tasks.some(t=>!t)||new Set(tasks.map(t=>t.id)).size!==tasks.length)throw new Error("Attività Dropbox non valide.");
+    if(data.history.some(h=>!validHistory(h)))throw new Error("Storico Dropbox non valido.");
+    return {sessions,tasks,history:data.history,defaults:{workMinutes:clampInt(data.defaults?.workMinutes,1,240,25),breakEnabled:data.defaults?.breakEnabled!==false}};
+  }
+  async function applyCloudBackup(data) {
+    const next=validateCloudBackup(data),old=state;
+    state=next;
+    try {localStorage.setItem(STORAGE_KEY,JSON.stringify(state));}
+    catch(e){state=old;throw new Error("Salvataggio locale non riuscito: backup remoto non applicato.");}
+    renderAll();
+  }
+  function cloudStatus(message,info) {
+    const target=$("dropbox-status");
+    if(target)target.textContent=message;
+    const setup=$("dropbox-setup"),initial=$("dropbox-initial"),actions=$("dropbox-actions");
+    if(setup)setup.classList.toggle("hidden",info.connected);
+    if(initial)initial.classList.toggle("hidden",!info.connected||info.ready);
+    if(actions)actions.classList.toggle("hidden",!info.ready);
+  }
+  dropbox=createDropboxSync({getState:()=>state,applyRemote:applyCloudBackup,onStatus:cloudStatus});
+  $("dropbox-connect").addEventListener("click",()=>dropbox.connect($("dropbox-key").value).catch(e=>showToast(e.message)));
+  $("dropbox-initial-upload").addEventListener("click",()=>{if(confirm("Creare il primo backup Dropbox con i dati presenti in questo dispositivo? Se Dropbox contiene già un backup, l'operazione verrà bloccata."))dropbox.firstSync("upload").catch(e=>showToast(e.message));});
+  $("dropbox-initial-download").addEventListener("click",()=>{if(confirm("Sostituire i dati locali con quelli di Dropbox? Esporta prima un backup manuale per sicurezza."))dropbox.firstSync("download").catch(e=>showToast(e.message));});
+  $("dropbox-sync").addEventListener("click",()=>dropbox.sync().catch(e=>showToast(e.message)));
+  $("dropbox-download").addEventListener("click",()=>{if(confirm("Scaricare il backup remoto e sostituire i dati locali?"))dropbox.forceDownload().catch(e=>showToast(e.message));});
+  $("dropbox-disconnect").addEventListener("click",()=>{if(confirm("Scollegare Dropbox da questo dispositivo? I dati locali rimangono invariati."))dropbox.disconnect();});
+  window.addEventListener("online",()=>dropbox.sync().catch(()=>{}));
+  document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")dropbox.sync().catch(()=>{});});
+  window.addEventListener("focus",()=>dropbox.sync().catch(()=>{}));
+  dropbox.init().catch(e=>cloudStatus(e.message,dropbox.info()));
+
   els.filterDate.value=localDateString();els.connectionStatus.textContent=navigator.onLine?"Pronta":"Offline";els.notificationButton.textContent=("Notification" in window&&Notification.permission==="granted")?"Notifiche attive":"Attiva notifiche";renderAll();setInterval(()=>renderTimer(),1000);setInterval(()=>{renderSessions();agenda?.tick();},15000);
   if("serviceWorker" in navigator&&(location.protocol==="https:"||location.hostname==="localhost")){window.addEventListener("load",()=>{navigator.serviceWorker.register("./sw.js").then(reg=>{swRegistration=reg;els.connectionStatus.textContent=navigator.onLine?"Pronta · offline disponibile":"Offline";}).catch(error=>console.warn("Service worker non registrato:",error));});}
 })();
