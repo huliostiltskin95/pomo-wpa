@@ -137,7 +137,7 @@
       <div class="dialog-heading"><h2>Inserimento multiplo</h2><button id="bulk-close" type="button" class="icon-button" aria-label="Chiudi">×</button></div>
       <p class="form-hint">Una task per riga. #tag, *scadenza, @durata, ^area. Esempio: Studiare Platone #greco *domani @1h30m ^Studio</p>
       <textarea id="bulk-input" rows="9" placeholder="Correggere verifiche #scuola *domani @2h ^Lavoro"></textarea>
-      <datalist id="bulk-suggestions"></datalist>
+      <div id="bulk-smart-suggestions" class="task-tags" aria-label="Suggerimenti di tag esistenti"></div>
       <div id="bulk-preview" class="planned-summary" aria-live="polite"></div>
       <p id="bulk-error" class="form-error" role="alert"></p>
       <div class="dialog-actions"><span class="action-spacer"></span><button type="button" id="bulk-cancel" class="button button-secondary">Annulla</button><button type="submit" class="button button-primary">Importa task</button></div>
