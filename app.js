@@ -231,9 +231,27 @@ import { localDateString, timeToMinutes, dateTime, formatTime, formatDate, escap
     catch(e){state=old;throw new Error("Salvataggio locale non riuscito: backup remoto non applicato.");}
     renderAll();
   }
+  let cloudNoticeTimer=null;
+  const cloudNotice=document.createElement("div");
+  cloudNotice.id="tempo-cloud-indicator";
+  cloudNotice.className="tempo-cloud-indicator hidden";
+  cloudNotice.setAttribute("role","status");
+  cloudNotice.setAttribute("aria-live","polite");
+  cloudNotice.innerHTML='<span class="tempo-cloud-spinner" aria-hidden="true"></span><span class="tempo-cloud-message"></span>';
+  document.body.appendChild(cloudNotice);
   function cloudStatus(message,info) {
     const target=$("dropbox-status");
     if(target)target.textContent=message;
+    clearTimeout(cloudNoticeTimer);
+    const phase=info.phase||"idle";
+    const visible=info.busy||phase==="pending"||phase==="error"||Boolean(info.connected);
+    cloudNotice.classList.toggle("hidden",!visible);
+    cloudNotice.classList.toggle("is-busy",Boolean(info.busy));
+    cloudNotice.classList.toggle("is-error",phase==="error");
+    cloudNotice.querySelector(".tempo-cloud-message").textContent=message;
+    if(visible&&!info.busy&&phase!=="pending"&&phase!=="error"){
+      cloudNoticeTimer=setTimeout(()=>cloudNotice.classList.add("hidden"),5000);
+    }
     const setup=$("dropbox-setup"),initial=$("dropbox-initial"),actions=$("dropbox-actions");
     if(setup)setup.classList.toggle("hidden",info.connected);
     if(initial)initial.classList.toggle("hidden",!info.connected||info.ready);
