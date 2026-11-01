@@ -30,7 +30,7 @@ Il file `.ics` contiene le sessioni programmate come eventi di calendario. Può 
 
 ## Aggiornamento dopo una modifica
 
-Il service worker usa la cache `tempo-pomodoro-v5`. Quando pubblichi una nuova versione, incrementa il numero della cache in `sw.js` (ad esempio `v4`) per forzare il rinnovo dei file memorizzati.
+Il service worker usa la cache `tempo-pomodoro-v6`. Quando pubblichi una nuova versione, incrementa il numero della cache in `sw.js` (ad esempio `v4`) per forzare il rinnovo dei file memorizzati.
 
 ## Limiti
 
@@ -69,7 +69,7 @@ Poi abilita **Tempo — Pomodoro** da **Impostazioni → Plugin comunitari**. Pe
 - Elenco delle sessioni future e possibilità di eliminarle.
 - Preferenze predefinite persistenti e comandi Obsidian per aprire il pannello o creare una sessione.
 
-Questa è la prima integrazione funzionante, non ancora una parità completa con la PWA: backup JSON, esportazione iCalendar, notifiche native, suoni ambientali, modalità focus e modifica delle sessioni non sono ancora implementati nel plugin.
+L'integrazione include anche suoni ambientali generati localmente (rumore marrone, bianco e pioggia). I suoni vengono dissolti automaticamente all'inizio di una fase di concentrazione e non possono essere avviati durante il focus. Restano da implementare backup JSON, esportazione iCalendar, notifiche native, modalità focus e modifica delle sessioni.
 
 
 ## Test automatici
