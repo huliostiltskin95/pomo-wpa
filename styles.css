@@ -132,3 +132,12 @@ body{--tempo-nav-width:218px}
 
 .dropbox-controls,.dropbox-controls>div{display:grid;gap:10px}.dropbox-controls input{width:100%;min-height:39px;border:1px solid var(--line);border-radius:9px;padding:8px 10px}.dropbox-controls .button{justify-self:start}.dropbox-controls .muted{margin:0}.dropbox-controls .hidden{display:none!important}
 \n.tempo-session-tasks{display:grid;gap:8px;margin-top:9px}.tempo-session-task{display:flex;gap:9px;align-items:center;font-size:12px}.tempo-session-task input{width:17px;height:17px;accent-color:var(--accent)}.tempo-session-task input:checked+span{text-decoration:line-through;color:var(--muted)}\n
+/* Indicatore globale per la sincronizzazione Dropbox: avanzamento non determinato. */
+.tempo-cloud-indicator{position:fixed;right:16px;bottom:calc(18px + env(safe-area-inset-bottom,0px));z-index:1100;display:flex;align-items:center;gap:10px;max-width:min(390px,calc(100vw - 32px));padding:12px 15px;background:var(--surface);color:var(--text);border:1px solid var(--line);border-radius:12px;box-shadow:0 8px 26px rgba(0,0,0,.16);font-size:13px;line-height:1.4;overflow-wrap:anywhere}
+.tempo-cloud-indicator.hidden{display:none!important}
+.tempo-cloud-spinner{width:16px;height:16px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;flex:none;display:none}
+.tempo-cloud-indicator.is-busy .tempo-cloud-spinner{display:block;animation:tempo-cloud-spin .85s linear infinite}
+.tempo-cloud-indicator.is-error{border-color:var(--danger);color:var(--danger)}
+@keyframes tempo-cloud-spin{to{transform:rotate(360deg)}}
+@media(max-width:700px){.tempo-cloud-indicator{bottom:calc(76px + env(safe-area-inset-bottom,0px));left:12px;right:12px;max-width:none}}
+@media(prefers-reduced-motion:reduce){.tempo-cloud-spinner{animation-duration:2s}}
