@@ -44,9 +44,19 @@ export function validSession(session) {
   const date = new Date(year, month - 1, day);
   if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return false;
   const start = timeToMinutes(session.start), end = timeToMinutes(session.end);
-  return Number.isFinite(start) && Number.isFinite(end) && end > start;
+  return Number.isFinite(start) && Number.isFinite(end);
 }
-export function sessionBounds(session) { return { start: dateTime(session.date, session.start), end: dateTime(session.date, session.end) }; }
+export function sessionDurationMinutes(session) {
+  const start = timeToMinutes(session.start), end = timeToMinutes(session.end);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return NaN;
+  return (end - start + 1440) % 1440 || 1440;
+}
+export function sessionBounds(session) {
+  const start = dateTime(session.date, session.start);
+  const end = dateTime(session.date, session.end);
+  if (timeToMinutes(session.end) <= timeToMinutes(session.start)) end.setDate(end.getDate() + 1);
+  return { start, end };
+}
 export function getSessionStatus(session, now = new Date()) {
   const { start, end } = sessionBounds(session);
   if (now < start) return "upcoming";
@@ -94,15 +104,13 @@ export function mmss(seconds) {
   return `${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`;
 }
 export function sessionsOverlap(a, b) {
-  if (a.date !== b.date) return false;
   const aa = sessionBounds(a), bb = sessionBounds(b);
   return aa.start < bb.end && aa.end > bb.start;
 }
 export function hasSessionOverlaps(sessions) {
-  const sorted = [...sessions].sort((a, b) => `${a.date} ${a.start}`.localeCompare(`${b.date} ${b.start}`));
-  let currentDate = "", furthestEnd = -Infinity;
+  const sorted = sortSessions(sessions);
+  let furthestEnd = -Infinity;
   for (const session of sorted) {
-    if (session.date !== currentDate) { currentDate = session.date; furthestEnd = -Infinity; }
     const { start, end } = sessionBounds(session);
     if (start.getTime() < furthestEnd) return true;
     furthestEnd = Math.max(furthestEnd, end.getTime());
