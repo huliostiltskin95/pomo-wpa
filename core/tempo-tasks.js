@@ -1,4 +1,4 @@
-import { sessionBounds, timeToMinutes, pauseMinutes } from "./tempo-core.js";
+import { sessionBounds, sessionDurationMinutes, timeToMinutes, pauseMinutes } from "./tempo-core.js";
 
 export const TASK_AREAS = Object.freeze(["Personale", "Lavoro", "Studio"]);
 export const TASK_PRIORITIES = Object.freeze(["alta", "media", "bassa", "nessuna"]);
@@ -81,7 +81,7 @@ export function wallMinutesForFocus(focusMinutes, workMinutes, breakEnabled) {
 
 /** Actual focus minutes represented by an existing session's calendar interval. */
 export function focusMinutesInSession(session) {
-  const wallMinutes = timeToMinutes(session.end) - timeToMinutes(session.start);
+  const wallMinutes = sessionDurationMinutes(session);
   const work = Number(session.workMinutes);
   if (!Number.isInteger(wallMinutes) || wallMinutes <= 0 || !Number.isInteger(work) || work < 1) return 0;
   if (!session.breakEnabled) return wallMinutes;
@@ -115,8 +115,8 @@ export function createTaskSession(task, { id, date, start, focusMinutes, grossMi
   if (!Number.isInteger(duration) || duration < 1) throw new Error("Durata lorda non valida.");
   const startMinute = timeToMinutes(start);
   if (!Number.isFinite(duration) || !Number.isFinite(startMinute)) throw new Error("Data o durata non valida.");
-  if (startMinute + duration >= 24 * 60) throw new Error("La sessione deve concludersi prima di mezzanotte.");
-  const endMinute = startMinute + duration;
+  if (duration > 1440) throw new Error("La sessione non può durare più di 24 ore.");
+  const endMinute = (startMinute + duration) % 1440;
   const end = String(Math.floor(endMinute / 60)).padStart(2, "0") + ":" +
     String(endMinute % 60).padStart(2, "0");
   // Date validation is done by the existing validSession before committing.
