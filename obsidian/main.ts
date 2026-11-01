@@ -22,7 +22,7 @@ export default class TempoPlugin extends Plugin {
     this.registerInterval(window.setInterval(() => this.refreshViews(), 1000));
   }
 
-  onunload() { this.app.workspace.detachLeavesOfType(VIEW_TYPE); }
+  onunload() { this.fadeAmbient(); this.app.workspace.detachLeavesOfType(VIEW_TYPE); }\n\n  async toggleAmbient() {\n    if (this.audioEnabled) { this.fadeAmbient(); return; }\n    const AudioCtx = window.AudioContext; if (!AudioCtx) { new Notice("Audio non supportato da questo dispositivo."); return; }\n    this.audioContext ??= new AudioCtx(); await this.audioContext.resume();\n    const ctx = this.audioContext, length = ctx.sampleRate * 4, buffer = ctx.createBuffer(1, length, ctx.sampleRate), data = buffer.getChannelData(0);\n    for (let i = 0; i < length; i++) data[i] = Math.random() * 2 - 1;\n    const source = ctx.createBufferSource(), filter = ctx.createBiquadFilter(), gain = ctx.createGain();\n    source.buffer = buffer; source.loop = true; filter.type = "lowpass"; filter.frequency.value = this.audioKind === "white" ? 15000 : this.audioKind === "rain" ? 3500 : 240;\n    gain.gain.setValueAtTime(0, ctx.currentTime); gain.gain.linearRampToValueAtTime(0.22, ctx.currentTime + 0.5);\n    source.connect(filter); filter.connect(gain); gain.connect(ctx.destination); source.start();\n    this.audioSource = source; this.audioGain = gain; this.audioEnabled = true; this.refreshViews();\n  }\n\n  fadeAmbient() {\n    if (!this.audioEnabled || !this.audioContext || !this.audioGain) return;\n    const ctx = this.audioContext, source = this.audioSource, gain = this.audioGain, end = ctx.currentTime + 1.4;\n    this.audioEnabled = false; gain.gain.cancelScheduledValues(ctx.currentTime); gain.gain.setValueAtTime(gain.gain.value, ctx.currentTime); gain.gain.linearRampToValueAtTime(0, end);\n    window.setTimeout(() => { try { source?.stop(); } catch {} source?.disconnect(); gain.disconnect(); if (this.audioSource === source) { this.audioSource = null; this.audioGain = null; } }, 1500);\n    this.refreshViews();\n  }
 
   async loadTempoData() {
     const saved = await this.loadData() as Partial<TempoData> | null;
@@ -105,7 +105,7 @@ class TempoView extends ItemView {
       timer.createEl("div", { cls: "tempo-muted", text: "Programma una sessione per iniziare." });
     }
 
-    root.createEl("h3", { text: "Sessioni programmate" });
+    const soundPanel = root.createDiv("tempo-audio-controls");\n    soundPanel.createEl("span", { text: "Suono ambientale" });\n    const soundSelect = soundPanel.createEl("select");\n    for (const [value, label] of [["brown", "Rumore marrone"], ["white", "Rumore bianco"], ["rain", "Pioggia"]] as const) soundSelect.createEl("option", { value, text: label });\n    soundSelect.value = this.plugin.audioKind; soundSelect.addEventListener("change", () => { this.plugin.audioKind = soundSelect.value; if (this.plugin.audioEnabled) { this.plugin.fadeAmbient(); window.setTimeout(() => this.plugin.toggleAmbient(), 1500); } });\n    const soundButton = soundPanel.createEl("button", { text: this.plugin.audioEnabled ? "Dissolvi suono" : "Avvia suono" });\n    soundButton.addEventListener("click", () => this.plugin.toggleAmbient());\n\n    root.createEl("h3", { text: "Sessioni programmate" });
     const upcoming = this.plugin.data.sessions.filter(s => sessionBounds(s).end > now).slice(0, 12);
     if (!upcoming.length) root.createEl("p", { cls: "tempo-muted", text: "Nessuna sessione futura." });
     for (const session of upcoming) {
