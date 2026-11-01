@@ -1,6 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="116" fill="#365fcb"/>
-  <circle cx="256" cy="256" r="154" fill="none" stroke="#ffffff" stroke-width="20" opacity=".92"/>
-  <path d="M256 144v116l82 48" fill="none" stroke="#ffffff" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="256" cy="260" r="14" fill="#ffffff"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="TEMPVS, monogramma romano TV"><rect width="512" height="512" rx="106" fill="#17283a"/><g fill="none" stroke="#d9bd82" stroke-linecap="round" stroke-linejoin="round"><circle cx="256" cy="256" r="189" stroke-width="10"/><path d="M256 86v18M256 408v18M86 256h18M408 256h18M136 136l13 13M363 363l13 13M376 136l-13 13M149 363l-13 13" stroke-width="7"/></g><g fill="none" stroke="#d9bd82" stroke-linecap="square" stroke-linejoin="miter"><path d="M168 173h176M256 175v177" stroke-width="21"/><path d="M183 220l73 129 73-129" stroke-width="21"/></g></svg>
