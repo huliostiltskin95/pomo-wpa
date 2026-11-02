@@ -141,3 +141,14 @@ body{--tempo-nav-width:218px}
 @keyframes tempo-cloud-spin{to{transform:rotate(360deg)}}
 @media(max-width:700px){.tempo-cloud-indicator{bottom:calc(76px + env(safe-area-inset-bottom,0px));left:12px;right:12px;max-width:none}}
 @media(prefers-reduced-motion:reduce){.tempo-cloud-spinner{animation-duration:2s}}
+
+/* TEMPVS: permanent inline task composer */
+.tempo-quick-task{display:grid;gap:8px;margin:0 0 17px;padding:17px 19px;background:var(--surface);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow)}
+.tempo-quick-task>label{font-size:12px;font-weight:750;color:var(--text)}
+.tempo-quick-task-row{display:flex;gap:9px;align-items:stretch}
+.tempo-quick-task-row input{flex:1;min-width:0;min-height:43px;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--text);font:inherit;font-size:13px}
+.tempo-quick-task-row input:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.tempo-quick-task-row button{flex:none}
+.tempo-quick-preview{font-size:11px;line-height:1.5;color:var(--muted);margin:0;overflow-wrap:anywhere}
+.tempo-quick-task .form-error:empty{display:none}
+@media(max-width:480px){.tempo-quick-task{padding:14px}.tempo-quick-task-row{flex-wrap:wrap}.tempo-quick-task-row input{flex-basis:100%}.tempo-quick-task-row button{width:100%}}
