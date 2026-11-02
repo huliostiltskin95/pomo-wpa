@@ -212,7 +212,10 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
     }
   }
 
-  function render() { renderLegacy(); agendaV2?.render(); }
+  function render() {
+    if(agendaV2) {el.statusFilter.value="all";el.areaFilter.value="";el.tagFilter.value="";el.search.value="";}
+    renderLegacy(); agendaV2?.render();
+  }
 
   function openTask(id = "") {
     const task = id ? findTask(id) : null;
