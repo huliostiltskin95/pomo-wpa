@@ -14,7 +14,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
     quickForm: $("quick-task-form"), quickInput: $("quick-task-input"), quickPreview: $("quick-task-preview"), quickError: $("quick-task-error"),
     newButton: $("new-task-button"), areaFilter: $("agenda-area-filter"),
     statusFilter: $("agenda-status-filter"), tagFilter: $("agenda-tag-filter"),
-    search: $("agenda-search"), dueDate: $("task-due-date"), markdownPreview: $("task-markdown-preview"),
+    search: $("agenda-search"), dueDate: $("task-due-date"), plannedDate: $("task-planned-date"), plannedStart: $("task-planned-start"), markdownPreview: $("task-markdown-preview"),
     bulkButton: $("bulk-task-button"), bulkDialog: $("bulk-dialog"), bulkForm: $("bulk-form"), bulkInput: $("bulk-input"), bulkPreview: $("bulk-preview"), bulkError: $("bulk-error"),
     tagsButton: $("manage-tags-button"), tagsDialog: $("tags-dialog"), tagsForm: $("tags-form"), tagsSource: $("tags-source"), tagsTarget: $("tags-target"), tagsError: $("tags-error"),
     dialog: $("task-dialog"), form: $("task-form"), dialogTitle: $("task-dialog-title"),
@@ -153,6 +153,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
         statusLabels[task.status] + '</span></div>' +
         '<h3 class="task-title">' + escape(task.title) + '</h3>' +
         (task.dueDate ? '<p class="task-due">Scadenza: '+escape(task.dueDate)+'</p>' : '') +
+        (task.plannedStart ? '<p class="task-due">Prevista: '+escape(task.plannedDate || "oggi")+' alle '+escape(task.plannedStart)+'</p>' : '') +
         (attention ? '<p class="task-reminder"><strong>' + attention.label + '.</strong> ' +
           (attention.kind === "reschedule" ? "Le sessioni previste sono terminate, ma l’attività è ancora aperta. Puoi aggiungere altro tempo o completarla manualmente." :
           "Non ci sono ancora sessioni previste. Puoi programmarne una quando vuoi.") + '</p>' : "") +
@@ -191,6 +192,8 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
     el.status.value = task?.status || "todo";
     el.estimate.value = task?.estimateMinutes == null ? "" : String(task.estimateMinutes / 60);
     el.dueDate.value = task?.dueDate || "";
+    el.plannedDate.value = task?.plannedDate || "";
+    el.plannedStart.value = task?.plannedStart || "";
     el.tags.value = task?.tags.join(", ") || "";
     el.description.value = task?.description || "";
     el.markdownPreview.innerHTML = markdown(el.description.value);
@@ -209,6 +212,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
       const task = normalizeTask({
         id: oldTask?.id || uuid(), title: el.title.value, area: el.area.value,
         priority: el.priority.value, estimateMinutes: minutes, dueDate: el.dueDate.value,
+        plannedDate: el.plannedStart.value ? (el.plannedDate.value || localDateString(new Date())) : "", plannedStart: el.plannedStart.value,
         tags: parseTaskTags(el.tags.value), description: el.description.value,
         status: el.status.value,
         completed: el.status.value === "done",
@@ -397,7 +401,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
   function parseBulk(source = el.bulkInput.value) {
     return source.split(/\r?\n/).map((line,index)=>{
       if(!line.trim())return null;
-      const tags=[], values={dueDate:"",estimateMinutes:null,area:"Studio",priority:"media"};
+      const tags=[], values={dueDate:"",estimateMinutes:null,area:"Studio",priority:"media",plannedStart:"",plannedDate:""};
       // The first standalone pipe separates title/shortcuts from Markdown description.
       const separator=line.indexOf("|");
       const left=separator<0?line:line.slice(0,separator);
@@ -406,6 +410,10 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
         if(symbol==="!"){
           if(!/^[1-4]$/.test(value))throw Error("Riga "+(index+1)+": priorità valida !1, !2, !3 o !4.");
           values.priority=({1:"alta",2:"media",3:"bassa",4:"nessuna"})[value];
+        }
+        if(symbol==="+"){
+          if(!/^([01]\\d|2[0-3]):[0-5]\\d$/.test(value))throw Error("Riga "+(index+1)+": ora prevista non valida (es. +16:30).");
+          values.plannedStart=value;
         }
         if(symbol==="#")tags.push(value);
         if(symbol==="*")values.dueDate=due(value.toLowerCase());
@@ -429,6 +437,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
         }
         return space;
       }).trim();
+      if(values.plannedStart) values.plannedDate=values.dueDate || localDateString(new Date());
       const task=normalizeTask({...values,id:uuid(),title,tags:parseTaskTags(tags),priority:values.priority,description,status:"todo",createdAt:new Date().toISOString()});
       if(!task)throw Error("Riga "+(index+1)+": task non valida.");
       return task;
@@ -437,14 +446,14 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
   function previewQuick() {
     const value = el.quickInput.value.trim();
     el.quickError.textContent = "";
-    if (!value) { el.quickPreview.textContent = "Titolo · !1 priorità · ^Area · @durata · *scadenza · #tag · | descrizione"; return; }
+    if (!value) { el.quickPreview.textContent = "Titolo · !1 priorità · ^Area · @durata · +16:30 orario · *scadenza · #tag · | descrizione"; return; }
     try {
       const parsed = parseBulk(value);
       if (parsed.length !== 1) throw Error("Inserisci una sola attività per volta.");
       const t = parsed[0];
       el.quickPreview.textContent = [t.title, t.area, priorityLabels[t.priority],
         t.estimateMinutes == null ? "" : format(t.estimateMinutes) + " lorde",
-        t.dueDate ? "Scadenza " + t.dueDate : "", t.tags.length ? t.tags.map(x=>"#"+x).join(" ") : "",
+        t.dueDate ? "Scadenza " + t.dueDate : "", t.plannedStart ? "Prevista " + t.plannedDate + " alle " + t.plannedStart : "", t.tags.length ? t.tags.map(x=>"#"+x).join(" ") : "",
         t.description ? "Descrizione inclusa" : ""].filter(Boolean).join(" · ");
     } catch(e) { el.quickError.textContent = e.message; el.quickPreview.textContent = "Controlla la sintassi."; }
   }
