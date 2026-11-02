@@ -11,6 +11,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
   const $ = id => document.getElementById(id);
   const el = {
     list: $("agenda-list"), empty: $("agenda-empty"), summary: $("agenda-summary"), alerts: $("agenda-alerts"),
+    quickForm: $("quick-task-form"), quickInput: $("quick-task-input"), quickPreview: $("quick-task-preview"), quickError: $("quick-task-error"),
     newButton: $("new-task-button"), areaFilter: $("agenda-area-filter"),
     statusFilter: $("agenda-status-filter"), tagFilter: $("agenda-tag-filter"),
     search: $("agenda-search"), dueDate: $("task-due-date"), markdownPreview: $("task-markdown-preview"),
@@ -393,8 +394,8 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
     }
     throw Error("Scadenza non riconosciuta: "+value);
   };
-  function parseBulk() {
-    return el.bulkInput.value.split(/\r?\n/).map((line,index)=>{
+  function parseBulk(source = el.bulkInput.value) {
+    return source.split(/\r?\n/).map((line,index)=>{
       if(!line.trim())return null;
       const tags=[], values={dueDate:"",estimateMinutes:null,area:"Studio",priority:"media"};
       // The first standalone pipe separates title/shortcuts from Markdown description.
@@ -433,6 +434,37 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
       return task;
     }).filter(Boolean);
   }
+  function previewQuick() {
+    const value = el.quickInput.value.trim();
+    el.quickError.textContent = "";
+    if (!value) { el.quickPreview.textContent = "Titolo · !1 priorità · ^Area · @durata · *scadenza · #tag · | descrizione"; return; }
+    try {
+      const parsed = parseBulk(value);
+      if (parsed.length !== 1) throw Error("Inserisci una sola attività per volta.");
+      const t = parsed[0];
+      el.quickPreview.textContent = [t.title, t.area, priorityLabels[t.priority],
+        t.estimateMinutes == null ? "" : format(t.estimateMinutes) + " lorde",
+        t.dueDate ? "Scadenza " + t.dueDate : "", t.tags.length ? t.tags.map(x=>"#"+x).join(" ") : "",
+        t.description ? "Descrizione inclusa" : ""].filter(Boolean).join(" · ");
+    } catch(e) { el.quickError.textContent = e.message; el.quickPreview.textContent = "Controlla la sintassi."; }
+  }
+  el.quickInput.addEventListener("input", previewQuick);
+  el.quickInput.addEventListener("keydown", event => {
+    if (event.key === "Escape") { el.quickInput.value = ""; previewQuick(); }
+  });
+  el.quickForm.addEventListener("submit", event => {
+    event.preventDefault();
+    try {
+      const parsed = parseBulk(el.quickInput.value);
+      if(parsed.length !== 1) throw Error("Inserisci una sola attività per volta.");
+      if (!saveMutation(state => { state.tasks = [...state.tasks, parsed[0]]; })) throw Error("Impossibile salvare: controlla lo spazio disponibile.");
+      el.quickInput.value = "";
+      previewQuick();
+      el.quickInput.focus();
+      showToast("Attività aggiunta: " + parsed[0].title);
+    } catch(e) { el.quickError.textContent = e.message; }
+  });
+  previewQuick();
   function suggestBulk(){
     const names=tagNames();
     const match=el.bulkInput.value.match(/(?:^|\s)#([^\s#]*)$/);
