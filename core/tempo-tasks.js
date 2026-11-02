@@ -48,6 +48,12 @@ export function normalizeTask(value) {
       // Backward-compatible migration from the original completed boolean.
       status: value.status === undefined ? (value.completed === true ? "done" : "todo") : value.status,
       completed: (value.status === undefined ? value.completed === true : value.status === "done"),
+      // Independent Eisenhower dimensions; null means not yet classified.
+      important: typeof value.important === "boolean" ? value.important : null,
+      urgent: typeof value.urgent === "boolean" ? value.urgent : null,
+      subtasks: Array.isArray(value.subtasks) ? value.subtasks.slice(0,200).map(item => ({
+        id:String(item?.id||""), title:String(item?.title||"").trim().slice(0,120), done:item?.done===true
+      })).filter(item=>item.id&&item.title) : [],
       createdAt: typeof value.createdAt === "string" ? value.createdAt : ""
     };
     return validTask(task) ? task : null;
@@ -62,6 +68,9 @@ export function validTask(task) {
     TASK_AREAS.includes(task.area) && TASK_PRIORITIES.includes(task.priority) &&
     TASK_STATUSES.includes(task.status) && task.completed === (task.status === "done") &&
     typeof task.description === "string" && task.description.length <= 10000 &&
+    (task.important === null || typeof task.important === "boolean") &&
+    (task.urgent === null || typeof task.urgent === "boolean") &&
+    Array.isArray(task.subtasks) && task.subtasks.length <= 200 &&
     Array.isArray(task.tags) && task.tags.length <= 24 &&
     (!task.plannedStart || /^([01]\d|2[0-3]):[0-5]\d$/.test(task.plannedStart)) &&
     typeof task.autoSessionId === "string" &&
