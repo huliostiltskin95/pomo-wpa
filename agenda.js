@@ -249,12 +249,14 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
       });
       if (!task) throw new Error("Controlla titolo, area, priorità, descrizione e durata.");
       const stateBeforeSave = getState();
-      const linked = oldTask?.autoSessionId ? stateBeforeSave.sessions.find(s=>s.id===oldTask.autoSessionId) : null;
+      const autoLinked = oldTask?.autoSessionId ? stateBeforeSave.sessions.find(s=>s.id===oldTask.autoSessionId) : null;
+      const linked = autoLinked && sessionHasTask(autoLinked,task.id) ? autoLinked : null;
       const timeChanged = !!oldTask && (oldTask.plannedStart!==task.plannedStart || oldTask.plannedDate!==task.plannedDate);
       let scheduledSession = null;
       if (!oldTask && task.plannedStart && task.estimateMinutes != null) {
         scheduledSession = plannedSession(task, stateBeforeSave.sessions);
       } else if (linked && timeChanged) {
+        if (sessionTaskIds(linked).length > 1) throw Error("Questa sessione contiene più task. Modifica la programmazione dalla sezione Sessioni per non scollegare le altre attività.");
         if (!task.plannedStart) throw Error("La task ha una sessione collegata. Per rimuovere l'orario, modifica o elimina prima la sessione nella sezione Sessioni.");
         if (sessionBounds(linked).start <= new Date()) throw Error("La sessione è già iniziata o terminata: riprogrammala separatamente.");
         scheduledSession = plannedSession(task, stateBeforeSave.sessions, linked);
