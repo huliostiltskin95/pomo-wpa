@@ -179,9 +179,9 @@ export function createAgendaV2({getState,saveMutation,setTaskStatus,openTask,ope
   }
   root.addEventListener("click",event=>{
     const b=event.target.closest("button");if(!b)return;
-    if(b.dataset.smart){ui.list=b.dataset.smart;render();}
+    if(b.dataset.smart){ui.list=b.dataset.smart;if(ui.view==="calendar"||ui.view==="timeline")ui.view="list";render();}
     else if(b.hasAttribute("data-area-filter")){ui.area=b.dataset.areaFilter;render();}
-    else if(b.dataset.view){ui.view=b.dataset.view;render();}
+    else if(b.dataset.view){ui.view=b.dataset.view;if(ui.view==="calendar"||ui.view==="timeline")ui.list="all";render();}
     else if(b.dataset.task){window.dispatchEvent(new CustomEvent("tempo:show-task",{detail:{taskId:b.dataset.task}}));}
     else if(b.dataset.complete){const t=getState().tasks.find(t=>t.id===b.dataset.complete);if(t)setTaskStatus(t.id,t.status==="done"?"todo":"done");}
     else if(b.dataset.plan)openPlan(b.dataset.plan);
@@ -232,6 +232,7 @@ export function createAgendaV2({getState,saveMutation,setTaskStatus,openTask,ope
     if(!t||!container)return;
     container.innerHTML='<section class="av2-detail-fields"><h3>Organizzazione</h3>'+
       '<label>Scadenza <input type="date" data-due="'+escape(t.id)+'" value="'+escape(t.dueDate||"")+'"></label>'+
+      '<label>Priorità <select data-priority="'+escape(t.id)+'">'+[["alta","Alta · !1"],["media","Media · !2"],["bassa","Bassa · !3"],["nessuna","Nessuna · !4"]].map(([v,l])=>'<option value="'+v+'" '+(t.priority===v?"selected":"")+'>'+l+'</option>').join("")+'</select></label>'+
       '<label>Importante <select data-importance="'+escape(t.id)+'"><option value="">Da classificare</option><option value="yes" '+(t.important===true?"selected":"")+'>Sì</option><option value="no" '+(t.important===false?"selected":"")+'>No</option></select></label>'+
       '<label>Urgente <select data-urgency="'+escape(t.id)+'"><option value="">Da classificare</option><option value="yes" '+(t.urgent===true?"selected":"")+'>Sì</option><option value="no" '+(t.urgent===false?"selected":"")+'>No</option></select></label>'+
       '</section><section class="av2-subtasks"><h3>Sottotask strutturate</h3>'+
@@ -240,6 +241,7 @@ export function createAgendaV2({getState,saveMutation,setTaskStatus,openTask,ope
     container.addEventListener("change",ev=>{
       const e=ev.target, current=getState().tasks.find(x=>x.id===taskId);if(!current)return;
       if(e.dataset.due)patch(taskId,{dueDate:e.value});
+      else if(e.dataset.priority)patch(taskId,{priority:e.value});
       else if(e.dataset.importance)patch(taskId,{important:e.value===""?null:e.value==="yes"});
       else if(e.dataset.urgency)patch(taskId,{urgent:e.value===""?null:e.value==="yes"});
       else if(e.dataset.subCheck)patch(taskId,{subtasks:current.subtasks.map(s=>s.id===e.dataset.subCheck?{...s,done:e.checked}:s)});
