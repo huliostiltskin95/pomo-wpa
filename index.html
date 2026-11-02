@@ -9,6 +9,7 @@
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" href="./icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./tempo-design.css">
 </head>
 <body>
   <header class="topbar">
@@ -72,6 +73,30 @@
       <div id="sessions-list" class="sessions-list"></div>
       <div id="empty-state" class="empty-state hidden"><div class="empty-icon" aria-hidden="true">◷</div><h3>Nessuna sessione in programma</h3><p>Aggiungi una finestra di concentrazione per organizzare la giornata.</p><button id="empty-add-button" class="button button-secondary" type="button">Crea la prima sessione</button></div>
       <div class="export-calendar-row"><p class="muted">Vuoi visualizzare il programma in un calendario esterno?</p><button id="export-ics-button" class="button button-secondary" type="button">Esporta calendario (.ics)</button></div>
+    </section>
+
+    <section class="tempo-appearance-settings" aria-labelledby="appearance-heading">
+      <div class="tempo-appearance-intro">
+        <div><p class="eyebrow">PERSONALIZZAZIONE</p><h2 id="appearance-heading">Aspetto e colori</h2>
+          <p class="muted">Scegli un tema, la densità degli elenchi e i colori delle aree. Le preferenze seguono i backup.</p></div>
+      </div>
+      <form id="tempo-appearance-form" class="tempo-appearance-form">
+        <div class="tempo-appearance-fields">
+          <label class="field-label" for="tempo-theme">Tema
+            <select id="tempo-theme"><option value="system">Automatico (sistema)</option><option value="light">Chiaro</option><option value="dark">Scuro</option></select>
+          </label>
+          <label class="field-label" for="tempo-density">Densità degli elenchi
+            <select id="tempo-density"><option value="compact">Compatta</option><option value="normal">Normale</option><option value="comfortable">Confortevole</option></select>
+          </label>
+        </div>
+        <div class="tempo-area-colors-heading"><h3>Colori delle aree</h3><p class="muted">Tocca un campione per modificarlo.</p></div>
+        <div class="tempo-color-picker-grid">
+          <label class="tempo-area-color" data-area="Studio" for="tempo-color-studio"><span class="tempo-area-dot" aria-hidden="true"></span><span>Studio</span><input id="tempo-color-studio" type="color" value="#d65b56" aria-label="Colore dell'area Studio"></label>
+          <label class="tempo-area-color" data-area="Lavoro" for="tempo-color-lavoro"><span class="tempo-area-dot" aria-hidden="true"></span><span>Lavoro</span><input id="tempo-color-lavoro" type="color" value="#29845c" aria-label="Colore dell'area Lavoro"></label>
+          <label class="tempo-area-color" data-area="Personale" for="tempo-color-personale"><span class="tempo-area-dot" aria-hidden="true"></span><span>Personale</span><input id="tempo-color-personale" type="color" value="#d6a323" aria-label="Colore dell'area Personale"></label>
+        </div>
+        <div class="tempo-appearance-foot"><p class="muted" id="tempo-appearance-save-status" role="status" aria-live="polite">Le modifiche vengono salvate automaticamente.</p><button class="button button-secondary" type="button" id="tempo-appearance-reset">Ripristina colori</button></div>
+      </form>
     </section>
 
     <section class="settings-card">
