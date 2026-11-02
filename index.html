@@ -41,7 +41,7 @@
       <form id="quick-task-form" class="tempo-quick-task" autocomplete="off">
         <label for="quick-task-input">Inserimento rapido</label>
         <div class="tempo-quick-task-row">
-          <input id="quick-task-input" type="text" maxlength="10500" placeholder="Nuova attività !1 ^Lavoro @30m +16:30 #scuola *domani | Descrizione Markdown" aria-describedby="quick-task-preview quick-task-error">
+          <input id="quick-task-input" type="text" maxlength="10500" placeholder="Nuova attività !1 ^Lavoro @30m +domani_16:30 *venerdì | Descrizione Markdown" aria-describedby="quick-task-preview quick-task-error">
           <button type="submit" class="button button-primary">Aggiungi</button>
         </div>
         <p id="quick-task-preview" class="tempo-quick-preview" aria-live="polite"></p>
@@ -131,7 +131,7 @@
       </label>
       <div class="two-fields"><label class="field-label">Giorno previsto<input id="task-planned-date" type="date"></label><label class="field-label">Ora prevista<input id="task-planned-start" type="time"></label></div>
       <label class="field-label">Scadenza (facoltativa)<input id="task-due-date" type="date"></label>
-      <p class="form-hint">La durata è una stima, non un limite. Puoi aggiungere sessioni quando vuoi. Il completamento resta sempre manuale.</p>
+      <p class="form-hint">Se indichi ora prevista e durata, TEMPVS crea una sessione Pomodoro associata alla task. Scadenza e svolgimento sono indipendenti; il completamento resta manuale.</p>
       <label class="field-label">Tag gerarchici
         <input id="task-tags" type="text" placeholder="Studio/Greco/Verbi, Studio/Didattica">
       </label>
@@ -154,8 +154,8 @@
   <dialog id="bulk-dialog" class="session-dialog task-dialog">
     <form id="bulk-form">
       <div class="dialog-heading"><h2>Inserimento multiplo</h2><button id="bulk-close" type="button" class="icon-button" aria-label="Chiudi">×</button></div>
-      <p class="form-hint">Una task per riga. #tag, *scadenza, @durata o @18-23 (5 ore lorde), ^area, +16:30 orario previsto, !1 alta / !2 media / !3 bassa / !4 nessuna. Dopo | inserisci una descrizione Markdown. La fascia oraria indica soltanto la stima, non programma automaticamente una sessione.</p>
-      <textarea id="bulk-input" rows="9" placeholder="Correggere verifiche !1 #scuola *domani @18-23 ^Lavoro | Rivedere le [griglie](https://example.com)"></textarea>
+      <p class="form-hint">Una task per riga: #tag, *scadenza, @durata lorda (es. @30m), ^area, +16:30 (oggi) oppure +domani_16:30 (giorno esplicito), !1–!4 priorità. Dopo | puoi scrivere una descrizione Markdown. @durata + +orario crea una sessione Pomodoro; *scadenza è indipendente. Se una sessione si sovrappone, nessuna task della lista viene importata.</p>
+      <textarea id="bulk-input" rows="9" placeholder="Correggere verifiche !1 #scuola *venerdì @2h +domani_16:30 ^Lavoro | Rivedere le [griglie](https://example.com)"></textarea>
       <div id="bulk-smart-suggestions" class="task-tags" aria-label="Suggerimenti di tag esistenti"></div>
       <div id="bulk-preview" class="planned-summary" aria-live="polite"></div>
       <p id="bulk-error" class="form-error" role="alert"></p>
