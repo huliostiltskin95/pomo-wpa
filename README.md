@@ -1,14 +1,22 @@
 # TEMPVS
 
-PWA installabile e utilizzabile offline per programmare finestre di concentrazione.
+PWA installabile e utilizzabile offline per organizzare task, aree e sessioni Pomodoro.
+
+## Aspetto — Quiet Focus
+
+- Tema **Automatico**, **Chiaro** o **Scuro** e densità degli elenchi **Compatta**, **Normale**, **Confortevole**.
+- Colori delle aree modificabili da **Impostazioni → Aspetto e colori**. Predefiniti: **Studio rosso**, **Lavoro verde**, **Personale giallo**.
+- Colori delle priorità in stile semaforo: **Alta rossa**, **Media gialla**, **Bassa verde**, **Nessuna senza evidenziazione**.
+- Navigazione laterale su desktop e inferiore su schermi stretti; pannello dettagli delle attività e indicatori di sincronizzazione.
+- Le preferenze estetiche sono incluse nello stato salvato, nel backup JSON e nel backup Dropbox. I backup più vecchi mantengono la compatibilità e utilizzano i colori predefiniti.
 
 ## Funzioni
 
-- **Agenda attività (solo PWA):** task con area (Personale, Lavoro, Studio), priorità, descrizione, durata stimata in ore nette di focus e tag gerarchici (per esempio `Studio/Greco/Morfologia`). Stati manuali `Da fare`, `In corso`, `Completata`; filtri per area, stato, tag e ricerca.
+- **Agenda attività (solo PWA):** task con area (Personale, Lavoro, Studio), priorità, descrizione, durata stimata in ore lorde e tag gerarchici (per esempio `Studio/Greco/Morfologia`). Stati manuali `Da fare`, `In corso`, `Completata`; filtri per area, stato, tag e ricerca.
 - **Completamento esclusivamente manuale:** nessuna sessione, anche terminata o oltre la stima, può cambiare lo stato della task. Se un'attività viene completata mentre ha sessioni non terminate, l'utente sceglie esplicitamente se conservarle o eliminarle.
 - **Avvisi di Agenda:** attività senza sessioni contrassegnate `Da pianificare`; attività ancora aperte senza blocchi futuri dopo almeno una sessione contrassegnate `Da riprogrammare`. Pannello di avviso e filtro dedicato; notifica di fine ultimo blocco se già autorizzata. Gli avvisi non modificano task o programmazione.
 - Durante la creazione della task si può scegliere `Salva e programma` per passare direttamente alla prima sessione, mantenendo gli oggetti task e sessione separati.
-- **Pianificazione dalle task:** ogni attività può generare uno o più blocchi collegati alle normali sessioni Pomodoro; l’utente sceglie data, ora, durata netta in ore, intervalli di focus e pause facoltative. Il termine viene calcolato automaticamente; si impediscono sovrapposizioni e intervalli oltre mezzanotte. Il pulsante **Avvia ora** inserisce subito un blocco di focus, salvo conflitti.
+- **Pianificazione dalle task:** ogni attività può generare uno o più blocchi collegati alle normali sessioni Pomodoro; l’utente sceglie data, ora, durata lorda in ore, intervalli di focus e pause facoltative. Il termine viene calcolato automaticamente; si impediscono le sovrapposizioni, mentre gli intervalli oltre mezzanotte sono supportati. Il pulsante **Avvia ora** inserisce subito un blocco di focus, salvo conflitti.
 - Pianificazione di sessioni per data e intervallo orario, con riepilogo delle altre sessioni già presenti nella giornata.
 - Cicli di concentrazione e pausa con rapporto automatico 5:1 (ad esempio 25 + 5 minuti).
 - Possibilità di disattivare completamente le pause per ogni sessione o come preferenza predefinita.
@@ -35,14 +43,14 @@ Il file `.ics` contiene anche i blocchi di attività programmati come normali se
 
 ## Aggiornamento dopo una modifica
 
-Il service worker usa la cache `tempo-pomodoro-v9`. Quando pubblichi una nuova versione, incrementa il numero della cache in `sw.js` (ad esempio `v10`) per forzare il rinnovo dei file memorizzati.
+Il service worker usa una cache versionata (attualmente `tempo-pomodoro-v24`). Ad ogni rilascio occorre incrementare il numero della cache in `sw.js` per rinnovare anche i file CSS e JavaScript.
 
 ## Limiti
 
 - Una PWA statica non può garantire timer, notifiche o avvio di sessioni con l'app completamente chiusa o il dispositivo in sospensione.
 - La riproduzione audio richiede un'interazione iniziale dell'utente e può essere sospesa dal sistema operativo in background.
 - I dati sono memorizzati localmente nel browser: usa periodicamente il backup JSON per conservarli o trasferirli su un altro dispositivo. Il backup versione 3 include task e sessioni e può leggere i vecchi backup versione 2 (senza task).
-- **Durata stimata = tempo netto di concentrazione**: pianificare 2 ore con focus 25 minuti e pause 5 minuti occupa 2 ore e 20 minuti sul calendario (4 pause tra 5 intervalli di focus).
+- **Durata stimata = tempo lordo**: pianificare 2 ore occupa 2 ore di calendario, pause comprese. Il tempo netto di concentrazione è distinto.
 - Quando contrassegni manualmente una task come completata, puoi scegliere se conservare o annullare i blocchi non ancora terminati. Eliminare una task rimuove i blocchi futuri e scollega quelli passati.
 
 ## Architettura condivisa
