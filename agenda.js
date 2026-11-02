@@ -406,13 +406,13 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
       const separator=line.indexOf("|");
       const left=separator<0?line:line.slice(0,separator);
       const description=separator<0?"":line.slice(separator+1).trim();
-      const title=left.replace(/(^|\s)([#*@^!])([^\s]+)/g,(_,space,symbol,value)=>{
+      const title=left.replace(/(^|\s)([#*@^!+])([^\s]+)/g,(_,space,symbol,value)=>{
         if(symbol==="!"){
           if(!/^[1-4]$/.test(value))throw Error("Riga "+(index+1)+": priorità valida !1, !2, !3 o !4.");
           values.priority=({1:"alta",2:"media",3:"bassa",4:"nessuna"})[value];
         }
         if(symbol==="+"){
-          if(!/^([01]\\d|2[0-3]):[0-5]\\d$/.test(value))throw Error("Riga "+(index+1)+": ora prevista non valida (es. +16:30).");
+          if(!/^([01]\d|2[0-3]):[0-5]\d$/.test(value))throw Error("Riga "+(index+1)+": ora prevista non valida (es. +16:30).");
           values.plannedStart=value;
         }
         if(symbol==="#")tags.push(value);
