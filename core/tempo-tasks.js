@@ -41,6 +41,8 @@ export function normalizeTask(value) {
       description: String(value.description || ""),
       tags,
       estimateMinutes: value.estimateMinutes == null || value.estimateMinutes === "" ? null : Number(value.estimateMinutes),
+      plannedStart: typeof value.plannedStart === "string" && /^([01]\\d|2[0-3]):[0-5]\\d$/.test(value.plannedStart) ? value.plannedStart : "",
+      plannedDate: typeof value.plannedDate === "string" && /^\\d{4}-\\d{2}-\\d{2}$/.test(value.plannedDate) ? value.plannedDate : "",
       dueDate: typeof value.dueDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.dueDate) ? value.dueDate : "",
       // Backward-compatible migration from the original completed boolean.
       status: value.status === undefined ? (value.completed === true ? "done" : "todo") : value.status,
@@ -60,6 +62,7 @@ export function validTask(task) {
     TASK_STATUSES.includes(task.status) && task.completed === (task.status === "done") &&
     typeof task.description === "string" && task.description.length <= 10000 &&
     Array.isArray(task.tags) && task.tags.length <= 24 &&
+    (!task.plannedStart || /^([01]\\d|2[0-3]):[0-5]\\d$/.test(task.plannedStart)) &&
     (task.estimateMinutes === null || (Number.isInteger(task.estimateMinutes) && task.estimateMinutes >= 15 && task.estimateMinutes <= 600000));
 }
 
