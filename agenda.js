@@ -1,3 +1,4 @@
+import { createAgendaV2 } from "./agenda-v2.js";
 import { localDateString, validSession, sessionBounds, escapeHtml, hasSessionOverlaps, sessionDurationMinutes } from "./core/tempo-core.js";
 import { TASK_AREAS, TASK_PRIORITIES, TASK_STATUSES, parseTaskTags, normalizeTask, estimatedMinutesFromHours,
   hoursFromMinutes, plannedFocusMinutes, elapsedScheduledFocusMinutes, getTaskAttention,
@@ -34,6 +35,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
   const statusLabels = { todo: "Da fare", in_progress: "In corso", done: "Completata" };
   const alertedEnds = new Set();
   let lastReminderSignature = "";
+  let agendaV2 = null;
   const uuid = () => typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
     ? crypto.randomUUID() : String(Date.now()) + "-" + Math.random().toString(36).slice(2);
   const tasks = () => getState().tasks;
@@ -113,7 +115,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
     return true;
   }
 
-  function render() {
+  function renderLegacy() {
     const state = getState();
     const now = new Date();
     const attentions = new Map(state.tasks.map(task => [task.id, getTaskAttention(task, state.sessions, now)]));
@@ -210,6 +212,8 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
     }
   }
 
+  function render() { renderLegacy(); agendaV2?.render(); }
+
   function openTask(id = "") {
     const task = id ? findTask(id) : null;
     el.form.reset();
@@ -246,6 +250,8 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
         tags: parseTaskTags(el.tags.value), description: el.description.value,
         status: el.status.value,
         completed: el.status.value === "done",
+        important: oldTask?.important ?? null, urgent: oldTask?.urgent ?? null,
+        subtasks: oldTask?.subtasks || [],
         createdAt: oldTask?.createdAt || new Date().toISOString()
       });
       if (!task) throw new Error("Controlla titolo, area, priorità, descrizione e durata.");
@@ -647,6 +653,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
       (getTaskAttention(task, getState().sessions, now)?.kind || "scheduled")).join("|");
     if (currentSignature !== lastReminderSignature) render();
   }
+  agendaV2 = createAgendaV2({getState,saveMutation,setTaskStatus,openTask,openPlan,showToast});
   render();
   return { render, tick };
 }
