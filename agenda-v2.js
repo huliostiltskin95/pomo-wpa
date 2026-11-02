@@ -186,8 +186,10 @@ export function createAgendaV2({getState,saveMutation,setTaskStatus,openTask,ope
     else if(b.dataset.complete){const t=getState().tasks.find(t=>t.id===b.dataset.complete);if(t)setTaskStatus(t.id,t.status==="done"?"todo":"done");}
     else if(b.dataset.plan)openPlan(b.dataset.plan);
     else if(b.dataset.toggleCompleted){ui.completed=!ui.completed;render();}
-    else if(b.dataset.shift){ui.anchor=day(ui.anchor,(ui.calendar==="month"?28:ui.calendar==="week"?7:1)*Number(b.dataset.shift));
-      if(ui.calendar==="month"){const d=new Date(ui.anchor+"T12:00:00");ui.anchor=localDateString(new Date(d.getFullYear(),d.getMonth(),1,12));}render();}
+    else if(b.dataset.shift){const delta=Number(b.dataset.shift);
+      if(ui.calendar==="month"){const d=new Date(ui.anchor+"T12:00:00");ui.anchor=localDateString(new Date(d.getFullYear(),d.getMonth()+delta,1,12));}
+      else ui.anchor=day(ui.anchor,(ui.calendar==="week"?7:1)*delta);
+      render();}
     else if(b.dataset.currentDate){ui.anchor=today();render();}
   });
   root.addEventListener("change",event=>{
