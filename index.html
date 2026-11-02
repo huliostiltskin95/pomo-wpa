@@ -38,6 +38,15 @@
           <p class="muted">Attività, stime e blocchi di concentrazione programmati.</p></div>
         <div class="agenda-extra-actions"><button id="bulk-task-button" class="button button-secondary" type="button">Inserimento multiplo</button><button id="manage-tags-button" class="button button-secondary" type="button">Gestisci tag</button><button id="new-task-button" class="button button-primary" type="button">＋ Nuova task</button></div>
       </div>
+      <form id="quick-task-form" class="tempo-quick-task" autocomplete="off">
+        <label for="quick-task-input">Inserimento rapido</label>
+        <div class="tempo-quick-task-row">
+          <input id="quick-task-input" type="text" maxlength="10500" placeholder="Nuova attività !1 ^Lavoro @18-23 #scuola *domani | Descrizione Markdown" aria-describedby="quick-task-preview quick-task-error">
+          <button type="submit" class="button button-primary">Aggiungi</button>
+        </div>
+        <p id="quick-task-preview" class="tempo-quick-preview" aria-live="polite"></p>
+        <p id="quick-task-error" class="form-error" role="alert"></p>
+      </form>
       <div class="agenda-toolbar">
         <label>Area<select id="agenda-area-filter">
           <option value="">Tutte</option><option>Personale</option><option>Lavoro</option><option>Studio</option>
