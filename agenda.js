@@ -74,11 +74,12 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
   // Create one actual session only when both gross duration and planned time exist.
   // The session always belongs to the task's area; the task remains manually controlled.
   function plannedSession(task, otherSessions, replacement = null) {
-    if (!task.plannedStart || task.estimateMinutes == null) return null;
-    if (task.estimateMinutes > 1440) throw Error("Per la programmazione automatica la durata non può superare 24 ore. Puoi creare la task senza +orario e suddividerla in più sessioni.");
+    if (!task.plannedStart || task.estimateMinutes == null || task.status === "done") return null;
+    const grossMinutes = replacement ? sessionDurationMinutes(replacement) : task.estimateMinutes;
+    if (grossMinutes > 1440) throw Error("Per la programmazione automatica la durata non può superare 24 ore. Puoi creare la task senza +orario e suddividerla in più sessioni.");
     const session = createTaskSession(task, {
       id: replacement?.id || uuid(), date: task.plannedDate || localDateString(new Date()),
-      start: task.plannedStart, grossMinutes: replacement ? sessionDurationMinutes(replacement) : task.estimateMinutes,
+      start: task.plannedStart, grossMinutes,
       workMinutes: replacement?.workMinutes ?? getState().defaults.workMinutes,
       breakEnabled: replacement?.breakEnabled ?? getState().defaults.breakEnabled
     });
@@ -272,8 +273,8 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
         if(oldTask && oldTask.area!==task.area) state.sessions=state.sessions.map(session=>sessionHasTask(session,task.id)&&sessionTaskIds(session).length===1?{...session,title:task.area,area:task.area}:session);
       })) return;
       el.dialog.close();
-      showToast(oldTask ? "Attività aggiornata." : "Attività aggiunta.");
-      if (event.submitter?.id === "task-save-plan" && task.status !== "done") openPlan(task.id);
+      showToast(oldTask ? "Attività aggiornata." : (scheduledSession ? "Attività aggiunta e sessione programmata." : "Attività aggiunta."));
+      if (event.submitter?.id === "task-save-plan" && task.status !== "done" && !scheduledSession) openPlan(task.id);
     } catch (error) {
       el.error.textContent = error.message;
     }
