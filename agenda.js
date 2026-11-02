@@ -396,21 +396,39 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
   function parseBulk() {
     return el.bulkInput.value.split(/\r?\n/).map((line,index)=>{
       if(!line.trim())return null;
-      const tags=[], values={dueDate:"",estimateMinutes:null,area:"Studio"};
-      const title=line.replace(/(^|\s)([#*@^])([^\s]+)/g,(_,space,symbol,value)=>{
+      const tags=[], values={dueDate:"",estimateMinutes:null,area:"Studio",priority:"media"};
+      // The first standalone pipe separates title/shortcuts from Markdown description.
+      const separator=line.indexOf("|");
+      const left=separator<0?line:line.slice(0,separator);
+      const description=separator<0?"":line.slice(separator+1).trim();
+      const title=left.replace(/(^|\s)([#*@^!])([^\s]+)/g,(_,space,symbol,value)=>{
+        if(symbol==="!"){
+          if(!/^[1-4]$/.test(value))throw Error("Riga "+(index+1)+": priorità valida !1, !2, !3 o !4.");
+          values.priority=({1:"alta",2:"media",3:"bassa",4:"nessuna"})[value];
+        }
         if(symbol==="#")tags.push(value);
         if(symbol==="*")values.dueDate=due(value.toLowerCase());
         if(symbol==="^"){const area=TASK_AREAS.find(a=>a.toLowerCase()===value.toLowerCase());if(!area)throw Error("Riga "+(index+1)+": area sconosciuta: "+value);values.area=area;}
         if(symbol==="@"){
-          const m=value.match(/^(?:(\d+(?:[.,]\d+)?)h)?(?:(\d+)m)?$/i);
-          if(!m||(!m[1]&&!m[2]))throw Error("Riga "+(index+1)+": durata non valida: "+value);
-          const minutes=Math.round(Number((m[1]||"0").replace(",","."))*60)+Number(m[2]||0);
+          const interval=value.match(/^(\d{1,2})(?::(\d{2}))?-(\d{1,2})(?::(\d{2}))?$/);
+          let minutes;
+          if(interval){
+            const startH=Number(interval[1]),startM=Number(interval[2]||0),endH=Number(interval[3]),endM=Number(interval[4]||0);
+            if(startH>23||endH>24||startM>59||endM>59||(endH===24&&endM!==0))throw Error("Riga "+(index+1)+": fascia oraria non valida.");
+            const start=startH*60+startM,end=endH*60+endM;
+            minutes=(end-start+1440)%1440;
+            if(end===1440)minutes=1440-start;
+          }else{
+            const m=value.match(/^(?:(\d+(?:[.,]\d+)?)h)?(?:(\d+)m)?$/i);
+            if(!m||(!m[1]&&!m[2]))throw Error("Riga "+(index+1)+": durata non valida: "+value);
+            minutes=Math.round(Number((m[1]||"0").replace(",","."))*60)+Number(m[2]||0);
+          }
           if(minutes<15||minutes%15||minutes>600000)throw Error("Riga "+(index+1)+": usa multipli di 15 minuti.");
           values.estimateMinutes=minutes;
         }
         return space;
       }).trim();
-      const task=normalizeTask({...values,id:uuid(),title,tags:parseTaskTags(tags),priority:"media",description:"",status:"todo",createdAt:new Date().toISOString()});
+      const task=normalizeTask({...values,id:uuid(),title,tags:parseTaskTags(tags),priority:values.priority,description,status:"todo",createdAt:new Date().toISOString()});
       if(!task)throw Error("Riga "+(index+1)+": task non valida.");
       return task;
     }).filter(Boolean);
@@ -433,7 +451,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
   }
   function previewBulk(){
     suggestBulk();
-    try {const parsed=parseBulk();el.bulkPreview.textContent=parsed.length+" task riconosciute. "+parsed.slice(0,7).map(t=>t.title+" ["+t.area+"]"+(t.dueDate?" · "+t.dueDate:"")).join(" | ");el.bulkError.textContent="";}
+    try {const parsed=parseBulk();el.bulkPreview.textContent=parsed.length+" task riconosciute. "+parsed.slice(0,7).map(t=>t.title+" ["+t.area+" · "+priorityLabels[t.priority]+"]"+(t.estimateMinutes?" · "+format(t.estimateMinutes):"")+(t.description?" · descrizione":"")+(t.dueDate?" · "+t.dueDate:"")).join(" | ");el.bulkError.textContent="";}
     catch(e){el.bulkError.textContent=e.message;el.bulkPreview.textContent="Correggi la sintassi prima dell'importazione.";}
   }
   el.bulkButton.addEventListener("click",()=>{el.bulkInput.value="";previewBulk();el.bulkDialog.showModal();});
