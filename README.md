@@ -10,6 +10,17 @@ PWA installabile e utilizzabile offline per organizzare task, aree e sessioni Po
 - Navigazione laterale su desktop e inferiore su schermi stretti; pannello dettagli delle attività e indicatori di sincronizzazione.
 - Le preferenze estetiche sono incluse nello stato salvato, nel backup JSON e nel backup Dropbox. I backup più vecchi mantengono la compatibilità e utilizzano i colori predefiniti.
 
+## Agenda 2.0 (branch di sviluppo)
+
+- **Cinque viste integrate:** Lista compatta, Calendario (giorno/settimana/mese), Kanban, Timeline, matrice Eisenhower.
+- **Liste intelligenti:** Oggi (task in scadenza, scadute e task collegate a sessioni odierne), Domani, Prossimi 7 giorni, Scadute, Senza data, Da riprogrammare, Tutte e Completate.
+- Il Calendario distingue **scadenze delle task** e **sessioni Pomodoro** come livelli indipendenti. Permette di aprire/modificare le sessioni e spostarle di data con controlli sulle sovrapposizioni. Lo spostamento di una task cambia soltanto la sua scadenza.
+- **Kanban:** passaggio manuale fra gli stati; **Eisenhower:** importanza e urgenza sono campi indipendenti dalle priorità !1–!4.
+- **Sottotask strutturate:** indipendenti dalle checklist Markdown. Completare le sottotask non completa la task.
+- **Dettagli:** pannello laterale desktop e layout adattato al mobile; colori delle aree conservati.
+- Preferenze delle viste salvate localmente al dispositivo. Campi delle task e sottotask salvati nei backup JSON e Dropbox tramite il modello esistente.
+- Questa branch non modifica il plugin Obsidian. Prima del merge in main occorre il collaudo funzionale completo nei browser target.
+
 ## Funzioni
 
 - **Agenda attività (solo PWA):** task con area (Personale, Lavoro, Studio), priorità, descrizione, durata stimata in ore lorde e tag gerarchici (per esempio `Studio/Greco/Morfologia`). Stati manuali `Da fare`, `In corso`, `Completata`; filtri per area, stato, tag e ricerca.
@@ -43,7 +54,7 @@ Il file `.ics` contiene anche i blocchi di attività programmati come normali se
 
 ## Aggiornamento dopo una modifica
 
-Il service worker usa una cache versionata (attualmente `tempo-pomodoro-v24`). Ad ogni rilascio occorre incrementare il numero della cache in `sw.js` per rinnovare anche i file CSS e JavaScript.
+Il service worker usa una cache versionata (attualmente `tempo-pomodoro-v25`). Ad ogni rilascio occorre incrementare il numero della cache in `sw.js` per rinnovare anche i file CSS e JavaScript.
 
 ## Limiti
 
