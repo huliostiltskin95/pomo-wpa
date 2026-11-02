@@ -64,7 +64,7 @@ try {
   await page.locator("#tempo-task-panel .tempo-task-panel-close").click();
 
   // Offline reload uses the versioned service-worker cache, not GitHub network.
-  await page.evaluate(()=>navigator.serviceWorker.ready);
+  await page.evaluate(()=>Promise.race([navigator.serviceWorker.ready,new Promise((_,reject)=>setTimeout(()=>reject(new Error("Service worker non attivo")),12000))]));
   await page.context().setOffline(true);
   await page.reload({waitUntil:"domcontentloaded"});
   await page.locator("#tempo-agenda-v2").waitFor({state:"attached",timeout:12000});
