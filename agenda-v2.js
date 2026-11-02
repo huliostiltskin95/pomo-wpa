@@ -1,4 +1,4 @@
-import { localDateString, sessionBounds } from "./core/tempo-core.js";
+import { localDateString, sessionBounds, hasSessionOverlaps } from "./core/tempo-core.js";
 import { sessionHasTask, getTaskAttention } from "./core/tempo-tasks.js";
 
 // TEMPVS Agenda 2.0. Presentation preferences are device-local; tasks remain in the existing state.
@@ -118,8 +118,8 @@ export function createAgendaV2({getState,saveMutation,setTaskStatus,openTask,ope
       const items=ui.taskLayer?shown.filter(t=>t.dueDate===date):[];
       const blocks=ui.sessionLayer?state.sessions.filter(s=>s.date===date&&(!ui.area||(s.area||s.title)===ui.area)).sort((a,b)=>a.start.localeCompare(b.start)):[];
       html+='<section class="av2-calendar-day '+(date===today()?"av2-is-today":"")+'" data-date="'+date+'"><h3>'+escape(new Date(date+"T12:00:00").toLocaleDateString("it-IT",{weekday:"short",day:"numeric"}))+'</h3>';
-      html+=items.map(t=>'<button class="av2-event av2-event-task" data-task="'+escape(t.id)+'" data-area="'+escape(t.area)+'">'+escape(t.title)+'</button>').join("");
-      html+=blocks.map(s=>'<div class="av2-event av2-event-session" data-area="'+escape(s.area||s.title)+'"><strong>'+escape(s.start)+'–'+escape(s.end)+'</strong> '+escape(s.area||s.title)+'</div>').join("");
+      html+=items.map(t=>'<button class="av2-event av2-event-task" draggable="true" data-drag-id="'+escape(t.id)+'" data-task="'+escape(t.id)+'" data-area="'+escape(t.area)+'">'+escape(t.title)+'</button>').join("");
+      html+=blocks.map(s=>'<button type="button" class="av2-event av2-event-session" draggable="true" data-drag-session="'+escape(s.id)+'" data-session="'+escape(s.id)+'" data-area="'+escape(s.area||s.title)+'"><strong>'+escape(s.start)+'–'+escape(s.end)+'</strong> '+escape(s.area||s.title)+'</button>').join("");
       html+='</section>';
     }
     return html+'</div>';
@@ -131,7 +131,7 @@ export function createAgendaV2({getState,saveMutation,setTaskStatus,openTask,ope
     for(const s of state.sessions){if(ui.area&&(s.area||s.title)!==ui.area)continue;if(!all.has(s.date))all.set(s.date,[]);all.get(s.date).push({type:"session",session:s});}
     return '<div class="av2-timeline">'+[...all.keys()].sort().map(d=>'<section class="av2-timeline-day"><h3>'+escape(formatDate(d))+'</h3><div>'+
       all.get(d).sort((a,b)=>(a.session?.start||"").localeCompare(b.session?.start||"")).map(entry=>entry.type==="task"?card(entry.task):
-      '<div class="av2-timeline-session" data-area="'+escape(entry.session.area||entry.session.title)+'">'+escape(entry.session.start)+'–'+escape(entry.session.end)+' · Sessione '+escape(entry.session.area||entry.session.title)+'</div>').join("")+'</div></section>').join("")+'</div>';
+      '<button type="button" class="av2-timeline-session" data-session="'+escape(entry.session.id)+'" data-area="'+escape(entry.session.area||entry.session.title)+'">'+escape(entry.session.start)+'–'+escape(entry.session.end)+' · Sessione '+escape(entry.session.area||entry.session.title)+'</button>').join("")+'</div></section>').join("")+'</div>';
   }
   function quadrant(t) {return (t.important==null||t.urgent==null)?"unassigned":(t.important?"1":"0")+(t.urgent?"1":"0");}
   function renderMatrix(tasks){
@@ -185,6 +185,7 @@ export function createAgendaV2({getState,saveMutation,setTaskStatus,openTask,ope
     else if(b.dataset.task){window.dispatchEvent(new CustomEvent("tempo:show-task",{detail:{taskId:b.dataset.task}}));}
     else if(b.dataset.complete){const t=getState().tasks.find(t=>t.id===b.dataset.complete);if(t)setTaskStatus(t.id,t.status==="done"?"todo":"done");}
     else if(b.dataset.plan)openPlan(b.dataset.plan);
+    else if(b.dataset.session)window.dispatchEvent(new CustomEvent("tempo:edit-session",{detail:{sessionId:b.dataset.session}}));
     else if(b.dataset.toggleCompleted){ui.completed=!ui.completed;render();}
     else if(b.dataset.shift){const delta=Number(b.dataset.shift);
       if(ui.calendar==="month"){const d=new Date(ui.anchor+"T12:00:00");ui.anchor=localDateString(new Date(d.getFullYear(),d.getMonth()+delta,1,12));}
@@ -199,13 +200,28 @@ export function createAgendaV2({getState,saveMutation,setTaskStatus,openTask,ope
     else if(t.dataset.search){ui.search=t.value;render();}
   });
   root.addEventListener("keydown",event=>{if(event.target.dataset.search && event.key==="Enter"){ui.search=event.target.value;render();}});
-  root.addEventListener("dragstart",event=>{const c=event.target.closest("[data-drag-id]");if(c)event.dataTransfer.setData("text/plain",c.dataset.dragId);});
-  root.addEventListener("dragover",event=>{if(event.target.closest("[data-drop-status],[data-drop-quadrant]"))event.preventDefault();});
+  root.addEventListener("dragstart",event=>{const c=event.target.closest("[data-drag-id],[data-drag-session]");if(c)event.dataTransfer.setData("text/plain",c.dataset.dragSession?"session:"+c.dataset.dragSession:"task:"+c.dataset.dragId);});
+  root.addEventListener("dragover",event=>{if(event.target.closest("[data-drop-status],[data-drop-quadrant],[data-date]"))event.preventDefault();});
   root.addEventListener("drop",event=>{
-    const target=event.target.closest("[data-drop-status],[data-drop-quadrant]");
+    const target=event.target.closest("[data-drop-status],[data-drop-quadrant],[data-date]");
     if(!target)return;event.preventDefault();
-    const id=event.dataTransfer.getData("text/plain"),t=getState().tasks.find(t=>t.id===id);
-    if(!t)return;
+    const raw=event.dataTransfer.getData("text/plain"),type=raw.slice(0,raw.indexOf(":")),id=raw.slice(raw.indexOf(":")+1);
+    const t=getState().tasks.find(x=>x.id===id);
+    if(target.dataset.date){
+      if(type==="task"&&t)patch(id,{dueDate:target.dataset.date});
+      else if(type==="session"){
+        const session=getState().sessions.find(x=>x.id===id);
+        if(!session)return;
+        if(sessionBounds(session).start<=new Date())return showToast("Modifica le sessioni già iniziate dalla sezione Sessioni.");
+        const moved={...session,date:target.dataset.date};
+        if(sessionBounds(moved).start<=new Date())return showToast("Non puoi spostare una sessione nel passato.");
+        const other=getState().sessions.filter(x=>x.id!==id);
+        if(hasSessionOverlaps([...other,moved]))return showToast("Sovrapposizione: sessione non spostata.");
+        saveMutation(state=>{state.sessions=state.sessions.map(x=>x.id===id?moved:x);});
+      }
+      return;
+    }
+    if(type!=="task"||!t)return;
     if(target.dataset.dropStatus)setTaskStatus(id,target.dataset.dropStatus);
     else if(target.dataset.dropQuadrant){const q=target.dataset.dropQuadrant;patch(id,{important:q[0]==="1",urgent:q[1]==="1"});}
   });
