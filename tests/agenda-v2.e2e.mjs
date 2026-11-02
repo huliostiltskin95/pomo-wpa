@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
 
@@ -42,8 +43,34 @@ try {
   assert.equal(t.subtasks[0].title,"Sottotask di collaudo");
   assert.equal(t.status,"todo","No view should auto-complete a task");
   assert.equal(t.description,"**Descrizione** Markdown");
+  // Exported JSON must include the new fields and the original Markdown.
+  await page.locator("[data-view-link=impostazioni]").click();
+  const downloadPromise=page.waitForEvent("download");
+  await page.locator("#export-button").click();
+  const downloaded=await downloadPromise;
+  const backup=JSON.parse(await readFile(await downloaded.path(),"utf8"));
+  const exported=backup.tasks.find(item=>item.title==="Collaudo multivista");
+  assert.ok(exported);
+  assert.equal(exported.subtasks[0].title,"Sottotask di collaudo");
+  assert.equal(exported.important,true);
+
+  // Confirm the same task is accessible on a narrow mobile viewport.
+  await page.setViewportSize({width:390,height:844});
+  await page.locator("[data-view-link=agenda]").click();
+  await page.locator('#tempo-agenda-v2 [data-smart="all"]').click();
+  await page.locator('#tempo-agenda-v2 [data-view="list"]').click();
+  await page.locator(".av2-task-title",{hasText:"Collaudo multivista"}).click();
+  await page.locator("#tempo-task-panel:not([hidden])").waitFor({state:"visible"});
+  await page.locator("#tempo-task-panel .tempo-task-panel-close").click();
+
+  // Offline reload uses the versioned service-worker cache, not GitHub network.
+  await page.evaluate(()=>navigator.serviceWorker.ready);
+  await page.context().setOffline(true);
+  await page.reload({waitUntil:"domcontentloaded"});
+  await page.locator("#tempo-agenda-v2").waitFor({state:"attached",timeout:12000});
+  await page.context().setOffline(false);
   assert.deepEqual(errors,[],"Unexpected uncaught browser errors");
-  console.log("PASS: task input, detail pane, subtasks, five views and reload persistence");
+  console.log("PASS: all five views, details, subtasks, persistence, JSON backup, mobile and offline reload");
 } finally {
   await browser.close();
 }
