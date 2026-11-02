@@ -91,6 +91,10 @@
         }
         content.appendChild(copy);
       }
+      const extra=document.createElement("div");
+      extra.className="tempo-v2-detail-extras";
+      content.appendChild(extra);
+      window.dispatchEvent(new CustomEvent("tempo:task-detail-rendered",{detail:{taskId:selectedId,container:extra}}));
       const actions=panel.querySelector(".tempo-task-panel-actions");
       actions.replaceChildren();
       for(const [selector,label,isPrimary] of [
@@ -128,6 +132,15 @@
     });
     const observer=new MutationObserver(()=>{if(selectedId)draw();});
     observer.observe(list,{childList:true});
+    window.addEventListener("tempo:show-task",event=>{
+      const id=event.detail?.taskId;
+      if(!id||!cardFor(id))return;
+      lastTrigger=null;
+      selectedId=id;
+      panel.hidden=false;
+      draw();
+      panel.focus();
+    });
     window.addEventListener("hashchange",()=>{if(!panel.hidden)close();});
   };
   if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",ready);
