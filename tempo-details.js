@@ -50,6 +50,23 @@
       }
       const content=panel.querySelector(".tempo-task-panel-content");
       content.replaceChildren();
+      const sourceStatus=card.querySelector("select[data-task-status]");
+      if(sourceStatus){
+        const statusField=document.createElement("label");
+        statusField.className="tempo-task-panel-status";
+        statusField.textContent="Stato dell’attività";
+        const select=sourceStatus.cloneNode(true);
+        select.removeAttribute("data-task-status");
+        select.setAttribute("aria-label","Stato dell’attività");
+        select.addEventListener("change",()=>{
+          const original=card.querySelector("select[data-task-status]");
+          if(!original)return;
+          original.value=select.value;
+          original.dispatchEvent(new Event("change",{bubbles:true}));
+        });
+        statusField.appendChild(select);
+        content.appendChild(statusField);
+      }
       for(const selector of [".task-reminder",".task-description",".task-tags",".task-estimate-line",".task-progress",".task-planning-note"]){
         const original=card.querySelector(selector);
         if(!original)continue;
