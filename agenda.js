@@ -433,15 +433,21 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
   });
   const due = value => {
     if(!value)return "";
+    const key = value.toLocaleLowerCase("it").normalize("NFD").replace(/[\u0300-\u036f]/g,"");
     const base=new Date();base.setHours(12,0,0,0);
-    if(value==="oggi")return localDateString(base);
-    if(value==="domani"){base.setDate(base.getDate()+1);return localDateString(base);}
+    if(key==="oggi")return localDateString(base);
+    if(key==="domani"){base.setDate(base.getDate()+1);return localDateString(base);}
+    const days = {domenica:0,lunedi:1,martedi:2,mercoledi:3,giovedi:4,venerdi:5,sabato:6};
+    if(Object.prototype.hasOwnProperty.call(days,key)){
+      base.setDate(base.getDate()+(days[key]-base.getDay()+7)%7);
+      return localDateString(base);
+    }
     if(/^\d{4}-\d{2}-\d{2}$/.test(value)){
       const d=new Date(value+"T12:00:00");
       if(!Number.isFinite(d.getTime())||localDateString(d)!==value)throw Error("Data non valida: "+value);
       return value;
     }
-    throw Error("Scadenza non riconosciuta: "+value);
+    throw Error("Data non riconosciuta: "+value);
   };
   function parseBulk(source = el.bulkInput.value) {
     return source.split(/\r?\n/).map((line,index)=>{
@@ -457,8 +463,10 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
           values.priority=({1:"alta",2:"media",3:"bassa",4:"nessuna"})[value];
         }
         if(symbol==="+"){
-          if(!/^([01]\d|2[0-3]):[0-5]\d$/.test(value))throw Error("Riga "+(index+1)+": ora prevista non valida (es. +16:30).");
-          values.plannedStart=value;
+          const sep=value.lastIndexOf("_"), time=sep<0?value:value.slice(sep+1), day=sep<0?"oggi":value.slice(0,sep);
+          if(!/^([01]\d|2[0-3]):[0-5]\d$/.test(time))throw Error("Riga "+(index+1)+": ora prevista non valida (es. +16:30 o +domani_16:30).");
+          values.plannedStart=time;
+          values.plannedDate=due(day);
         }
         if(symbol==="#")tags.push(value);
         if(symbol==="*")values.dueDate=due(value.toLowerCase());
@@ -482,7 +490,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
         }
         return space;
       }).trim();
-      if(values.plannedStart) values.plannedDate=values.dueDate || localDateString(new Date());
+      // A deadline (*) never determines the scheduled day (+).
       const task=normalizeTask({...values,id:uuid(),title,tags:parseTaskTags(tags),priority:values.priority,description,status:"todo",createdAt:new Date().toISOString()});
       if(!task)throw Error("Riga "+(index+1)+": task non valida.");
       return task;
@@ -491,16 +499,23 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
   function previewQuick() {
     const value = el.quickInput.value.trim();
     el.quickError.textContent = "";
-    if (!value) { el.quickPreview.textContent = "Titolo · !1 priorità · ^Area · @durata · +16:30 orario · *scadenza · #tag · | descrizione"; return; }
+    if (!value) {
+      el.quickPreview.textContent = "Titolo · !1 priorità · ^Area · @durata · +16:30 / +domani_16:30 · *scadenza · #tag · | descrizione";
+      return;
+    }
     try {
       const parsed = parseBulk(value);
       if (parsed.length !== 1) throw Error("Inserisci una sola attività per volta.");
-      const t = parsed[0];
-      el.quickPreview.textContent = [t.title, t.area, priorityLabels[t.priority],
-        t.estimateMinutes == null ? "" : format(t.estimateMinutes) + " lorde",
-        t.dueDate ? "Scadenza " + t.dueDate : "", t.plannedStart ? "Prevista " + t.plannedDate + " alle " + t.plannedStart : "", t.tags.length ? t.tags.map(x=>"#"+x).join(" ") : "",
-        t.description ? "Descrizione inclusa" : ""].filter(Boolean).join(" · ");
-    } catch(e) { el.quickError.textContent = e.message; el.quickPreview.textContent = "Controlla la sintassi."; }
+      const prepared = prepareNewTasks(parsed), t=prepared.tasks[0];
+      el.quickPreview.textContent = [t.title,t.area,priorityLabels[t.priority],
+        t.estimateMinutes==null?"":format(t.estimateMinutes)+" lorde",
+        t.dueDate?"Scadenza "+t.dueDate:"",
+        t.plannedStart?"Svolgimento "+t.plannedDate+" alle "+t.plannedStart:"",
+        t.tags.length?t.tags.map(x=>"#"+x).join(" "):"",
+        t.description?"Descrizione inclusa":"",
+        prepared.sessions.length>getState().sessions.length?"Sessione automatica":""
+      ].filter(Boolean).join(" · ");
+    } catch(e) {el.quickError.textContent=e.message;el.quickPreview.textContent="Controlla la sintassi.";}
   }
   el.quickInput.addEventListener("input", previewQuick);
   el.quickInput.addEventListener("keydown", event => {
@@ -511,11 +526,15 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
     try {
       const parsed = parseBulk(el.quickInput.value);
       if(parsed.length !== 1) throw Error("Inserisci una sola attività per volta.");
-      if (!saveMutation(state => { state.tasks = [...state.tasks, parsed[0]]; })) throw Error("Impossibile salvare: controlla lo spazio disponibile.");
+      const prepared=prepareNewTasks(parsed);
+      const count=prepared.sessions.length-getState().sessions.length;
+      if (!saveMutation(state => {
+        state.tasks=[...state.tasks,...prepared.tasks];
+        state.sessions=prepared.sessions;
+      })) throw Error("Impossibile salvare: controlla lo spazio disponibile.");
       el.quickInput.value = "";
-      previewQuick();
-      el.quickInput.focus();
-      showToast("Attività aggiunta: " + parsed[0].title);
+      previewQuick(); el.quickInput.focus();
+      showToast("Attività aggiunta"+(count?" e sessione programmata.":"."));
     } catch(e) { el.quickError.textContent = e.message; }
   });
   previewQuick();
@@ -537,8 +556,16 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
   }
   function previewBulk(){
     suggestBulk();
-    try {const parsed=parseBulk();el.bulkPreview.textContent=parsed.length+" task riconosciute. "+parsed.slice(0,7).map(t=>t.title+" ["+t.area+" · "+priorityLabels[t.priority]+"]"+(t.estimateMinutes?" · "+format(t.estimateMinutes):"")+(t.description?" · descrizione":"")+(t.dueDate?" · "+t.dueDate:"")).join(" | ");el.bulkError.textContent="";}
-    catch(e){el.bulkError.textContent=e.message;el.bulkPreview.textContent="Correggi la sintassi prima dell'importazione.";}
+    try {
+      const parsed=parseBulk(), prepared=prepareNewTasks(parsed);
+      const count=prepared.sessions.length-getState().sessions.length;
+      el.bulkPreview.textContent=parsed.length+" task riconosciute · "+count+" sessioni automatiche. "+
+        parsed.slice(0,7).map(t=>t.title+" ["+t.area+" · "+priorityLabels[t.priority]+"]"+
+          (t.estimateMinutes?" · "+format(t.estimateMinutes):"")+
+          (t.plannedStart?" · "+t.plannedDate+" "+t.plannedStart:"")+
+          (t.dueDate?" · scadenza "+t.dueDate:"")).join(" | ");
+      el.bulkError.textContent="";
+    } catch(e){el.bulkError.textContent=e.message;el.bulkPreview.textContent="Correggi la sintassi prima dell'importazione.";}
   }
   el.bulkButton.addEventListener("click",()=>{el.bulkInput.value="";previewBulk();el.bulkDialog.showModal();});
   el.bulkInput.addEventListener("input",previewBulk);
@@ -546,9 +573,14 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
   $("bulk-cancel").addEventListener("click",()=>el.bulkDialog.close());
   el.bulkForm.addEventListener("submit",event=>{
     event.preventDefault();
-    try{const parsed=parseBulk();if(!parsed.length)throw Error("Inserisci almeno una task.");
-      if(saveMutation(state=>{state.tasks=[...state.tasks,...parsed];})){el.bulkDialog.close();showToast(parsed.length+" task importate.");}
-    }catch(e){el.bulkError.textContent=e.message;}
+    try {
+      const parsed=parseBulk();
+      if(!parsed.length)throw Error("Inserisci almeno una task.");
+      const prepared=prepareNewTasks(parsed), count=prepared.sessions.length-getState().sessions.length;
+      if(saveMutation(state=>{
+        state.tasks=[...state.tasks,...prepared.tasks];state.sessions=prepared.sessions;
+      })){el.bulkDialog.close();showToast(parsed.length+" task importate · "+count+" sessioni programmate.");}
+    } catch(e){el.bulkError.textContent=e.message;}
   });
   el.newButton.addEventListener("click", () => openTask());
   el.form.addEventListener("submit", saveTask);
