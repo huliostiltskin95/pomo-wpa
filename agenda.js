@@ -71,6 +71,33 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
   const getUpcoming = taskId => getState().sessions.filter(session => sessionHasTask(session,taskId) &&
     sessionBounds(session).end > new Date());
 
+  // Create one actual session only when both gross duration and planned time exist.
+  // The session always belongs to the task's area; the task remains manually controlled.
+  function plannedSession(task, otherSessions, replacement = null) {
+    if (!task.plannedStart || task.estimateMinutes == null) return null;
+    if (task.estimateMinutes > 1440) throw Error("Per la programmazione automatica la durata non può superare 24 ore. Puoi creare la task senza +orario e suddividerla in più sessioni.");
+    const session = createTaskSession(task, {
+      id: replacement?.id || uuid(), date: task.plannedDate || localDateString(new Date()),
+      start: task.plannedStart, grossMinutes: replacement ? sessionDurationMinutes(replacement) : task.estimateMinutes,
+      workMinutes: replacement?.workMinutes ?? getState().defaults.workMinutes,
+      breakEnabled: replacement?.breakEnabled ?? getState().defaults.breakEnabled
+    });
+    if (!validSession(session)) throw Error("Data o orario della sessione non validi.");
+    if (sessionBounds(session).start.getTime() < Date.now() - 60000) throw Error("L'orario di svolgimento è nel passato. Indica una data futura con +domani_16:30 oppure +AAAA-MM-GG_16:30.");
+    if (hasSessionOverlaps([...otherSessions.filter(item=>item.id!==session.id), session]))
+      throw Error("La fascia oraria si sovrappone a una sessione esistente. Cambia +orario oppure collega manualmente la task alla sessione già programmata.");
+    return session;
+  }
+  function prepareNewTasks(parsed) {
+    const sessions = [...getState().sessions], tasks = [];
+    for (const task of parsed) {
+      const session = plannedSession(task, sessions);
+      if (session) { sessions.push(session); tasks.push({...task, autoSessionId:session.id}); }
+      else tasks.push(task);
+    }
+    return { tasks, sessions };
+  }
+
   function saveMutation(action) {
     const state = getState();
     const previousTasks = state.tasks;
@@ -209,20 +236,38 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
       const minutes = estimatedMinutesFromHours(el.estimate.value);
       if (Number.isNaN(minutes)) throw new Error("La durata deve essere in ore, con incrementi di 15 minuti (es. 1,5).");
       const oldTask = findTask(el.id.value);
-      const task = normalizeTask({
+      let task = normalizeTask({
         id: oldTask?.id || uuid(), title: el.title.value, area: el.area.value,
         priority: el.priority.value, estimateMinutes: minutes, dueDate: el.dueDate.value,
         plannedDate: el.plannedStart.value ? (el.plannedDate.value || localDateString(new Date())) : "", plannedStart: el.plannedStart.value,
+        autoSessionId: oldTask?.autoSessionId || "",
         tags: parseTaskTags(el.tags.value), description: el.description.value,
         status: el.status.value,
         completed: el.status.value === "done",
         createdAt: oldTask?.createdAt || new Date().toISOString()
       });
       if (!task) throw new Error("Controlla titolo, area, priorità, descrizione e durata.");
+      const stateBeforeSave = getState();
+      const linked = oldTask?.autoSessionId ? stateBeforeSave.sessions.find(s=>s.id===oldTask.autoSessionId) : null;
+      const timeChanged = !!oldTask && (oldTask.plannedStart!==task.plannedStart || oldTask.plannedDate!==task.plannedDate);
+      let scheduledSession = null;
+      if (!oldTask && task.plannedStart && task.estimateMinutes != null) {
+        scheduledSession = plannedSession(task, stateBeforeSave.sessions);
+      } else if (linked && timeChanged) {
+        if (!task.plannedStart) throw Error("La task ha una sessione collegata. Per rimuovere l'orario, modifica o elimina prima la sessione nella sezione Sessioni.");
+        if (sessionBounds(linked).start <= new Date()) throw Error("La sessione è già iniziata o terminata: riprogrammala separatamente.");
+        scheduledSession = plannedSession(task, stateBeforeSave.sessions, linked);
+      } else if (oldTask && !linked && timeChanged && task.plannedStart && task.estimateMinutes != null) {
+        scheduledSession = plannedSession(task, stateBeforeSave.sessions);
+      }
+      if (scheduledSession) task = {...task, autoSessionId:scheduledSession.id};
       const cancelScheduled = askCancelUpcomingOnCompletion(oldTask, task.status);
       if (!saveMutation(state => {
         state.tasks = oldTask ? state.tasks.map(item => item.id === task.id ? task : item) :
           [...state.tasks, task];
+        if (scheduledSession) state.sessions = linked && scheduledSession.id===linked.id
+          ? state.sessions.map(item=>item.id===scheduledSession.id ? scheduledSession : item)
+          : [...state.sessions,scheduledSession];
         if (cancelScheduled) state.sessions = state.sessions.map(session => sessionHasTask(session,task.id) && sessionBounds(session).end > new Date() ? withSessionTasks(session,sessionTaskIds(session).filter(id=>id!==task.id)):session);
         if(oldTask && oldTask.area!==task.area) state.sessions=state.sessions.map(session=>sessionHasTask(session,task.id)&&sessionTaskIds(session).length===1?{...session,title:task.area,area:task.area}:session);
       })) return;
