@@ -16,7 +16,7 @@ test("task fields and hierarchical tags are normalized and validated", () => {
   assert.equal(taskHasTag(task, "Storia/Grecia"), true);
   assert.equal(taskHasTag(task, "Storia/Roma"), false);
 });
-test("hours are interpreted as net focus time and pauses extend calendar time", () => {
+test("legacy focus estimates and new gross time blocks have distinct semantics", () => {
   assert.equal(estimatedMinutesFromHours("1.5"), 90);
   assert.equal(estimatedMinutesFromHours("1.1"), NaN);
   assert.equal(wallMinutesForFocus(90, 25, true), 105);
@@ -28,8 +28,14 @@ test("hours are interpreted as net focus time and pauses extend calendar time", 
   assert.equal(focusMinutesInSession(s), 90);
   assert.equal(plannedFocusMinutes(task.id, [s]), 90);
   assert.equal(getPhase(s, new Date(2026,10,2,9,25)).kind, "break");
-  assert.throws(() => createTaskSession(task, { id: "s2", date: "2026-11-02",
-    start: "23:00", focusMinutes: 120, workMinutes: 25, breakEnabled: true }));
+  const overnight = createTaskSession(task, { id: "s2", date: "2026-11-02",
+    start: "23:00", focusMinutes: 120, workMinutes: 25, breakEnabled: true });
+  assert.equal(overnight.end, "01:20");
+  assert.equal(validSession(overnight), true);
+  const gross = createTaskSession(task, { id: "s3", date: "2026-11-02",
+    start: "10:00", grossMinutes: 90, workMinutes: 25, breakEnabled: true });
+  assert.equal(gross.end, "11:30");
+  assert.equal(focusMinutesInSession(gross), 75);
 });
 test("existing sessions and linked task sessions share overlap protection", () => {
   const a = createTaskSession(task, { id: "s1", date: "2026-11-02", start: "09:00",
