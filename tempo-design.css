@@ -171,6 +171,8 @@ input[type="checkbox"]{accent-color:var(--accent)}
 .tempo-task-panel-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:20px;padding-top:16px;border-top:1px solid var(--line)}
 .tempo-task-panel-actions button{flex:1;min-width:90px}
 .tempo-task-panel-content .markdown-preview input[type="checkbox"]{pointer-events:auto}
+.tempo-task-panel-status{display:grid;gap:8px;margin-bottom:18px;color:var(--muted);font-size:12px;font-weight:650}
+.tempo-task-panel-status select{min-height:42px;padding:8px 12px;border:1px solid var(--line);border-radius:9px;background:var(--surface);color:var(--text);font-size:13px}
 html[data-tempo-theme="dark"] .ratio-note,html[data-tempo-theme="dark"] .form-hint{color:var(--muted)}
 html[data-tempo-theme="dark"] .timer-card,html[data-tempo-theme="dark"] .session-dialog{box-shadow:none}
 html[data-tempo-theme="dark"] input,html[data-tempo-theme="dark"] textarea,html[data-tempo-theme="dark"] select{color-scheme:dark}
