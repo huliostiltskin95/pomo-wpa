@@ -21,6 +21,7 @@ jobs:
           node --check tempo-details.js
           node --check core/tempo-appearance.js
           node --check agenda.js
+          node --check agenda-v2.js
           node --check core/tempo-tasks.js
           node --check core/tempo-core.js
           node --check core/tempo-audio.js
