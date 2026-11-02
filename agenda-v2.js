@@ -36,7 +36,7 @@ export function createAgendaV2({getState,saveMutation,setTaskStatus,openTask,ope
       case "week":return (t.dueDate && t.dueDate<=last) || dates.some(d=>d>=current&&d<=last);
       case "overdue":return !!t.dueDate && t.dueDate<current;
       case "nodate":return !t.dueDate && dates.length===0;
-      case "attention":return !!getTaskAttention(t,state.sessions,new Date());
+      case "attention":return getTaskAttention(t,state.sessions,new Date())?.kind==="reschedule";
       default:return true;
     }
   }
