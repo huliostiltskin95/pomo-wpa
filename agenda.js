@@ -52,7 +52,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
       checkboxes.push({ token, lineIndex, checked, label: escape(match[3]), depth: match[1].length });
       return token;
     }).join("\n");
-    s = s.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, label, url) =>
+    s = s.replace(/\[([^\]\n]+)\]\(((?:https?:\/\/|mailto:|obsidian:\/\/|logseq:\/\/|capacities:\/\/|ticktick:\/\/)[^\s)]+)\)/gi, (_, label, url) =>
       '<a href="' + url.replace(/&amp;/g, "&").replace(/"/g, "%22") + '" target="_blank" rel="noopener noreferrer">' + label + '</a>');
     s = s.replace(/^### (.+)$/gm, '<h5>$1</h5>').replace(/^## (.+)$/gm, '<h4>$1</h4>').replace(/^# (.+)$/gm, '<h3>$1</h3>');
     s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/\*(.+?)\*/g, '<em>$1</em>').replace(/`([^`]+)`/g, '<code>$1</code>');
