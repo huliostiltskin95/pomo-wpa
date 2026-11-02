@@ -217,7 +217,10 @@ export function createAgendaV2({getState,saveMutation,setTaskStatus,openTask,ope
         if(sessionBounds(moved).start<=new Date())return showToast("Non puoi spostare una sessione nel passato.");
         const other=getState().sessions.filter(x=>x.id!==id);
         if(hasSessionOverlaps([...other,moved]))return showToast("Sovrapposizione: sessione non spostata.");
-        saveMutation(state=>{state.sessions=state.sessions.map(x=>x.id===id?moved:x);});
+        saveMutation(state=>{
+          state.sessions=state.sessions.map(x=>x.id===id?moved:x);
+          state.tasks=state.tasks.map(x=>x.autoSessionId===id?{...x,plannedDate:moved.date,plannedStart:moved.start}:x);
+        });
       }
       return;
     }
