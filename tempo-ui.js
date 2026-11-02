@@ -16,12 +16,33 @@
     nav.setAttribute("aria-label", "Sezioni di Tempo");
     nav.innerHTML = views.map(([id,label,icon]) => '<a class="tempo-nav-link" href="#'+id+'" data-view-link="'+id+'"><span class="tempo-nav-icon" aria-hidden="true">'+icon+'</span><span>'+label+'</span></a>').join("");
     document.body.insertBefore(nav, main);
+    const separator = document.createElement("div");
+    separator.className = "tempo-nav-divider";
+    nav.appendChild(separator);
+    const areaHeading = document.createElement("div");
+    areaHeading.className = "tempo-nav-label";
+    areaHeading.textContent = "AREE";
+    nav.appendChild(areaHeading);
+    for (const name of ["Studio","Lavoro","Personale"]) {
+      const item = document.createElement("div");
+      item.className = "tempo-nav-area";
+      item.dataset.area = name;
+      const dot = document.createElement("span");
+      dot.className = "tempo-area-dot";
+      dot.setAttribute("aria-hidden","true");
+      item.append(dot,document.createTextNode(name));
+      nav.appendChild(item);
+    }
+    const footer = document.createElement("div");
+    footer.className = "tempo-nav-footer";
+    footer.textContent = "TEMPVS · Quiet Focus";
+    nav.appendChild(footer);
 
     const map = {
       oggi: [".intro", ".timer-card"],
       agenda: [".agenda-section"],
       sessioni: [".schedule-section"],
-      impostazioni: [".settings-card", ".sound-card", ".backup-card", ".notice"]
+      impostazioni: [".tempo-appearance-settings", ".settings-card", ".sound-card", ".backup-card", ".notice"]
     };
     for (const [view, selectors] of Object.entries(map)) {
       for (const selector of selectors) {
@@ -65,6 +86,47 @@
       document.addEventListener("keydown", event => { if (event.key === "Escape") close(); });
     }
 
+    const topActions = document.querySelector(".top-actions");
+    if (topActions) {
+      const pill = document.createElement("span");
+      pill.className = "tempo-cloud-compact";
+      pill.setAttribute("role","status");
+      pill.setAttribute("aria-live","polite");
+      pill.innerHTML = '<span class="tempo-cloud-compact-dot" aria-hidden="true"></span><span class="tempo-cloud-compact-label">Archivio locale</span>';
+      topActions.prepend(pill);
+      window.addEventListener("tempo:cloud-status",event=>{
+        const d=event.detail||{},phase=d.phase||"idle";
+        pill.dataset.state=phase==="error"?"error":d.busy?"busy":d.connected?"ok":"idle";
+        const label=phase==="error"?"Errore Dropbox":d.busy?"Sincronizzazione…":phase==="pending"?"Modifiche in attesa":d.connected?(d.ready?"Dropbox collegato":"Dropbox da configurare"):"Archivio locale";
+        pill.querySelector(".tempo-cloud-compact-label").textContent=label;
+        pill.title=d.message||label;
+      });
+    }
+    const appearanceForm = document.getElementById("tempo-appearance-form");
+    if (appearanceForm) {
+      const themeField=document.getElementById("tempo-theme");
+      const densityField=document.getElementById("tempo-density");
+      const colors={Studio:document.getElementById("tempo-color-studio"),Lavoro:document.getElementById("tempo-color-lavoro"),Personale:document.getElementById("tempo-color-personale")};
+      const defaultColors={Studio:"#D65B56",Lavoro:"#29845C",Personale:"#D6A323"};
+      const showAppearance=data=>{
+        const a=data||{};
+        themeField.value=a.theme||"system";
+        densityField.value=a.density||"normal";
+        for(const area of Object.keys(colors))colors[area].value=a.areaColors?.[area]||defaultColors[area];
+      };
+      const saveAppearance=()=>{
+        const areaColors={};
+        for(const area of Object.keys(colors))areaColors[area]=colors[area].value;
+        window.dispatchEvent(new CustomEvent("tempo:appearance-save",{detail:{theme:themeField.value,density:densityField.value,areaColors}}));
+      };
+      appearanceForm.addEventListener("change",saveAppearance);
+      document.getElementById("tempo-appearance-reset")?.addEventListener("click",()=>{
+        for(const area of Object.keys(colors))colors[area].value=defaultColors[area];
+        saveAppearance();
+      });
+      window.addEventListener("tempo:appearance-updated",event=>showAppearance(event.detail));
+      showAppearance(readState().appearance);
+    }
     const agendaList = document.getElementById("agenda-list");
     const collapseTasks = () => {
       if (!agendaList) return;
@@ -103,13 +165,13 @@
     }
     function focusMinutes(session) {
       const toMin = t => {const p=String(t||"").split(":").map(Number);return p.length===2&&p.every(Number.isFinite)?p[0]*60+p[1]:0;};
-      const span = Math.max(0,toMin(session.end)-toMin(session.start)), work=Number(session.workMinutes)||25;
+      let span=toMin(session.end)-toMin(session.start);if(span<0)span+=1440;span=Math.max(0,span);const work=Number(session.workMinutes)||25;
       if (!session.breakEnabled) return span;
       const pause=Math.max(1,Math.round(work/5)), cycle=work+pause;
       return Math.floor(span/cycle)*work+Math.min(work,span%cycle);
     }
     function startOf(session) {return new Date(session.date+"T"+session.start+":00").getTime();}
-    function endOf(session) {return new Date(session.date+"T"+session.end+":00").getTime();}
+    function endOf(session) {const end=new Date(session.date+"T"+session.end+":00").getTime();return end<startOf(session)?end+86400000:end;}
     function renderOverview() {
       const state=readState(), sessions=Array.isArray(state.sessions)?state.sessions:[], tasks=Array.isArray(state.tasks)?state.tasks:[], history=Array.isArray(state.history)?state.history:[];
       const now=Date.now(), next=sessions.filter(s=>endOf(s)>now).sort((a,b)=>startOf(a)-startOf(b)).slice(0,4);
@@ -122,7 +184,11 @@
           const time=document.createElement("strong");
           time.textContent=s.date+" · "+s.start+"–"+s.end;
           const title=document.createElement("span");title.textContent=s.title;
-          row.append(time,title);nextEl.appendChild(row);
+          row.dataset.area=s.area||s.title;
+          row.append(time,title);
+          const linked=tasks.filter(t=>(Array.isArray(s.taskIds)?s.taskIds:[s.taskId]).includes(t.id));
+          if(linked.length){const description=document.createElement("span");description.textContent="☐ "+linked.map(t=>t.title).join(", ");row.append(description);}
+          nextEl.appendChild(row);
         }
       }
       const loggedIds = new Set(history.map(h=>h.sessionId));

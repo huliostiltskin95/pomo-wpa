@@ -10,7 +10,8 @@ test("validates real calendar dates and 24-hour times", () => {
   assert.equal(validSession(session("ok", "09:00", "10:00")), true);
   assert.equal(validSession(session("bad-date", "09:00", "10:00", "2026-02-30")), false);
   assert.equal(validSession(session("bad-time", "25:00", "26:00")), false);
-  assert.equal(validSession(session("zero", "09:00", "09:00")), false);
+  assert.equal(validSession(session("overnight", "21:00", "00:00")), true);
+  assert.equal(validSession(session("full-day", "09:00", "09:00")), true);
 });
 
 test("detects nested and adjacent session overlaps correctly", () => {

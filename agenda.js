@@ -172,6 +172,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
       const attention = attentions.get(task.id);
       const card = document.createElement("article");
       card.dataset.taskId = task.id;
+      card.dataset.area = task.area;
       card.className = "task-item" + (task.status === "done" ? " task-completed" : "") + (attention ? " task-needs-attention" : "");
       const badgeTags = task.tags.map(tag => '<button type="button" class="tag-chip" data-tag="' +
         escape(tag) + '" title="Filtra per questo tag">' + escape(tag.replaceAll("/", " › ")) + "</button>").join("");
