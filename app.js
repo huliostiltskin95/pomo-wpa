@@ -111,10 +111,14 @@ import { localDateString, timeToMinutes, dateTime, formatTime, formatDate, escap
     const {start,end}=sessionBounds(session);
     const overlaps=state.sessions.some(s=>{if(s.id===session.id)return false;const bounds=sessionBounds(s);return start<bounds.end&&end>bounds.start;});
     if(overlaps){els.formError.textContent="Questa sessione si sovrappone a un'altra sessione dello stesso giorno.";return;}
-    const previous=state.sessions, previousHistory=state.history;
+    const previous=state.sessions, previousTasks=state.tasks, previousHistory=state.history;
     if(existingSession)archivePast(existingSession);
     state.sessions=existingId?state.sessions.map(s=>s.id===existingId?session:s):[...state.sessions,session];
-    if(!persist()){state.sessions=previous;state.history=previousHistory;return;}
+    if(existingSession){
+      state.tasks=state.tasks.map(t=>t.autoSessionId===existingId && session.taskIds.includes(t.id)
+        ? {...t,plannedDate:session.date,plannedStart:session.start} : t);
+    }
+    if(!persist()){state.sessions=previous;state.tasks=previousTasks;state.history=previousHistory;return;}
     els.filterDate.value=session.date;els.dialog.close();renderAll();showToast(existingId?"Sessione aggiornata.":"Sessione aggiunta all'agenda.");
   }
   function deleteSession(id){
