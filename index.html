@@ -20,12 +20,6 @@
   </header>
 
   <main class="layout">
-    <section class="intro">
-      <p class="eyebrow">IL TUO TEMPO, CON INTENZIONE</p>
-      <h1>Fai spazio alla concentrazione.</h1>
-      <p class="intro-copy">Programma le tue finestre di lavoro. TEMPVS avvierà i cicli all'orario previsto, se l'app è aperta.</p>
-    </section>
-
     <section class="timer-card" aria-labelledby="timer-heading">
       <div class="timer-topline"><div><p class="eyebrow" id="timer-mode">NESSUNA SESSIONE ATTIVA</p><h2 id="timer-heading">Pronto quando vuoi</h2></div><span id="phase-pill" class="phase-pill neutral">In attesa</span></div>
       <div class="timer-display" id="timer-display" role="timer" aria-live="off">25:00</div>
@@ -38,20 +32,20 @@
     <section class="tempo-inbox-section tempo-view-section" data-tempo-view="inbox"></section>
 
     <section id="agenda" class="agenda-section" aria-labelledby="agenda-heading">
-      <div class="section-heading">
-        <div><p class="eyebrow">ORGANIZZAZIONE</p><h2 id="agenda-heading">Agenda</h2>
-          <p class="muted">Attività, stime e blocchi di concentrazione programmati.</p></div>
+      <div class="section-heading tempo-agenda-heading">
+        <h2 id="agenda-heading" class="tempo-visually-hidden">Agenda</h2>
         <div class="agenda-extra-actions"><button id="bulk-task-button" class="button button-secondary" type="button">Inserimento multiplo</button><button id="manage-tags-button" class="button button-secondary" type="button">Gestisci tag</button><button id="new-task-button" class="button button-primary" type="button">＋ Nuova task</button></div>
       </div>
       <form id="quick-task-form" class="tempo-quick-task" autocomplete="off">
         <label for="quick-task-input">Inserimento rapido</label>
         <div class="tempo-quick-task-row">
-          <input id="quick-task-input" type="text" maxlength="10500" placeholder="Nuova attività !1 ^Lavoro @30m +domani_16:30 *venerdì | Descrizione Markdown" aria-describedby="quick-task-preview quick-task-error">
+          <input id="quick-task-input" type="text" maxlength="10500" placeholder="Nuova task · !1 ^Lavoro @30m *venerdì" aria-describedby="quick-task-preview quick-task-error">
           <button type="submit" class="button button-primary">Aggiungi</button>
         </div>
         <p id="quick-task-preview" class="tempo-quick-preview" aria-live="polite"></p>
         <p id="quick-task-error" class="form-error" role="alert"></p>
       </form>
+      <details class="tempo-inline-help tempo-quick-help"><summary>Guida all'inserimento rapido</summary><p>!1–!4: priorità · ^Studio/^Lavoro/^Personale: area · @30m: stima lorda · *venerdì: scadenza · +domani_16:30: sessione programmata (con @durata) · #tag · |: descrizione Markdown.</p></details>
       <div class="agenda-toolbar">
         <label>Area<select id="agenda-area-filter">
           <option value="">Tutte</option><option>Personale</option><option>Lavoro</option><option>Studio</option>
@@ -124,17 +118,45 @@
     </section>
 
     <section class="backup-card" aria-labelledby="dropbox-heading">
-      <div><p class="eyebrow">SINCRONIZZAZIONE</p><h2 id="dropbox-heading">Dropbox</h2><p class="muted">Archivio privato delle attività e sessioni. All'apertura scarica i cambiamenti remoti; dopo le modifiche carica il backup. Le modifiche compatibili vengono unite automaticamente; se lo stesso dato cambia in modo incompatibile, scegli quale modifica conservare. La sovrascrittura resta disponibile solo come alternativa manuale.</p><p id="dropbox-status" class="muted" role="status" aria-live="polite">Dropbox non collegato</p></div>
+      <div><h2 id="dropbox-heading">Dropbox</h2>
+        <p class="muted">Sincronizzazione automatica e unione delle modifiche compatibili.</p>
+        <p id="dropbox-status" class="muted" role="status" aria-live="polite">Dropbox non collegato</p>
+        <details class="tempo-inline-help"><summary>Come funziona la sincronizzazione</summary><p>All'apertura TEMPVS scarica le modifiche remote e carica quelle locali dopo i salvataggi. In caso di modifiche incompatibili allo stesso elemento, ti chiederà quale conservare. La sovrascrittura è un'alternativa manuale: prima di usarla, esporta un backup JSON.</p></details>
+      </div>
       <div class="dropbox-controls">
-        <div id="dropbox-setup"><label class="field-label" for="dropbox-key">Dropbox App key<input id="dropbox-key" type="text" autocomplete="off" spellcheck="false" placeholder="App key dalla Dropbox App Console"></label><button class="button button-primary" id="dropbox-connect" type="button">Collega Dropbox</button><p class="muted">Crea un'app Dropbox con accesso App folder e permessi files.content.read, files.content.write. Registra come Redirect URI l'indirizzo esatto della PWA.</p></div>
-        <div id="dropbox-initial" class="hidden"><p class="muted">Prima sincronizzazione: unisci i due archivi (consigliato) oppure scegli una copia da conservare. Esporta prima un backup JSON.</p><button class="button button-primary" id="dropbox-initial-merge" type="button">Unisci archivi (consigliato)</button><button class="button button-primary" id="dropbox-initial-upload" type="button">Carica archivio locale</button><button class="button button-secondary" id="dropbox-initial-download" type="button">Scarica archivio Dropbox</button><button class="button button-danger" id="dropbox-initial-overwrite" type="button">Sovrascrivi Dropbox con dati locali</button></div>
-        <div id="dropbox-actions" class="hidden"><button class="button button-primary" id="dropbox-merge" type="button">Unisci e sincronizza</button><button class="button button-secondary" id="dropbox-sync" type="button">Sincronizza ora</button><button class="button button-secondary" id="dropbox-download" type="button">Scarica backup</button><button class="button button-secondary" id="dropbox-resolve" type="button">Risolvi conflitto: conserva Dropbox</button><button class="button button-danger" id="dropbox-force-upload" type="button">Risolvi conflitto: conserva dati locali</button></div>
-        <button id="dropbox-recovery" class="button button-secondary hidden" type="button">Scarica copia precedente</button><button id="dropbox-disconnect" class="button button-secondary" type="button">Scollega Dropbox</button>
+        <div id="dropbox-setup">
+          <label class="field-label" for="dropbox-key">Dropbox App key<input id="dropbox-key" type="text" autocomplete="off" spellcheck="false" placeholder="App key dalla Dropbox App Console"></label>
+          <button class="button button-primary" id="dropbox-connect" type="button">Collega Dropbox</button>
+          <details class="tempo-inline-help"><summary>Istruzioni per il collegamento</summary><p>Crea un'app Dropbox con accesso App folder e permessi files.content.read, files.content.write. Registra come Redirect URI l'indirizzo esatto della PWA.</p></details>
+        </div>
+        <div id="dropbox-initial" class="hidden">
+          <p class="muted">Prima sincronizzazione: unisci gli archivi per conservare i dati compatibili.</p>
+          <button class="button button-primary" id="dropbox-initial-merge" type="button">Unisci archivi (consigliato)</button>
+          <details class="tempo-advanced-actions"><summary>Altre opzioni iniziali</summary>
+            <p class="muted">Esporta prima un backup JSON: queste operazioni non uniscono gli archivi.</p>
+            <button class="button button-secondary" id="dropbox-initial-upload" type="button">Carica archivio locale</button>
+            <button class="button button-secondary" id="dropbox-initial-download" type="button">Scarica archivio Dropbox</button>
+            <button class="button button-danger" id="dropbox-initial-overwrite" type="button">Sovrascrivi Dropbox con dati locali</button>
+          </details>
+        </div>
+        <div id="dropbox-actions" class="hidden">
+          <button class="button button-primary" id="dropbox-sync" type="button">Sincronizza ora</button>
+          <details class="tempo-advanced-actions"><summary>Unione manuale e risoluzione conflitti</summary>
+            <button class="button button-secondary" id="dropbox-merge" type="button">Unisci e sincronizza</button>
+            <button class="button button-secondary" id="dropbox-download" type="button">Scarica backup</button>
+            <button class="button button-secondary" id="dropbox-resolve" type="button">Conserva archivio Dropbox</button>
+            <button class="button button-danger" id="dropbox-force-upload" type="button">Sovrascrivi Dropbox con dati locali</button>
+          </details>
+        </div>
+        <button id="dropbox-recovery" class="button button-secondary hidden" type="button">Scarica copia precedente</button>
+        <details id="dropbox-account" class="tempo-advanced-actions hidden"><summary>Gestione collegamento</summary>
+          <button id="dropbox-disconnect" class="button button-secondary" type="button">Scollega Dropbox</button>
+        </details>
       </div>
     </section>
     <section class="backup-card"><div><p class="eyebrow">I TUOI DATI</p><h2>Backup e ripristino</h2><p class="muted">Attività, tag, stime e sessioni restano in questo browser. Il backup JSON conserva tutti i dati.</p></div><div class="backup-actions"><button id="export-button" class="button button-secondary" type="button">Esporta backup</button><label class="button button-secondary file-button">Importa backup<input id="import-input" type="file" accept=".json,application/json"></label></div></section>
 
-    <aside class="notice"><span class="notice-icon" aria-hidden="true">i</span><p><strong>Nota sull'avvio automatico.</strong> La scheda deve essere aperta e il dispositivo attivo. Se il browser sospende la pagina o il computer va in stop, il timer si riallinea all'orario reale al ritorno. Una PWA non può garantire l'avvio con l'app completamente chiusa su tutti i sistemi.</p></aside>
+    <details class="tempo-footer-note tempo-inline-help"><summary>Limiti dell'avvio automatico</summary><p>La scheda deve essere aperta e il dispositivo attivo. Se il browser sospende la pagina o il computer va in stop, il timer si riallinea all'orario reale al ritorno. Una PWA non può garantire l'avvio con l'app completamente chiusa su tutti i sistemi.</p></details>
   </main>
 
   <dialog id="task-dialog" class="session-dialog task-dialog" aria-labelledby="task-dialog-title">
@@ -164,8 +186,7 @@
         <label class="field-label">Scadenza<input id="task-due-date" type="date"></label>
         <label class="field-label"><span>Alternativa alla scadenza</span><span class="check-label"><input type="checkbox" id="task-long-term"> A lungo termine</span></label>
       </div>
-      <p class="form-hint">La task entra automaticamente in Agenda quando ha area, stima lorda e scadenza oppure «A lungo termine».</p>
-      <p class="form-hint">Se indichi ora prevista e durata, TEMPVS crea una sessione Pomodoro associata alla task. Scadenza e svolgimento sono indipendenti; il completamento resta manuale.</p>
+      <p class="form-hint">Area, stima e scadenza (o «A lungo termine») inseriscono la task in Agenda. Data, ora e durata possono creare una sessione associata; il completamento resta manuale.</p>
       <label class="field-label">Tag gerarchici
         <input id="task-tags" type="text" placeholder="Studio/Greco/Verbi, Studio/Didattica">
       </label>
@@ -188,7 +209,8 @@
   <dialog id="bulk-dialog" class="session-dialog task-dialog">
     <form id="bulk-form">
       <div class="dialog-heading"><h2>Inserimento multiplo</h2><button id="bulk-close" type="button" class="icon-button" aria-label="Chiudi">×</button></div>
-      <p class="form-hint">Una task per riga: #tag, *scadenza, @durata lorda (es. @30m), ^area, +16:30 (oggi) oppure +domani_16:30 (giorno esplicito), !1–!4 priorità. Dopo | puoi scrivere una descrizione Markdown. @durata + +orario crea una sessione Pomodoro; *scadenza è indipendente. Se una sessione si sovrappone, nessuna task della lista viene importata.</p>
+      <p class="form-hint">Una task per riga. Puoi inserire scadenze, stime e sessioni direttamente nel testo.</p>
+      <details class="tempo-inline-help"><summary>Sintassi dell'inserimento multiplo</summary><p>#tag · *scadenza · @durata lorda (es. @30m) · ^area · +16:30 (oggi) oppure +domani_16:30 · !1–!4 priorità · | descrizione Markdown. @durata e +orario creano una sessione; *scadenza è indipendente. In caso di sovrapposizione non viene importata alcuna task.</p></details>
       <textarea id="bulk-input" rows="9" placeholder="Correggere verifiche !1 #scuola *venerdì @2h +domani_16:30 ^Lavoro | Rivedere le [griglie](https://example.com)"></textarea>
       <div id="bulk-smart-suggestions" class="task-tags" aria-label="Suggerimenti di tag esistenti"></div>
       <div id="bulk-preview" class="planned-summary" aria-live="polite"></div>
