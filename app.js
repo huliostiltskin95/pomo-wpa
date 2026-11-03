@@ -277,6 +277,13 @@ import { localDateString, timeToMinutes, dateTime, formatTime, formatDate, escap
   $("dropbox-connect").addEventListener("click",()=>dropbox.connect($("dropbox-key").value).catch(e=>showToast(e.message)));
   $("dropbox-initial-upload").addEventListener("click",()=>{if(confirm("Creare il primo backup Dropbox con i dati presenti in questo dispositivo? Se Dropbox contiene già un backup, l'operazione verrà bloccata."))dropbox.firstSync("upload").catch(e=>showToast(e.message));});
   $("dropbox-initial-download").addEventListener("click",()=>{if(confirm("Sostituire i dati locali con quelli di Dropbox? Esporta prima un backup manuale per sicurezza."))dropbox.firstSync("download").catch(e=>showToast(e.message));});
+  function overwriteDropboxWithLocal(){
+    if(!dropbox.info().connected)return;
+    if(!confirm("ATTENZIONE: sovrascrivere il backup Dropbox con tutti i dati di QUESTO dispositivo? I dati presenti soltanto su Dropbox verranno sostituiti. Gli archivi non saranno uniti."))return;
+    dropbox.forceUpload().catch(e=>showToast(e.message));
+  }
+  $("dropbox-initial-overwrite").addEventListener("click",overwriteDropboxWithLocal);
+  $("dropbox-force-upload").addEventListener("click",overwriteDropboxWithLocal);
   $("dropbox-sync").addEventListener("click",()=>dropbox.sync().catch(e=>showToast(e.message)));
   $("dropbox-download").addEventListener("click",()=>{if(dropbox.info().dirty){showToast("Modifiche locali in sospeso: usa la risoluzione conflitti.");return;}if(confirm("Scaricare il backup remoto e sostituire i dati locali?"))dropbox.forceDownload().catch(e=>showToast(e.message));});
   $("dropbox-resolve").addEventListener("click",()=>{if(!dropbox.info().ready)return;if(!confirm("ATTENZIONE: sostituire le modifiche locali con Dropbox? Verrà prima scaricata una copia JSON locale di sicurezza."))return;exportBackup();dropbox.forceDownload(true).catch(e=>showToast(e.message));});
