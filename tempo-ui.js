@@ -62,7 +62,7 @@
     const stats = document.createElement("section");
     stats.dataset.tempoView = "statistiche";
     stats.className = "tempo-view-section tempo-statistics";
-    stats.innerHTML = '<p class="eyebrow">RIEPILOGO</p><h2>Statistiche</h2><p class="muted">Il tempo lordo trascorso segue le sessioni conservate, pause comprese, e non misura l'attenzione effettiva.</p><div id="tempo-stat-grid" class="tempo-stat-grid"></div><p class="tempo-stat-footnote">Tempo pianificato e tempo trascorso sono distinti; tutte le durate sono lorde. Le sessioni eliminate non contribuiscono più ai conteggi.</p>';
+    stats.innerHTML = '<p class="eyebrow">RIEPILOGO</p><h2>Statistiche</h2><p class="muted">Il tempo lordo trascorso segue le sessioni conservate, pause comprese, e non misura la concentrazione effettiva.</p><div id="tempo-stat-grid" class="tempo-stat-grid"></div><p class="tempo-stat-footnote">Tempo pianificato e tempo trascorso sono distinti; tutte le durate sono lorde. Le sessioni eliminate non contribuiscono più ai conteggi.</p>';
     main.appendChild(stats);
 
     const toolbar = document.querySelector(".agenda-extra-actions");
