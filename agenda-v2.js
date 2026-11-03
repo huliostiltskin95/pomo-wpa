@@ -27,15 +27,16 @@ export function createAgendaV2({getState,saveMutation,setTaskStatus,openTask,ope
   function hasDate(t,state,date){return t.dueDate===date || sessionDates(t,state).includes(date);}
   function isListed(t,state){
     if(ui.list==="done")return t.status==="done";
+    if(t.inbox)return false;
     if(t.status==="done")return false;
     const current=today(), tomorrow=day(current,1), last=day(current,6);
     const dates=sessionDates(t,state);
     switch(ui.list){
-      case "today":return (t.dueDate && t.dueDate<=current) || dates.includes(current);
-      case "tomorrow":return t.dueDate===tomorrow || dates.includes(tomorrow);
-      case "week":return (t.dueDate && t.dueDate<=last) || dates.some(d=>d>=current&&d<=last);
+      case "today":return t.workDate===current || (t.dueDate && t.dueDate<=current) || dates.includes(current);
+      case "tomorrow":return t.workDate===tomorrow || t.dueDate===tomorrow || dates.includes(tomorrow);
+      case "week":return (t.workDate>=current&&t.workDate<=last) || (t.dueDate && t.dueDate<=last) || dates.some(d=>d>=current&&d<=last);
       case "overdue":return !!t.dueDate && t.dueDate<current;
-      case "nodate":return !t.dueDate && dates.length===0;
+      case "nodate":return !t.dueDate && !t.workDate && dates.length===0;
       case "attention":return getTaskAttention(t,state.sessions,new Date())?.kind==="reschedule";
       default:return true;
     }
@@ -59,7 +60,8 @@ export function createAgendaV2({getState,saveMutation,setTaskStatus,openTask,ope
       '<button class="av2-task-title '+(t.status==="done"?"av2-done":"")+'" data-task="'+escape(t.id)+'">'+escape(t.title)+'</button>'+
       '<span class="av2-area" title="'+escape(t.area)+'">'+escape(t.area)+'</span>'+
       '<span class="av2-priority av2-priority-'+escape(t.priority)+'">'+priorities[t.priority]+'</span>'+
-      (t.dueDate?'<span class="av2-date">'+escape(formatDate(t.dueDate))+'</span>':'')+
+      (t.workDate?'<span class="av2-date">Lavoro '+escape(formatDate(t.workDate))+'</span>':'')+
+      (t.dueDate?'<span class="av2-date">Scade '+escape(formatDate(t.dueDate))+'</span>':'')+
       '<button class="av2-more" data-plan="'+escape(t.id)+'" title="Programma una sessione">◷</button></div>';
   }
   function groupKey(t,state) {
@@ -235,6 +237,7 @@ export function createAgendaV2({getState,saveMutation,setTaskStatus,openTask,ope
     if(!t||!container)return;
     container.innerHTML='<section class="av2-detail-fields"><h3>Organizzazione</h3>'+
       '<label>Scadenza <input type="date" data-due="'+escape(t.id)+'" value="'+escape(t.dueDate||"")+'"></label>'+
+      '<label>Giorno di lavoro <input type="date" data-work="'+escape(t.id)+'" value="'+escape(t.workDate||"")+'"></label>'+
       '<label>Priorità <select data-priority="'+escape(t.id)+'">'+[["alta","Alta · !1"],["media","Media · !2"],["bassa","Bassa · !3"],["nessuna","Nessuna · !4"]].map(([v,l])=>'<option value="'+v+'" '+(t.priority===v?"selected":"")+'>'+l+'</option>').join("")+'</select></label>'+
       '<label>Importante <select data-importance="'+escape(t.id)+'"><option value="">Da classificare</option><option value="yes" '+(t.important===true?"selected":"")+'>Sì</option><option value="no" '+(t.important===false?"selected":"")+'>No</option></select></label>'+
       '<label>Urgente <select data-urgency="'+escape(t.id)+'"><option value="">Da classificare</option><option value="yes" '+(t.urgent===true?"selected":"")+'>Sì</option><option value="no" '+(t.urgent===false?"selected":"")+'>No</option></select></label>'+
@@ -244,6 +247,7 @@ export function createAgendaV2({getState,saveMutation,setTaskStatus,openTask,ope
     container.addEventListener("change",ev=>{
       const e=ev.target, current=getState().tasks.find(x=>x.id===taskId);if(!current)return;
       if(e.dataset.due)patch(taskId,{dueDate:e.value});
+      else if(e.dataset.work)patch(taskId,{workDate:e.value,inbox:false});
       else if(e.dataset.priority)patch(taskId,{priority:e.value});
       else if(e.dataset.importance)patch(taskId,{important:e.value===""?null:e.value==="yes"});
       else if(e.dataset.urgency)patch(taskId,{urgent:e.value===""?null:e.value==="yes"});
