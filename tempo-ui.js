@@ -49,9 +49,9 @@
     if (toolbar) {
       const menu = document.createElement("div");
       menu.className = "tempo-add-menu";
-      menu.innerHTML = '<button type="button" id="tempo-add-toggle" class="button button-primary" aria-expanded="false" aria-controls="tempo-add-options">＋ Aggiungi</button><div id="tempo-add-options" class="tempo-add-options hidden" role="menu"><button type="button" data-add-action="new-task-button" role="menuitem">Nuova task</button><button type="button" data-add-action="bulk-task-button" role="menuitem">Inserimento multiplo</button><button type="button" data-add-action="manage-tags-button" role="menuitem">Gestisci tag</button></div>';
+      menu.innerHTML = '<button type="button" id="tempo-add-toggle" class="button button-primary" aria-expanded="false" aria-controls="tempo-add-options">＋ Aggiungi</button><div id="tempo-add-options" class="tempo-add-options hidden" role="menu"><button type="button" data-add-action="new-task-button" role="menuitem">Nuova task</button><button type="button" data-add-action="bulk-task-button" role="menuitem">Inserimento multiplo</button></div>';
       toolbar.prepend(menu);
-      for (const id of ["new-task-button", "bulk-task-button", "manage-tags-button"]) {
+      for (const id of ["new-task-button", "bulk-task-button"]) {
         const target = document.getElementById(id);
         if (target) { target.classList.add("tempo-original-action"); target.setAttribute("tabindex", "-1"); }
       }
