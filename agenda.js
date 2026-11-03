@@ -119,7 +119,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
   function renderLegacy() {
     const state = getState();
     const now = new Date();
-    const attentions = new Map(state.tasks.map(task => [task.id, getTaskAttention(task, state.sessions, now)]));
+    const attentions = new Map(state.tasks.filter(task=>!task.inbox).map(task => [task.id, getTaskAttention(task, state.sessions, now)]));
     lastReminderSignature = state.tasks.map(task => task.id + ":" + task.status + ":" + (attentions.get(task.id)?.kind || "scheduled")).join("|");
     const missed = [...attentions.values()].filter(info => info?.kind === "reschedule").length;
     const unplanned = [...attentions.values()].filter(info => info?.kind === "unplanned").length;
@@ -145,6 +145,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
 
     const query = el.search.value.trim().toLocaleLowerCase("it");
     const filtered = state.tasks.filter(task =>
+      (task.status === "done" || !task.inbox) &&
       (!el.areaFilter.value || task.area === el.areaFilter.value) &&
       (el.statusFilter.value === "all" ||
        (el.statusFilter.value === "open" && task.status !== "done") ||
@@ -489,7 +490,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
     }
     throw Error("Data non riconosciuta: "+value);
   };
-  function parseBulk(source = el.bulkInput.value, defaultArea = "Studio") {
+  function parseBulk(source = el.bulkInput.value, defaultArea = "") {
     return source.split(/\r?\n/).map((line,index)=>{
       if(!line.trim())return null;
       const tags=[], values={dueDate:"",estimateMinutes:null,area:defaultArea,priority:"media",plannedStart:"",plannedDate:""};
@@ -552,7 +553,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
       const prepared = prepareNewTasks(parsed), t=prepared.tasks[0];
       el.quickPreview.textContent = [t.title,t.area,priorityLabels[t.priority],
         t.estimateMinutes==null?"":format(t.estimateMinutes)+" lorde",
-        t.dueDate?"Scadenza "+t.dueDate:"",
+        t.dueDate?"Scadenza "+t.dueDate:t.longTerm?"A lungo termine":"",
         t.plannedStart?"Svolgimento "+t.plannedDate+" alle "+t.plannedStart:"",
         t.tags.length?t.tags.map(x=>"#"+x).join(" "):"",
         t.description?"Descrizione inclusa":"",
