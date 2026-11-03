@@ -162,7 +162,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
 
     const remaining = state.tasks.filter(task => task.status !== "done");
     const allMinutes = remaining.reduce((sum, task) => sum + (task.estimateMinutes || 0), 0);
-    const areaStats = TASK_AREAS.map(area => { const areaTasks = remaining.filter(t=>t.area===area); const estimated = areaTasks.reduce((sum,t)=>sum+(t.estimateMinutes||0),0); const blocks = state.sessions.filter(s=>(s.area||s.title)===area); const scheduled=blocks.reduce((sum,s)=>sum+sessionDurationMinutes(s),0); const elapsed=blocks.filter(s=>sessionBounds(s).end<=now).reduce((sum,s)=>sum+sessionDurationMinutes(s),0); return area+": "+format(estimated)+" stimate · "+format(scheduled)+" programmate · "+format(elapsed)+" trascorse"; }).join(" | ");
+    const areaStats = TASK_AREAS.map(area => { const areaTasks = remaining.filter(t=>t.area===area); const estimated = areaTasks.reduce((sum,t)=>sum+(t.estimateMinutes||0),0); const blocks = state.sessions.filter(s=>(s.area||s.title)===area); const scheduled=blocks.reduce((sum,s)=>sum+sessionDurationMinutes(s),0); const elapsed=blocks.filter(s=>sessionBounds(s).end<=now).reduce((sum,s)=>sum+focusMinutesInSession(s),0); return area+": "+format(estimated)+" stimate · "+format(scheduled)+" programmate · "+format(elapsed)+" nette trascorse"; }).join(" | ");
     el.summary.textContent = state.tasks.length + " attività · " + remaining.length + " aperte · " +
       state.tasks.filter(task => task.status === "in_progress").length + " in corso · " + format(allMinutes) + " stimate · " + areaStats;
     el.list.replaceChildren();
@@ -404,7 +404,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
       const net=slots.reduce((sum,s)=>sum+focusMinutesInSession(s),0);
       el.planPreview.textContent=slots.length+" "+(slots.length===1?"sessione":"sessioni")+
         " · "+format(gross)+" lorde · "+format(net)+" nette previste · fine ultima sessione "+
-        slots.at(-1).date+" "+slots.at(-1).end;
+        slots[slots.length-1].date+" "+slots[slots.length-1].end;
       el.planError.textContent=existing?"Attenzione: almeno una sessione si sovrappone a un blocco esistente.":"";
     } catch(error) {
       el.planPreview.textContent="Modifica durata, data e ora per calcolare le sessioni.";
