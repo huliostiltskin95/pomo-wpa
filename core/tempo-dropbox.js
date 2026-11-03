@@ -122,6 +122,7 @@ export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus
     synced(data,rev);
   }
   async function applyMerged(item,{manual=false}={}){
+    if(overridePending&&!manual)return false;
     const local=current(),base=baseline();
     let decisions={},result=mergeSnapshots(base,local,item.file,decisions);
     if(result.conflicts.length && !manual){
@@ -142,6 +143,7 @@ export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus
     const merged=normalizeRemote?normalizeRemote(result.merged):result.merged;
     if(stateJSON(current())!==stateJSON(local))
       throw new Error("I dati locali sono cambiati durante la scelta. Riprova l'unione.");
+    if(overridePending&&!manual)return false;
     // Save the pre-merge version before any remote/local write.
     backupBeforeReplacement(merged);
     if(stateJSON(merged)===stateJSON(item.file)){
@@ -209,6 +211,7 @@ export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus
       }
       status("Verifica delle modifiche su Dropbox…","checking");
       const remote=await metadata();
+      if(overridePending)return;
       if(!remote){
         if(meta.rev)throw new Error("Backup remoto rimosso: evita una nuova copia senza conferma.");
         if(!meta.dirty)return;
@@ -228,6 +231,7 @@ export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus
       // Remote revision changed, or this device lacks a common ancestor.
       status("Confronto dell'archivio remoto e di quello locale…","downloading");
       const item=await download();
+      if(overridePending)return;
       if(item.rev!==remote.rev)
         throw new Error("Dropbox è cambiato durante il download. Riprova.");
       if(base&&!meta.dirty&&stateJSON(current())===stateJSON(base)){
