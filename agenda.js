@@ -544,7 +544,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
     const value = el.quickInput.value.trim();
     el.quickError.textContent = "";
     if (!value) {
-      el.quickPreview.textContent = "Titolo · !1 priorità · ^Area · @durata · +16:30 / +domani_16:30 · *scadenza · #tag · | descrizione";
+      el.quickPreview.textContent = "Titolo · !1 priorità · ^Area · @durata lorda · *scadenza / *lungo-termine · +orario facoltativo · #tag · | descrizione";
       return;
     }
     try {
@@ -679,7 +679,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
   function tick() {
     const now = new Date();
     if (typeof sendNotification === "function") {
-      for (const task of tasks()) {
+      for (const task of tasks().filter(t=>!t.inbox)) {
         const reminder = getTaskAttention(task, getState().sessions, now);
         if (reminder?.kind !== "reschedule" || !reminder.lastEnd) continue;
         const elapsed = now - reminder.lastEnd;
@@ -690,7 +690,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
         }
       }
     }
-    const currentSignature = tasks().map(task => task.id + ":" + task.status + ":" +
+    const currentSignature = tasks().filter(t=>!t.inbox).map(task => task.id + ":" + task.status + ":" +
       (getTaskAttention(task, getState().sessions, now)?.kind || "scheduled")).join("|");
     if (currentSignature !== lastReminderSignature) render();
   }
