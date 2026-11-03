@@ -173,10 +173,10 @@ function isOverlap(a,b) {
     if(!/^\d{4}-\d{2}-\d{2}$/.test(session.date||"")||
        !/^\d\d:\d\d$/.test(session.start||"")||
        !/^\d\d:\d\d$/.test(session.end||""))return null;
-    const start=new Date(session.date+"T"+session.start+":00").getTime();
-    const endDay=new Date(start);
-    const end=new Date(session.date+"T"+session.end+":00").getTime();
-    return [start,end<=start?end+86400000:end];
+    const start=new Date(session.date+"T"+session.start+":00");
+    const end=new Date(session.date+"T"+session.end+":00");
+    if(end<=start)end.setDate(end.getDate()+1);
+    return [start.getTime(),end.getTime()];
   };
   const x=bounds(a),y=bounds(b);
   return Boolean(x&&y&&x[0]<y[1]&&x[1]>y[0]);
