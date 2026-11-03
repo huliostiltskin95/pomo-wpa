@@ -29,3 +29,14 @@
 .tempo-fill-item li{padding:2px 0;font-size:13px}
 .tempo-day-launch{gap:8px;flex-wrap:wrap}
 .session-actions [data-fill]{white-space:nowrap}
+
+/* Multiline Inbox quick-entry: the same shortcut syntax as Agenda. */
+.tempo-inbox-capture{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:9px}
+.tempo-inbox-capture>label,.tempo-inbox-capture>.form-hint,.tempo-inbox-capture>.form-error,.tempo-inbox-capture>.tempo-inbox-capture-preview{grid-column:1/-1}
+.tempo-inbox-capture>label{font-weight:650;font-size:13px}
+.tempo-inbox-capture textarea{grid-column:1;min-width:0;min-height:110px;resize:vertical;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--surface);color:var(--text);font:inherit;line-height:1.5}
+.tempo-inbox-capture textarea:focus-visible{outline:3px solid var(--accent-soft);outline-offset:2px}
+.tempo-inbox-capture>.form-hint{margin:0;color:var(--muted);font-size:12px;line-height:1.55}
+.tempo-inbox-capture-preview{margin:0;color:var(--muted);font-size:12px;line-height:1.5;overflow-wrap:anywhere}
+.tempo-inbox-capture>.form-error{margin:0}
+@media(max-width:600px){.tempo-inbox-capture{grid-template-columns:1fr}.tempo-inbox-capture textarea,.tempo-inbox-capture>button{grid-column:1;max-width:100%}}
