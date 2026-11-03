@@ -1,4 +1,4 @@
-import { normalizeTask, createTaskSession, sessionHasTask, sessionTaskIds, grossMinutesForTask } from "./core/tempo-tasks.js";
+import { normalizeTask, isTaskInInbox, createTaskSession, sessionHasTask, sessionTaskIds, grossMinutesForTask } from "./core/tempo-tasks.js";
 import { localDateString, sessionBounds, sessionDurationMinutes, validSession, hasSessionOverlaps } from "./core/tempo-core.js";
 
 export function mountInbox({getState,saveMutation,openTask,showToast,parseTasks,prepareTasks}) {
@@ -6,11 +6,11 @@ export function mountInbox({getState,saveMutation,openTask,showToast,parseTasks,
   section.className="tempo-inbox-section tempo-view-section";
   section.dataset.tempoView="inbox";
   section.innerHTML=`
-    <div class="section-heading"><div><p class="eyebrow">RACCOLTA</p><h2>Inbox</h2><p class="muted">Cattura una o più task con la stessa sintassi dell'Agenda; una task per riga.</p></div></div>
+    <div class="section-heading"><div><p class="eyebrow">RACCOLTA</p><h2>Inbox</h2><p class="muted">Le task passano automaticamente in Agenda con area, stima lorda e scadenza oppure «A lungo termine».</p></div></div>
     <form id="tempo-inbox-capture" class="tempo-inbox-capture">
       <label for="tempo-inbox-title">Inserimento rapido multiplo</label>
       <textarea id="tempo-inbox-title" rows="4" maxlength="50000" required placeholder="Studio degli Assiri ^Studio @8h *martedì !2 #storia | Leggere il capitolo&#10;Preparare verifica ^Lavoro @2h *venerdì !1"></textarea>
-      <p class="form-hint">Una task per riga · !1–!4 priorità · ^Studio/^Lavoro/^Personale area · @durata lorda · *scadenza · #tag · | descrizione Markdown · +domani_16:30 programma anche una sessione, se è presente @durata.</p>
+      <p class="form-hint">Una task per riga · !1–!4 priorità · ^Studio/^Lavoro/^Personale area · @durata lorda · *scadenza o *lungo-termine · #tag · | descrizione Markdown · +domani_16:30 programma anche una sessione, se è presente @durata.</p>
       <p id="tempo-inbox-capture-preview" class="tempo-inbox-capture-preview" aria-live="polite"></p>
       <p id="tempo-inbox-capture-error" class="form-error" role="alert"></p>
       <button class="button button-primary" type="submit">Aggiungi task</button>
@@ -40,12 +40,11 @@ export function mountInbox({getState,saveMutation,openTask,showToast,parseTasks,
   let proposal=[];
   date.value=today();
   function render(){
-    const pending=getState().tasks.filter(t=>t.inbox&&t.status!=="done");
+    const pending=getState().tasks.filter(t=>isTaskInInbox(t)&&t.status!=="done");
     list.innerHTML=pending.length?pending.map(t=>`<article class="tempo-inbox-item" data-id="${esc(t.id)}">
-      <div class="tempo-inbox-item-text"><strong>${esc(t.title)}</strong><small>${esc(t.area)} · ${t.estimateMinutes==null?"Stima da definire":(t.estimateMinutes/60).toLocaleString("it-IT")+" h lorde"}</small></div>
+      <div class="tempo-inbox-item-text"><strong>${esc(t.title)}</strong><small>${esc(t.area||"Area da definire")} · ${t.estimateMinutes==null?"Stima da definire":(t.estimateMinutes/60).toLocaleString("it-IT")+" h lorde"} · ${t.dueDate?"Scadenza "+esc(t.dueDate):t.longTerm?"Lungo termine":"Scadenza da definire"}</small></div>
       <button type="button" class="button button-secondary" data-detail="${esc(t.id)}">Dettagli</button>
-      <label>Giorno di lavoro <input type="date" data-assign-date="${esc(t.id)}" value="${esc(date.value)}"></label>
-      <button type="button" class="button button-primary" data-assign="${esc(t.id)}">Assegna</button>
+
     </article>`).join(""):'<p class="muted">Inbox vuota. Le attività da organizzare compariranno qui.</p>';
     // A persisted day proposal is no longer trustworthy after an external edit.
     proposal=[];confirm.classList.add("hidden");slots.replaceChildren();
@@ -68,7 +67,8 @@ export function mountInbox({getState,saveMutation,openTask,showToast,parseTasks,
         (sessions.length===1?" sessione":" sessioni")+" da programmare. "+
         parsed.map(t=>t.title+" ("+t.area+
           (t.estimateMinutes==null?"":", "+(t.estimateMinutes/60).toLocaleString("it-IT")+" h lorde")+
-          (t.dueDate?", scadenza "+t.dueDate:"")+")").join(" · ");
+          (t.dueDate?", scadenza "+t.dueDate:t.longTerm?", lungo termine":"")+
+          (isTaskInInbox(t)?", Inbox":", Agenda")+")").join(" · ");
       return {prepared,sessions};
     }catch(error){capturePreview.textContent="";captureError.textContent=error.message;return null;}
   }
@@ -78,27 +78,18 @@ export function mountInbox({getState,saveMutation,openTask,showToast,parseTasks,
     const evaluated=evaluateCapture();
     if(!evaluated)return;
     const {prepared,sessions}=evaluated;
-    const scheduledIds=new Set(sessions.flatMap(s=>sessionTaskIds(s)));
-    // Explicit +orario and @durata requests create a linked session and go to
-    // the Agenda. Otherwise the parsed task remains in Inbox for later triage.
-    const newTasks=prepared.tasks.map(t=>({...t,inbox:!scheduledIds.has(t.id)}));
+    const newTasks=prepared.tasks.map(normalizeTask);
     if(saveMutation(state=>{
       state.tasks=[...state.tasks,...newTasks];
       state.sessions=prepared.sessions;
     })){
       capture.value="";evaluateCapture();
-      showToast(newTasks.length+" task aggiunte"+(sessions.length?" · "+sessions.length+" sessioni programmate.": " in Inbox."));
+      showToast(newTasks.length+" task aggiunte · "+newTasks.filter(t=>!isTaskInInbox(t)).length+" in Agenda · "+newTasks.filter(isTaskInInbox).length+" in Inbox"+(sessions.length?" · "+sessions.length+" sessioni programmate.":"."));
     }else captureError.textContent="Salvataggio non riuscito: nessuna task aggiunta.";
   });
   list.addEventListener("click",event=>{
-    const b=event.target.closest("button");if(!b)return;
-    if(b.dataset.detail)return openTask(b.dataset.detail);
-    if(!b.dataset.assign)return;
-    const row=b.closest("[data-id]"),workDate=row.querySelector("[data-assign-date]").value;
-    if(!workDate)return showToast("Indica il giorno di lavoro.");
-    if(saveMutation(s=>{s.tasks=s.tasks.map(t=>t.id===b.dataset.assign?{...t,inbox:false,workDate}:t);})){
-      showToast("Task assegnata al "+workDate+". Completa i dettagli nell'Agenda.");
-    }
+    const button=event.target.closest("[data-detail]");
+    if(button)openTask(button.dataset.detail);
   });
   const selected=()=>getState().tasks.filter(t=>!t.inbox&&t.status!=="done"&&t.workDate===date.value);
   function calculate(){
