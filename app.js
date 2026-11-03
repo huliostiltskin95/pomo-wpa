@@ -82,7 +82,7 @@ import { localDateString, timeToMinutes, dateTime, formatTime, formatDate, escap
     state.history = [...(state.history||[]), {sessionId:session.id,taskId:session.taskId||"",date:session.date,minutes:focusMinutesInSession(session),title:session.title}];
   }
   function normalizeDeleted(input) {
-    return {tasks:["tasks"],sessions:["sessions"]}.tasks && ["tasks","sessions"].reduce((out,key)=>{
+    return ["tasks","sessions"].reduce((out,key)=>{
       out[key]=Array.isArray(input?.[key])?[...new Set(input[key].filter(id=>typeof id==="string"&&id))]:[];
       return out;
     },{});
@@ -170,7 +170,7 @@ import { localDateString, timeToMinutes, dateTime, formatTime, formatDate, escap
     renderTimer();showToast("Preferenze salvate.");
   }
   function downloadFile(content,type,filename){const blob=new Blob([content],{type}),url=URL.createObjectURL(blob),link=document.createElement("a");link.href=url;link.download=filename;document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}
-  function exportBackup(){downloadFile(JSON.stringify({app:"TEMPVS",version:4,exportedAt:new Date().toISOString(),defaults:state.defaults,appearance:state.appearance,sessions:state.sessions,tasks:state.tasks,history:state.history || [],syncDeleted:state.syncDeleted || {tasks:[],sessions:[]}},null,2),"application/json",`tempo-backup-${localDateString()}.json`);showToast("Backup esportato.");}
+  function exportBackup(){downloadFile(JSON.stringify({app:"TEMPVS",version:5,exportedAt:new Date().toISOString(),defaults:state.defaults,appearance:state.appearance,sessions:state.sessions,tasks:state.tasks,history:state.history || [],syncDeleted:state.syncDeleted || {tasks:[],sessions:[]}},null,2),"application/json",`tempo-backup-${localDateString()}.json`);showToast("Backup esportato.");}
   async function importBackup(file) {
     if (!file) return;
     const previous = state;
@@ -273,8 +273,14 @@ import { localDateString, timeToMinutes, dateTime, formatTime, formatDate, escap
     const tasks=data.tasks.map(normalizeTask);
     if(tasks.some(t=>!t)||new Set(tasks.map(t=>t.id)).size!==tasks.length)throw new Error("Attività Dropbox non valide.");
     if(data.history.some(h=>!validHistory(h)))throw new Error("Storico Dropbox non valido.");
+    if(data.syncDeleted!==undefined){
+      if(!data.syncDeleted||typeof data.syncDeleted!=="object")throw new Error("Registro delle eliminazioni non valido.");
+      for(const key of ["tasks","sessions"]){
+        if(!Array.isArray(data.syncDeleted[key])||data.syncDeleted[key].some(id=>typeof id!=="string"||!id))
+          throw new Error("Registro delle eliminazioni non valido.");
+      }
+    }
     const syncDeleted=normalizeDeleted(data.syncDeleted);
-    if(["tasks","sessions"].some(key=>syncDeleted[key].some(id=>typeof id!=="string"||!id)))throw new Error("Registro delle eliminazioni non valido.");
     return {sessions,tasks,history:data.history,syncDeleted,defaults:{workMinutes:clampInt(data.defaults?.workMinutes,1,240,25),breakEnabled:data.defaults?.breakEnabled!==false},appearance:normalizeAppearance(data.appearance)};
   }
   async function applyCloudBackup(data) {
@@ -310,6 +316,8 @@ import { localDateString, timeToMinutes, dateTime, formatTime, formatDate, escap
     if(setup)setup.classList.toggle("hidden",info.connected);
     if(initial)initial.classList.toggle("hidden",!info.connected||info.ready);
     if(actions)actions.classList.toggle("hidden",!info.ready);
+    const recovery=$("dropbox-recovery");
+    if(recovery)recovery.classList.toggle("hidden",!dropbox?.recovery());
   }
   async function resolveCloudConflicts(conflicts) {
     return new Promise(resolve=>{
