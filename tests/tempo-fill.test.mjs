@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { proposeSessionFill, grossAssignedToTask, reconcileSessionAllocations } from "../core/tempo-fill.js";
-import { grossMinutesForTask, allocatedGrossMinutes, elapsedGrossForTask } from "../core/tempo-tasks.js";
+import { grossMinutesForTask, allocatedGrossMinutes, elapsedGrossForTask, normalizeTask, isTaskInInbox } from "../core/tempo-tasks.js";
 
 const session=(id="s1",start="15:00",end="18:00")=>({
   id,title:"Studio",area:"Studio",date:"2026-11-06",start,end,
@@ -55,4 +55,23 @@ test("editing session while preserving its task IDs retains gross quotas",()=>{
   const moved={...s,start:"14:00",taskAllocations:undefined};
   const reconciled=reconcileSessionAllocations(s,moved);
   assert.deepEqual(reconciled.taskAllocations,s.taskAllocations);
+});
+
+test("Inbox classification depends on explicit area, gross estimate and a deadline",()=>{
+  const base={id:"test",title:"Studiare gli Assiri",priority:"media",status:"todo"};
+  for(const partial of [{},{area:"Studio"},{area:"Studio",estimateMinutes:120},
+    {area:"Studio",dueDate:"2026-11-15"},{area:"Studio",longTerm:true}]){
+    assert.equal(isTaskInInbox(normalizeTask({...base,...partial})),true);
+  }
+  assert.equal(isTaskInInbox(normalizeTask({...base,area:"Studio",estimateMinutes:120,dueDate:"2026-11-15"})),false);
+  assert.equal(isTaskInInbox(normalizeTask({...base,area:"Studio",estimateMinutes:120,longTerm:true})),false);
+});
+
+test("legacy Inbox flags are reclassified without changing task identity",()=>{
+  const base={id:"legacy",title:"Leggere Tucidide",area:"Studio",estimateMinutes:120,dueDate:"2026-12-15",
+    priority:"media",status:"todo",inbox:true};
+  const migrated=normalizeTask(base);
+  assert.equal(migrated.id,"legacy");
+  assert.equal(migrated.inbox,false);
+  assert.equal(normalizeTask({...base,dueDate:"",inbox:false}).inbox,true);
 });
