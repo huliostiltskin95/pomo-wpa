@@ -155,8 +155,9 @@ import { localDateString, timeToMinutes, dateTime, formatTime, formatDate, escap
     const session=state.sessions.find(item=>item.id===id);
     if(!session||!window.confirm(`Eliminare la sessione “${session.title}”?`))return;
     const previous=state.sessions, previousHistory=state.history;
-    archivePast(session);
+    // Intentionally removed sessions contribute neither planned nor elapsed time.
     state.sessions=state.sessions.filter(item=>item.id!==id);
+    state.history=(state.history||[]).filter(entry=>entry.sessionId!==id);
     if(!persist()){state.sessions=previous;state.history=previousHistory;return;}
     if(els.dialog.open)els.dialog.close();renderAll();showToast("Sessione eliminata.");
   }
@@ -215,6 +216,10 @@ import { localDateString, timeToMinutes, dateTime, formatTime, formatDate, escap
         tasks:[...new Set([...currentDeleted.tasks,...incomingDeleted.tasks])],
         sessions:[...new Set([...currentDeleted.sessions,...incomingDeleted.sessions])]
       };
+      const deletedSessionIds=new Set(mergedDeleted.sessions);
+      mergedSessions=mergedSessions.filter(session=>!deletedSessionIds.has(session.id));
+      const keptSessionIds=new Set(mergedSessions.map(session=>session.id));
+      mergedHistory=mergedHistory.filter(entry=>keptSessionIds.has(entry.sessionId));
       state = { sessions: mergedSessions, tasks: mergedTasks, history: mergedHistory, syncDeleted:mergedDeleted,
         defaults: replace ? defaults : state.defaults, appearance: replace ? normalizeAppearance(data.appearance) : state.appearance };
       if (!persist()) { state = previous; return; }
