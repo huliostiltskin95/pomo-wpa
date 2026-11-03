@@ -68,7 +68,8 @@ export function createAgendaV2({getState,saveMutation,setTaskStatus,openTask,ope
     if(ui.group==="area")return t.area;
     if(ui.group==="priority")return priorities[t.priority];
     if(ui.group==="status")return statusNames[t.status];
-    if(!t.dueDate && !t.workDate) {
+    if(t.workDate)return t.workDate;
+    if(!t.dueDate) {
       const dates=sessionDates(t,state).sort();
       if(dates.length)return dates[0];
       return "zzzz";
@@ -240,6 +241,7 @@ export function createAgendaV2({getState,saveMutation,setTaskStatus,openTask,ope
     container.innerHTML='<section class="av2-detail-fields"><h3>Organizzazione</h3>'+
       '<label>Scadenza <input type="date" data-due="'+escape(t.id)+'" value="'+escape(t.dueDate||"")+'"></label>'+
       '<label>Giorno di lavoro <input type="date" data-work="'+escape(t.id)+'" value="'+escape(t.workDate||"")+'"></label>'+
+      '<button type="button" data-to-inbox="'+escape(t.id)+'">Sposta in Inbox</button>'+
       '<label>Priorità <select data-priority="'+escape(t.id)+'">'+[["alta","Alta · !1"],["media","Media · !2"],["bassa","Bassa · !3"],["nessuna","Nessuna · !4"]].map(([v,l])=>'<option value="'+v+'" '+(t.priority===v?"selected":"")+'>'+l+'</option>').join("")+'</select></label>'+
       '<label>Importante <select data-importance="'+escape(t.id)+'"><option value="">Da classificare</option><option value="yes" '+(t.important===true?"selected":"")+'>Sì</option><option value="no" '+(t.important===false?"selected":"")+'>No</option></select></label>'+
       '<label>Urgente <select data-urgency="'+escape(t.id)+'"><option value="">Da classificare</option><option value="yes" '+(t.urgent===true?"selected":"")+'>Sì</option><option value="no" '+(t.urgent===false?"selected":"")+'>No</option></select></label>'+
@@ -256,6 +258,8 @@ export function createAgendaV2({getState,saveMutation,setTaskStatus,openTask,ope
       else if(e.dataset.subCheck)patch(taskId,{subtasks:current.subtasks.map(s=>s.id===e.dataset.subCheck?{...s,done:e.checked}:s)});
     });
     container.addEventListener("click",ev=>{
+      const inboxButton=ev.target.closest("[data-to-inbox]");
+      if(inboxButton){patch(taskId,{inbox:true,workDate:""});window.location.hash="inbox";return;}
       const b=ev.target.closest("[data-sub-delete]");if(!b)return;
       const current=getState().tasks.find(x=>x.id===taskId);if(!current)return;
       patch(taskId,{subtasks:current.subtasks.filter(s=>s.id!==b.dataset.subDelete)});
