@@ -26,7 +26,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
     closeButton: $("task-close-button"), cancelButton: $("task-cancel-button"),
     planDialog: $("task-plan-dialog"), planForm: $("task-plan-form"), planTaskId: $("task-plan-id"),
     planTitle: $("task-plan-title"), planDate: $("task-plan-date"),
-    planStart: $("task-plan-start"), planHours: $("task-plan-hours"),
+    planStart: $("task-plan-start"), planHours: $("task-plan-hours"), planRepeat: $("task-plan-repeat"),
     planWork: $("task-plan-work"), planBreaks: $("task-plan-breaks"),
     planPreview: $("task-plan-preview"), planError: $("task-plan-error"),
     planClose: $("task-plan-close"), planCancel: $("task-plan-cancel")
@@ -350,6 +350,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
     el.planDate.value = start.date;
     el.planStart.value = start.time;
     el.planHours.value = String(Math.min(120, remaining) / 60);
+    el.planRepeat.value = "once";
     el.planWork.value = String(getState().defaults.workMinutes);
     el.planBreaks.checked = getState().defaults.breakEnabled;
     el.planError.textContent = "";
@@ -367,42 +368,63 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
       start: el.planStart.value, grossMinutes, workMinutes, breakEnabled: el.planBreaks.checked });
   }
 
-  function updatePreview() {
-    try {
-      const session = readPlan();
-      if (!validSession(session)) throw new Error("Controlla data e ora di inizio.");
-      const existing = getState().sessions.some(other =>
-        sessionBounds(other).start < sessionBounds(session).end &&
-        sessionBounds(other).end > sessionBounds(session).start);
-      const gross = estimatedMinutesFromHours(el.planHours.value);
-      const net = focusMinutesInSession(session);
-      el.planPreview.textContent = "Termine previsto " + session.end + (sessionDurationMinutes(session) <= 0 ? "" : (session.end <= session.start ? " (giorno successivo)" : "")) + " · " + format(gross) +
-        " lorde · " + format(net) + " di concentrazione netta" + (session.breakEnabled ? " (pause incluse)." : " (senza pause).");
-      el.planError.textContent = existing ? "Attenzione: l'intervallo si sovrappone a una sessione esistente." : "";
-    } catch (error) {
-      el.planPreview.textContent = "Modifica durata, data e ora per calcolare il termine.";
-      el.planError.textContent = error.message;
+  function buildPlanSessions() {
+    const first=readPlan();
+    if(el.planRepeat.value!=="daily")return [first];
+    const task=findTask(el.planTaskId.value);
+    if(!task?.dueDate)throw Error("Per la ripetizione giornaliera imposta prima una scadenza della task.");
+    if(first.date>task.dueDate)throw Error("La prima sessione è successiva alla scadenza.");
+    const remaining=(task.estimateMinutes??0)-grossPlanned(task.id,getState().sessions);
+    if(remaining<15)throw Error("La stima è già coperta. Puoi comunque aggiungere una sessione singola.");
+    const duration=sessionDurationMinutes(first);
+    let quota=remaining, day=new Date(first.date+"T12:00:00");
+    const result=[];
+    while(quota>=15 && localDateString(day)<=task.dueDate && result.length<90){
+      const grossMinutes=Math.min(duration,quota);
+      const session=createTaskSession(task,{
+        id:uuid(),date:localDateString(day),start:first.start,grossMinutes,
+        workMinutes:first.workMinutes,breakEnabled:first.breakEnabled
+      });
+      if(!validSession(session))throw Error("Intervallo generato non valido.");
+      result.push(session);
+      quota-=grossMinutes;
+      day.setDate(day.getDate()+1);
     }
+    if(localDateString(day)<=task.dueDate && quota>=15)
+      throw Error("La ripetizione supera 90 giorni. Programma un intervallo più breve.");
+    return result;
   }
 
-  function addSlot(session) {
-    if (!validSession(session)) throw new Error("Orari o durata non validi.");
-    if (sessionBounds(session).start.getTime() < Date.now() - 60000) throw new Error("Non è possibile avviare automaticamente una sessione nel passato.");
-    if (hasSessionOverlaps([...getState().sessions, session])) throw new Error("Intervallo sovrapposto a una sessione già programmata.");
-    if (!saveMutation(state => { state.sessions = [...state.sessions, session]; })) return false;
-    return true;
+  function updatePreview() {
+    try {
+      const slots=buildPlanSessions();
+      if(slots.some(session=>!validSession(session)))throw Error("Controlla data e ora di inizio.");
+      const existing=hasSessionOverlaps([...getState().sessions,...slots]);
+      const gross=slots.reduce((sum,s)=>sum+sessionDurationMinutes(s),0);
+      const net=slots.reduce((sum,s)=>sum+focusMinutesInSession(s),0);
+      el.planPreview.textContent=slots.length+" "+(slots.length===1?"sessione":"sessioni")+
+        " · "+format(gross)+" lorde · "+format(net)+" nette previste · fine ultima sessione "+
+        slots.at(-1).date+" "+slots.at(-1).end;
+      el.planError.textContent=existing?"Attenzione: almeno una sessione si sovrappone a un blocco esistente.":"";
+    } catch(error) {
+      el.planPreview.textContent="Modifica durata, data e ora per calcolare le sessioni.";
+      el.planError.textContent=error.message;
+    }
   }
 
   function savePlan(event) {
     event.preventDefault();
     try {
-      const session = readPlan();
-      if (!addSlot(session)) return;
+      const slots=buildPlanSessions();
+      if(slots.some(s=>!validSession(s)))throw Error("Orari o durata non validi.");
+      if(slots.some(s=>sessionBounds(s).start.getTime()<Date.now()-60000))
+        throw Error("Non puoi programmare una sessione nel passato.");
+      if(hasSessionOverlaps([...getState().sessions,...slots]))
+        throw Error("Una o più sessioni si sovrappongono a blocchi esistenti.");
+      if(!saveMutation(state=>{state.sessions=[...state.sessions,...slots];}))return;
       el.planDialog.close();
-      showToast("Quota programmata e collegata alla task. Il timer partirà all'orario scelto, con l'app aperta.");
-    } catch (error) {
-      el.planError.textContent = error.message;
-    }
+      showToast(slots.length+" sessioni programmate e collegate alla task.");
+    } catch(error) { el.planError.textContent=error.message; }
   }
 
   function startNow(id) {
@@ -607,7 +629,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
   el.planForm.addEventListener("submit", savePlan);
   el.planClose.addEventListener("click", () => el.planDialog.close());
   el.planCancel.addEventListener("click", () => el.planDialog.close());
-  for (const input of [el.planDate, el.planStart, el.planHours, el.planWork, el.planBreaks]) {
+  for (const input of [el.planDate, el.planStart, el.planHours, el.planRepeat, el.planWork, el.planBreaks]) {
     input.addEventListener("input", updatePreview);
     input.addEventListener("change", updatePreview);
   }
