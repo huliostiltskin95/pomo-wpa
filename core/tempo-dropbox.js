@@ -25,7 +25,8 @@ export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus
     }
   });
   const stateJSON=data=>JSON.stringify(syncState(data));
-  const current=()=>syncState(getState());
+  // Immutable point-in-time copy: UI mutations must not rewrite an in-flight snapshot.
+  const current=()=>JSON.parse(JSON.stringify(syncState(getState())));
   const baseline=()=>read(BASE_KEY,null);
   const saveBase=data=>write(BASE_KEY,syncState(data));
   const recovery=()=>read(RECOVERY_KEY,null);
