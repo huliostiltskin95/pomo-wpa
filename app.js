@@ -76,7 +76,52 @@ import { localDateString, timeToMinutes, dateTime, formatTime, formatDate, escap
     return { sessions: [], tasks: [], history: [], syncDeleted:{tasks:[],sessions:[]}, defaults: { ...DEFAULTS }, appearance: normalizeAppearance(DEFAULT_APPEARANCE) };
   }
   function migrateSession(s,tasks){const area=sessionArea(s,tasks);return {...withSessionTasks(s,sessionTaskIds(s)),area,title:area};}
-  function taskPicker(ids=[]){const area=els.sessionTitle.value;document.getElementById("session-task-picker").innerHTML=state.tasks.filter(t=>t.area===area).map(t=>'<label class="tempo-session-task"><input type="checkbox" value="'+escapeHtml(t.id)+'" '+(ids.includes(t.id)?'checked':'')+'><span>'+escapeHtml(t.title)+'</span></label>').join("")||"Nessuna task disponibile nell’area.";}
+  // The picker selection is independent of rendered rows: filtering/sorting must not drop hidden checks.
+  const pickerSelectedIds = new Set();
+  let pickerReverse = false;
+  const pickerPriority = {alta:0, media:1, bassa:2, nessuna:3};
+  function taskPicker(ids) {
+    if(Array.isArray(ids)){pickerSelectedIds.clear();ids.forEach(id=>pickerSelectedIds.add(id));}
+    const area=els.sessionTitle.value;
+    const available=state.tasks.filter(t=>t.area===area&&t.status!=="done");
+    const query=$("session-task-search").value.trim().toLocaleLowerCase("it");
+    const mode=$("session-task-sort").value;
+    const compareTitle=(a,b)=>a.title.localeCompare(b.title,"it",{sensitivity:"base"});
+    const due=t=>t.dueDate||"9999-12-31";
+    const compare=(a,b)=>{
+      let result=0;
+      if(mode==="due")result=due(a).localeCompare(due(b))||(pickerPriority[a.priority]??3)-(pickerPriority[b.priority]??3);
+      else if(mode==="title")result=compareTitle(a,b);
+      else if(mode==="created")result=(b.createdAt||"").localeCompare(a.createdAt||"");
+      else if(mode==="status")result=Number(a.status!=="in_progress")-Number(b.status!=="in_progress");
+      else result=(pickerPriority[a.priority]??3)-(pickerPriority[b.priority]??3)||due(a).localeCompare(due(b));
+      return (pickerReverse?-1:1)*(result||compareTitle(a,b)||a.id.localeCompare(b.id));
+    };
+    const filtered=available.filter(t=>!query||t.title.toLocaleLowerCase("it").includes(query)).sort(compare);
+    const picker=$("session-task-picker");
+    picker.innerHTML=filtered.map(t=>
+      '<label class="tempo-session-task tempo-task-picker-row"><input type="checkbox" value="'+escapeHtml(t.id)+'" '+(pickerSelectedIds.has(t.id)?'checked':'')+'>'+
+      '<span class="tempo-task-picker-details"><span class="tempo-task-picker-title">'+escapeHtml(t.title)+'</span>'+
+      '<span class="tempo-task-picker-meta"><span class="tempo-task-picker-priority priority-'+escapeHtml(t.priority)+'">'+
+      escapeHtml(({alta:"!1 Alta",media:"!2 Media",bassa:"!3 Bassa",nessuna:"!4 Nessuna"})[t.priority])+'</span>'+
+      (t.dueDate?'<span>Scade '+escapeHtml(formatDate(t.dueDate))+'</span>':'<span>Senza scadenza</span>')+
+      (t.status==="in_progress"?'<span>In corso</span>':'')+
+      '</span></span></label>'
+    ).join("") || '<p class="tempo-task-picker-empty">'+(query?"Nessuna task corrisponde alla ricerca.":"Nessuna task da svolgere in quest’area.")+'</p>';
+    updateTaskPickerCount();
+  }
+  function updateTaskPickerCount(){
+    const available=state.tasks.filter(t=>t.area===els.sessionTitle.value&&t.status!=="done");
+    const chosen=available.filter(t=>pickerSelectedIds.has(t.id)).length;
+    $("session-task-count").textContent=chosen+" selezionate su "+available.length+" disponibili";
+    $("session-task-reverse").setAttribute("aria-pressed",String(pickerReverse));
+    $("session-task-reverse").textContent=pickerReverse?"Ordine inverso":"Inverti ordine";
+  }
+  function resetTaskPicker(){
+    $("session-task-sort").value="priority";
+    $("session-task-search").value="";
+    pickerReverse=false;
+  }
   function checklist(s){return '<div class="tempo-session-tasks">'+state.tasks.filter(t=>sessionTaskIds(s).includes(t.id)).map(t=>'<label class="tempo-session-task"><input type="checkbox" data-check-task="'+escapeHtml(t.id)+'" '+(t.status==="done"?"checked":"")+'><span>'+escapeHtml(t.title)+' · '+(grossMinutesForTask(s,t.id)/60).toLocaleString("it-IT",{maximumFractionDigits:2})+' h lorde</span></label>').join("")+'</div>';}
   function validHistory(h){return h && typeof h.sessionId==="string" && typeof h.minutes==="number" && Number.isFinite(h.minutes) && h.minutes>=0 && typeof h.taskId==="string" && typeof h.date==="string";}
   function archivePast(session){
@@ -132,13 +177,13 @@ import { localDateString, timeToMinutes, dateTime, formatTime, formatDate, escap
   function renderAll(){applyAppearance(state.appearance);renderTimer();renderSessions();agenda?.render();els.defaultWork.value=state.defaults.workMinutes;els.defaultBreakEnabled.checked=state.defaults.breakEnabled;window.dispatchEvent(new CustomEvent("tempo:appearance-updated",{detail:state.appearance}));}
   function updateBreakPreview(){const work=clampInt(els.sessionWork.value,1,240,25);els.breakPreview.textContent=els.sessionBreakEnabled.checked?`Con ${work} minuti di concentrazione, la pausa sarà di ${pauseMinutes(work)} ${pauseMinutes(work)===1?"minuto":"minuti"}.`:"Le pause sono disattivate: la sessione sarà un unico intervallo di concentrazione.";}
   function updatePlannedSummary(){const date=els.sessionDate.value,id=els.sessionId.value,items=state.sessions.filter(s=>s.date===date&&s.id!==id).sort((a,b)=>a.start.localeCompare(b.start));els.plannedSummaryList.innerHTML=items.length?items.map(s=>`<div class="planned-row"><span>${escapeHtml(s.start)}–${escapeHtml(s.end)}</span><span>${escapeHtml(s.title)}</span></div>`).join("") : "Nessun'altra sessione per questa data.";}
-  function openNewDialog(){els.sessionForm.reset();els.sessionId.value="";els.dialogTitle.textContent="Nuova sessione";els.sessionTitle.value="Studio";taskPicker();els.sessionDate.value=els.filterDate.value||localDateString();els.sessionStart.value="09:00";els.sessionEnd.value="11:00";els.sessionWork.value=state.defaults.workMinutes;els.sessionBreakEnabled.checked=state.defaults.breakEnabled;els.formError.textContent="";els.deleteButton.classList.add("hidden");updateBreakPreview();updatePlannedSummary();els.dialog.showModal();els.sessionTitle.focus();}
-  function openEditDialog(id){const s=state.sessions.find(x=>x.id===id);if(!s)return;els.sessionId.value=s.id;els.dialogTitle.textContent="Modifica sessione";els.sessionTitle.value=sessionArea(s,state.tasks);taskPicker(sessionTaskIds(s));els.sessionDate.value=s.date;els.sessionStart.value=s.start;els.sessionEnd.value=s.end;els.sessionWork.value=s.workMinutes;els.sessionBreakEnabled.checked=s.breakEnabled;els.formError.textContent="";els.deleteButton.classList.remove("hidden");updateBreakPreview();updatePlannedSummary();els.dialog.showModal();}
+  function openNewDialog(){els.sessionForm.reset();els.sessionId.value="";els.dialogTitle.textContent="Nuova sessione";els.sessionTitle.value="Studio";resetTaskPicker();taskPicker([]);els.sessionDate.value=els.filterDate.value||localDateString();els.sessionStart.value="09:00";els.sessionEnd.value="11:00";els.sessionWork.value=state.defaults.workMinutes;els.sessionBreakEnabled.checked=state.defaults.breakEnabled;els.formError.textContent="";els.deleteButton.classList.add("hidden");updateBreakPreview();updatePlannedSummary();els.dialog.showModal();els.sessionTitle.focus();}
+  function openEditDialog(id){const s=state.sessions.find(x=>x.id===id);if(!s)return;els.sessionId.value=s.id;els.dialogTitle.textContent="Modifica sessione";els.sessionTitle.value=sessionArea(s,state.tasks);resetTaskPicker();taskPicker(sessionTaskIds(s));els.sessionDate.value=s.date;els.sessionStart.value=s.start;els.sessionEnd.value=s.end;els.sessionWork.value=s.workMinutes;els.sessionBreakEnabled.checked=s.breakEnabled;els.formError.textContent="";els.deleteButton.classList.remove("hidden");updateBreakPreview();updatePlannedSummary();els.dialog.showModal();}
   function saveSession(event){
     event.preventDefault();
     const existingId=els.sessionId.value;
     const existingSession=state.sessions.find(s=>s.id===existingId);
-    const session={id:existingId||(crypto.randomUUID?crypto.randomUUID():`${Date.now()}-${Math.random().toString(16).slice(2)}`),title:els.sessionTitle.value.trim(),area:els.sessionTitle.value.trim(),taskIds:[...document.querySelectorAll("#session-task-picker input:checked")].map(x=>x.value),date:els.sessionDate.value,start:els.sessionStart.value,end:els.sessionEnd.value,workMinutes:Number(els.sessionWork.value),breakEnabled:els.sessionBreakEnabled.checked};
+    const session={id:existingId||(crypto.randomUUID?crypto.randomUUID():`${Date.now()}-${Math.random().toString(16).slice(2)}`),title:els.sessionTitle.value.trim(),area:els.sessionTitle.value.trim(),taskIds:[...new Set([...pickerSelectedIds].filter(id=>state.tasks.some(t=>t.id===id&&t.area===els.sessionTitle.value&&t.status!=="done")).concat(existingSession?sessionTaskIds(existingSession).filter(id=>state.tasks.some(t=>t.id===id&&t.area===els.sessionTitle.value&&t.status==="done")):[]))],date:els.sessionDate.value,start:els.sessionStart.value,end:els.sessionEnd.value,workMinutes:Number(els.sessionWork.value),breakEnabled:els.sessionBreakEnabled.checked};
     if(!session.title){els.formError.textContent="Inserisci un nome per la sessione.";return;}
     if(!validSession(session)){els.formError.textContent="Controlla gli orari e la durata della sessione.";return;}
     const {start,end}=sessionBounds(session);
@@ -280,7 +325,17 @@ import { localDateString, timeToMinutes, dateTime, formatTime, formatDate, escap
     renderAll();showToast("Aspetto aggiornato e salvato.");
   });
   window.addEventListener("tempo:edit-session",event=>{if(event.detail?.sessionId)openEditDialog(event.detail.sessionId);});
-  els.newSessionButton.addEventListener("click",openNewDialog);els.emptyAddButton.addEventListener("click",openNewDialog);els.sessionForm.addEventListener("submit",saveSession);els.closeDialog.addEventListener("click",()=>els.dialog.close());els.cancelDialog.addEventListener("click",()=>els.dialog.close());els.deleteButton.addEventListener("click",()=>deleteSession(els.sessionId.value));els.filterDate.addEventListener("change",renderSessions);els.todayButton.addEventListener("click",()=>{els.filterDate.value=localDateString();renderSessions();});els.sessionTitle.addEventListener("change",()=>taskPicker());els.sessionsList.addEventListener("change",event=>{if(!event.target.matches("[data-check-task]"))return;const id=event.target.dataset.checkTask, old=state.tasks;state.tasks=old.map(t=>t.id===id?{...t,status:event.target.checked?"done":"todo",completed:event.target.checked}:t);if(!persist())state.tasks=old;renderAll();});els.sessionsList.addEventListener("click",event=>{const edit=event.target.closest("[data-edit]"),del=event.target.closest("[data-delete]"),fill=event.target.closest("[data-fill]");if(fill)filler?.openSession(fill.dataset.fill);if(edit)openEditDialog(edit.dataset.edit);if(del)deleteSession(del.dataset.delete);});els.defaultsForm.addEventListener("submit",saveDefaults);els.exportButton.addEventListener("click",exportBackup);els.importInput.addEventListener("change",()=>importBackup(els.importInput.files[0]));els.sessionWork.addEventListener("input",updateBreakPreview);els.sessionBreakEnabled.addEventListener("change",updateBreakPreview);els.sessionDate.addEventListener("change",updatePlannedSummary);els.focusButton.addEventListener("click",enterFocus);els.exitFocusButton.addEventListener("click",exitFocus);els.focusFullscreenButton.addEventListener("click",async()=>{try{if(!document.fullscreenElement)await document.documentElement.requestFullscreen();else await document.exitFullscreen();}catch{showToast("Schermo intero non disponibile in questo browser.");}});els.notificationButton.addEventListener("click",enableNotifications);els.soundToggle.addEventListener("click",toggleSound);els.focusSoundButton.addEventListener("click",toggleSound);els.soundSelect.addEventListener("change",()=>{if(soundPlaying){const kind=els.soundSelect.value;if(kind==="off"){stopSound();return;}const audible=getAmbientFocusMode(state.sessions)==="focus";void ambient.start(kind,Number(els.soundVolume.value)/100,audible).then(ok=>{if(!ok)showToast("Impossibile cambiare suono.");syncFocusAudio();});}});els.soundVolume.addEventListener("input",updateVolume);els.exportIcsButton.addEventListener("click",exportIcs);
+  els.newSessionButton.addEventListener("click",openNewDialog);els.emptyAddButton.addEventListener("click",openNewDialog);els.sessionForm.addEventListener("submit",saveSession);els.closeDialog.addEventListener("click",()=>els.dialog.close());els.cancelDialog.addEventListener("click",()=>els.dialog.close());els.deleteButton.addEventListener("click",()=>deleteSession(els.sessionId.value));els.filterDate.addEventListener("change",renderSessions);els.todayButton.addEventListener("click",()=>{els.filterDate.value=localDateString();renderSessions();});els.sessionTitle.addEventListener("change",()=>taskPicker([]));
+   $("session-task-sort").addEventListener("change",()=>taskPicker());
+   $("session-task-search").addEventListener("input",()=>taskPicker());
+   $("session-task-reverse").addEventListener("click",()=>{pickerReverse=!pickerReverse;taskPicker();});
+   $("session-task-picker").addEventListener("change",event=>{
+     if(!event.target.matches('input[type="checkbox"]'))return;
+     if(event.target.checked)pickerSelectedIds.add(event.target.value);
+     else pickerSelectedIds.delete(event.target.value);
+     updateTaskPickerCount();
+   });
+   els.sessionsList.addEventListener("change",event=>{if(!event.target.matches("[data-check-task]"))return;const id=event.target.dataset.checkTask, old=state.tasks;state.tasks=old.map(t=>t.id===id?{...t,status:event.target.checked?"done":"todo",completed:event.target.checked}:t);if(!persist())state.tasks=old;renderAll();});els.sessionsList.addEventListener("click",event=>{const edit=event.target.closest("[data-edit]"),del=event.target.closest("[data-delete]"),fill=event.target.closest("[data-fill]");if(fill)filler?.openSession(fill.dataset.fill);if(edit)openEditDialog(edit.dataset.edit);if(del)deleteSession(del.dataset.delete);});els.defaultsForm.addEventListener("submit",saveDefaults);els.exportButton.addEventListener("click",exportBackup);els.importInput.addEventListener("change",()=>importBackup(els.importInput.files[0]));els.sessionWork.addEventListener("input",updateBreakPreview);els.sessionBreakEnabled.addEventListener("change",updateBreakPreview);els.sessionDate.addEventListener("change",updatePlannedSummary);els.focusButton.addEventListener("click",enterFocus);els.exitFocusButton.addEventListener("click",exitFocus);els.focusFullscreenButton.addEventListener("click",async()=>{try{if(!document.fullscreenElement)await document.documentElement.requestFullscreen();else await document.exitFullscreen();}catch{showToast("Schermo intero non disponibile in questo browser.");}});els.notificationButton.addEventListener("click",enableNotifications);els.soundToggle.addEventListener("click",toggleSound);els.focusSoundButton.addEventListener("click",toggleSound);els.soundSelect.addEventListener("change",()=>{if(soundPlaying){const kind=els.soundSelect.value;if(kind==="off"){stopSound();return;}const audible=getAmbientFocusMode(state.sessions)==="focus";void ambient.start(kind,Number(els.soundVolume.value)/100,audible).then(ok=>{if(!ok)showToast("Impossibile cambiare suono.");syncFocusAudio();});}});els.soundVolume.addEventListener("input",updateVolume);els.exportIcsButton.addEventListener("click",exportIcs);
   window.addEventListener("beforeinstallprompt",event=>{event.preventDefault();deferredInstallPrompt=event;els.installButton.classList.remove("hidden");});els.installButton.addEventListener("click",async()=>{if(!deferredInstallPrompt){showToast("Per installare, usa il menu del browser e scegli ‘Installa app’ o ‘Aggiungi alla schermata Home’. ");return;}const prompt=deferredInstallPrompt;deferredInstallPrompt=null;await prompt.prompt();const choice=await prompt.userChoice;if(choice?.outcome==="accepted")els.installButton.classList.add("hidden");});window.addEventListener("online",()=>{els.connectionStatus.textContent="Online";});window.addEventListener("offline",()=>{els.connectionStatus.textContent="Offline";});document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")renderAll();});window.addEventListener("focus",renderAll);window.addEventListener("pagehide",()=>ambient.stop(0));document.addEventListener("keydown",event=>{if(event.key==="Escape"&&!els.focusOverlay.classList.contains("hidden"))exitFocus();});
   agenda = mountAgenda({ getState:()=>state, persist, refresh:renderAll, showToast, sendNotification });
   filler=mountSessionFiller({getState:()=>state,showToast,applySessions:replacements=>{
