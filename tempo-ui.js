@@ -3,6 +3,7 @@
   "use strict";
   const views = [
     ["oggi", "Oggi", "◷"],
+    ["inbox", "Inbox", "▤"],
     ["agenda", "Agenda", "☑"],
     ["sessioni", "Sessioni", "▦"],
     ["statistiche", "Statistiche", "▥"],
@@ -41,6 +42,7 @@
     const map = {
       oggi: [".intro", ".timer-card"],
       agenda: [".agenda-section"],
+      inbox: [".tempo-inbox-section"],
       sessioni: [".schedule-section"],
       impostazioni: [".tempo-appearance-settings", ".settings-card", ".sound-card", ".backup-card", ".notice"]
     };
@@ -60,7 +62,7 @@
     const stats = document.createElement("section");
     stats.dataset.tempoView = "statistiche";
     stats.className = "tempo-view-section tempo-statistics";
-    stats.innerHTML = '<p class="eyebrow">RIEPILOGO</p><h2>Statistiche</h2><p class="muted">Il tempo trascorso è una registrazione basata sul calendario, non una misura verificata dell’attenzione.</p><div id="tempo-stat-grid" class="tempo-stat-grid"></div><p class="tempo-stat-footnote">Tempo pianificato e tempo trascorso sono distinti. Le sessioni archiviate rimangono nello storico anche se rimosse dall’agenda.</p>';
+    stats.innerHTML = '<p class="eyebrow">RIEPILOGO</p><h2>Statistiche</h2><p class="muted">Il tempo trascorso è una registrazione basata sul calendario, non una misura verificata dell’attenzione.</p><div id="tempo-stat-grid" class="tempo-stat-grid"></div><p class="tempo-stat-footnote">Tempo pianificato e tempo trascorso sono distinti. Le sessioni eliminate non contribuiscono più ai conteggi.</p>';
     main.appendChild(stats);
 
     const toolbar = document.querySelector(".agenda-extra-actions");
@@ -193,7 +195,8 @@
       }
       const loggedIds = new Set(history.map(h=>h.sessionId));
       const planned = sessions.filter(s=>startOf(s)>now).reduce((sum,s)=>sum+focusMinutes(s),0);
-      const elapsed = sessions.filter(s=>endOf(s)<=now&&!loggedIds.has(s.id)).reduce((sum,s)=>sum+focusMinutes(s),0) + history.reduce((sum,h)=>sum+(Number(h.minutes)||0),0);
+      const savedIds=new Set(sessions.map(s=>s.id));
+      const elapsed = sessions.filter(s=>endOf(s)<=now&&!loggedIds.has(s.id)).reduce((sum,s)=>sum+focusMinutes(s),0) + history.filter(h=>savedIds.has(h.sessionId)).reduce((sum,h)=>sum+(Number(h.minutes)||0),0);
       const completed = tasks.filter(t=>t.status==="done").length;
       const statsEl=document.getElementById("tempo-stat-grid");
       if(statsEl){
