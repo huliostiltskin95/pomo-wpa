@@ -39,6 +39,14 @@ import { sessionBounds, sessionDurationMinutes, timeToMinutes, pauseMinutes } fr
 export const TASK_AREAS = Object.freeze(["Personale", "Lavoro", "Studio"]);
 export const TASK_PRIORITIES = Object.freeze(["alta", "media", "bassa", "nessuna"]);
 export const TASK_STATUSES = Object.freeze(["todo", "in_progress", "done"]);
+/** The Inbox is a computed organizational state, never a manual destination. */
+export function isTaskReady(task) {
+  return !!task && TASK_AREAS.includes(task.area) &&
+    Number.isInteger(task.estimateMinutes) && task.estimateMinutes>=15 &&
+    (!!task.dueDate || task.longTerm===true);
+}
+export function isTaskInInbox(task) { return !isTaskReady(task); }
+
 
 export function parseTaskTags(value) {
   const values = Array.isArray(value) ? value : String(value || "").split(",");
@@ -68,7 +76,7 @@ export function normalizeTask(value) {
     const task = {
       id: String(value.id || ""),
       title: String(value.title || "").trim(),
-      area: value.area,
+      area: TASK_AREAS.includes(value.area) ? value.area : "",
       priority: value.priority,
       description: String(value.description || ""),
       tags,
@@ -78,7 +86,8 @@ export function normalizeTask(value) {
       plannedDate: typeof value.plannedDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.plannedDate) ? value.plannedDate : "",
       dueDate: typeof value.dueDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.dueDate) ? value.dueDate : "",
       workDate: typeof value.workDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.workDate) ? value.workDate : "",
-      inbox: value.inbox === true,
+      longTerm: value.longTerm === true && !value.dueDate,
+      inbox: false,
       // Backward-compatible migration from the original completed boolean.
       status: value.status === undefined ? (value.completed === true ? "done" : "todo") : value.status,
       completed: (value.status === undefined ? value.completed === true : value.status === "done"),
@@ -90,6 +99,7 @@ export function normalizeTask(value) {
       })).filter(item=>item.id&&item.title) : [],
       createdAt: typeof value.createdAt === "string" ? value.createdAt : ""
     };
+    task.inbox=isTaskInInbox(task);
     return validTask(task) ? task : null;
   } catch {
     return null;
@@ -99,7 +109,7 @@ export function normalizeTask(value) {
 export function validTask(task) {
   return !!task && typeof task.id === "string" && task.id.length > 0 &&
     typeof task.title === "string" && task.title.length > 0 && task.title.length <= 120 &&
-    TASK_AREAS.includes(task.area) && TASK_PRIORITIES.includes(task.priority) &&
+    (task.area === "" || TASK_AREAS.includes(task.area)) && TASK_PRIORITIES.includes(task.priority) &&
     TASK_STATUSES.includes(task.status) && task.completed === (task.status === "done") &&
     typeof task.description === "string" && task.description.length <= 10000 &&
     (task.important === null || typeof task.important === "boolean") &&
