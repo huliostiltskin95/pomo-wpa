@@ -156,7 +156,7 @@ export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus
       // revision, so the next pass merges that edit with the uploaded data.
       // Updating the base here would let the next sync silently delete
       // remote-only items that have not reached the local copy yet.
-      meta.dirty=true;storeMeta();
+      meta.ready=true;meta.dirty=true;storeMeta();
       status("Backup unificato caricato, ma i dati locali sono cambiati: nuova unione necessaria.","pending");
       return true;
     }
