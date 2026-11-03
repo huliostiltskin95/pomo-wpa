@@ -67,7 +67,11 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
     }
     return s;
   };
-  const recorded = (taskId, state) => (state.history || []).filter(entry => entry.taskId === taskId).reduce((a,e)=>a+e.minutes,0);
+  const recorded = (taskId, state) => {
+    const keptIds = new Set(state.sessions.filter(s=>sessionHasTask(s,taskId)).map(s=>s.id));
+    return (state.history || []).filter(entry=>entry.taskId===taskId && keptIds.has(entry.sessionId))
+      .reduce((sum,entry)=>sum+entry.minutes,0);
+  };
   const elapsed = (taskId, state, now) => recorded(taskId,state) +
     elapsedScheduledFocusMinutes(taskId,state.sessions.filter(s=>!(state.history||[]).some(h=>h.sessionId===s.id)),now);
   const getUpcoming = taskId => getState().sessions.filter(session => sessionHasTask(session,taskId) &&
@@ -193,7 +197,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
         '<div class="task-estimate-line"><strong>' + (task.estimateMinutes == null ? 'Nessuna stima' : format(task.estimateMinutes)) +
         '</strong> stimate <span aria-hidden="true">·</span> ' + format(planned) +
         ' lorde pianificate <span aria-hidden="true">·</span> ' + format(completedMinutes) +
-        ' nette in sessioni registrate <span aria-hidden="true">·</span> ' +
+        ' nette da sessioni trascorse <span aria-hidden="true">·</span> ' +
         (task.estimateMinutes == null ? 'stima libera' : planned > task.estimateMinutes ? format(planned - task.estimateMinutes) + ' oltre la stima' : format(left) + ' non ancora pianificate') + '</div>' +
         '<div class="task-progress" role="progressbar" aria-label="Tempo pianificato" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' +
         (task.estimateMinutes ? Math.min(100, Math.round(planned / task.estimateMinutes * 100)) : 0) + '"><span style="width:' +
@@ -207,7 +211,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
         '" aria-label="Stato di ' + escape(task.title) + '">' +
         TASK_STATUSES.map(status => '<option value="' + status + '"' + (task.status === status ? ' selected' : '') + '>' +
         statusLabels[status] + '</option>').join('') + '</select></label></div>' +
-        '<p class="task-planning-note">Tempo registrato in base ai blocchi trascorsi (non verifica l’attenzione effettiva). Le sessioni rimosse restano nello storico. Il completamento è manuale.</p>';
+        '<p class="task-planning-note">Il tempo svolto segue il timer nelle sessioni conservate; eliminare una sessione azzera ogni suo conteggio. Il completamento è manuale.</p>';
       el.list.appendChild(card);
     }
   }
@@ -342,7 +346,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
     const start = defaultStart();
     el.planForm.reset();
     el.planTaskId.value = task.id;
-    el.planTitle.textContent = "Programma · " + task.title;
+    el.planTitle.textContent = "Pianifica una quota · " + task.title;
     el.planDate.value = start.date;
     el.planStart.value = start.time;
     el.planHours.value = String(Math.min(120, remaining) / 60);
@@ -395,7 +399,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
       const session = readPlan();
       if (!addSlot(session)) return;
       el.planDialog.close();
-      showToast("Sessione programmata: si avvierà automaticamente all'orario scelto, con l'app aperta.");
+      showToast("Quota programmata e collegata alla task. Il timer partirà all'orario scelto, con l'app aperta.");
     } catch (error) {
       el.planError.textContent = error.message;
     }
