@@ -1,15 +1,19 @@
 import { normalizeTask, createTaskSession, sessionHasTask, sessionTaskIds, grossMinutesForTask } from "./core/tempo-tasks.js";
 import { localDateString, sessionBounds, sessionDurationMinutes, validSession, hasSessionOverlaps } from "./core/tempo-core.js";
 
-export function mountInbox({getState,saveMutation,openTask,showToast}) {
+export function mountInbox({getState,saveMutation,openTask,showToast,parseTasks,prepareTasks}) {
   const section=document.querySelector(".tempo-inbox-section") || document.createElement("section");
   section.className="tempo-inbox-section tempo-view-section";
   section.dataset.tempoView="inbox";
   section.innerHTML=`
-    <div class="section-heading"><div><p class="eyebrow">RACCOLTA</p><h2>Inbox</h2><p class="muted">Annota subito le idee; assegna area, stima e giorno di lavoro quando sei pronto.</p></div></div>
+    <div class="section-heading"><div><p class="eyebrow">RACCOLTA</p><h2>Inbox</h2><p class="muted">Cattura una o più task con la stessa sintassi dell'Agenda; una task per riga.</p></div></div>
     <form id="tempo-inbox-capture" class="tempo-inbox-capture">
-      <input id="tempo-inbox-title" maxlength="120" required placeholder="Aggiungi rapidamente una task…">
-      <button class="button button-primary" type="submit">Aggiungi</button>
+      <label for="tempo-inbox-title">Inserimento rapido multiplo</label>
+      <textarea id="tempo-inbox-title" rows="4" maxlength="50000" required placeholder="Studio degli Assiri ^Studio @8h *martedì !2 #storia | Leggere il capitolo&#10;Preparare verifica ^Lavoro @2h *venerdì !1"></textarea>
+      <p class="form-hint">Una task per riga · !1–!4 priorità · ^Studio/^Lavoro/^Personale area · @durata lorda · *scadenza · #tag · | descrizione Markdown · +domani_16:30 programma anche una sessione, se è presente @durata.</p>
+      <p id="tempo-inbox-capture-preview" class="tempo-inbox-capture-preview" aria-live="polite"></p>
+      <p id="tempo-inbox-capture-error" class="form-error" role="alert"></p>
+      <button class="button button-primary" type="submit">Aggiungi task</button>
     </form>
     <div id="tempo-inbox-list" class="tempo-inbox-list"></div>
     <div class="tempo-day-planner">
@@ -46,15 +50,45 @@ export function mountInbox({getState,saveMutation,openTask,showToast}) {
     // A persisted day proposal is no longer trustworthy after an external edit.
     proposal=[];confirm.classList.add("hidden");slots.replaceChildren();
   }
+  const capture=$("tempo-inbox-title"),capturePreview=$("tempo-inbox-capture-preview"),captureError=$("tempo-inbox-capture-error");
+  function evaluateCapture() {
+    const source=capture.value;
+    captureError.textContent="";
+    if(!source.trim()){capturePreview.textContent="Scrivi una task per riga. Le righe vuote vengono ignorate.";return null;}
+    try {
+      const parsed=parseTasks(source);
+      if(!parsed.length)throw Error("Non è stata riconosciuta alcuna task.");
+      // Do not silently drop explicit scheduling when an estimate is missing.
+      if(parsed.some(t=>t.plannedStart&&t.estimateMinutes==null))
+        throw Error("Per programmare una sessione con +orario, indica anche @durata lorda.");
+      const prepared=prepareTasks(parsed);
+      const newSessionIds=new Set(getState().sessions.map(s=>s.id));
+      const sessions=prepared.sessions.filter(s=>!newSessionIds.has(s.id));
+      capturePreview.textContent=parsed.length+" task riconosciute · "+sessions.length+
+        (sessions.length===1?" sessione":" sessioni")+" da programmare. "+
+        parsed.map(t=>t.title+" ("+t.area+
+          (t.estimateMinutes==null?"":", "+(t.estimateMinutes/60).toLocaleString("it-IT")+" h lorde")+
+          (t.dueDate?", scadenza "+t.dueDate:"")+")").join(" · ");
+      return {prepared,sessions};
+    }catch(error){capturePreview.textContent="";captureError.textContent=error.message;return null;}
+  }
+  capture.addEventListener("input",evaluateCapture);
   $("tempo-inbox-capture").addEventListener("submit",event=>{
     event.preventDefault();
-    const title=$("tempo-inbox-title").value.trim();
-    const task=normalizeTask({id:uuid(),title,area:"Personale",priority:"nessuna",status:"todo",
-      description:"",tags:[],estimateMinutes:null,dueDate:"",workDate:"",inbox:true,createdAt:new Date().toISOString()});
-    if(!task)return showToast("Inserisci un titolo valido.");
-    if(saveMutation(s=>{s.tasks=[...s.tasks,task];})){
-      $("tempo-inbox-title").value="";showToast("Attività salvata in Inbox.");
-    }
+    const evaluated=evaluateCapture();
+    if(!evaluated)return;
+    const {prepared,sessions}=evaluated;
+    const scheduledIds=new Set(sessions.flatMap(s=>sessionTaskIds(s)));
+    // Explicit +orario and @durata requests create a linked session and go to
+    // the Agenda. Otherwise the parsed task remains in Inbox for later triage.
+    const newTasks=prepared.tasks.map(t=>({...t,inbox:!scheduledIds.has(t.id)}));
+    if(saveMutation(state=>{
+      state.tasks=[...state.tasks,...newTasks];
+      state.sessions=prepared.sessions;
+    })){
+      capture.value="";evaluateCapture();
+      showToast(newTasks.length+" task aggiunte"+(sessions.length?" · "+sessions.length+" sessioni programmate.": " in Inbox."));
+    }else captureError.textContent="Salvataggio non riuscito: nessuna task aggiunta.";
   });
   list.addEventListener("click",event=>{
     const b=event.target.closest("button");if(!b)return;
