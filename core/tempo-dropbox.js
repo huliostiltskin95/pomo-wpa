@@ -13,7 +13,7 @@ async function shaChallenge(code){return bytesToBase64(await crypto.subtle.diges
 async function fail(response){if(response.ok)return response;let body="";try{body=await response.text();}catch{}const error=new Error("Dropbox HTTP "+response.status+" "+body.slice(0,250));error.status=response.status;throw error;}
 export function createDropboxSync({getState,applyRemote,onStatus}){
   let auth=read(AUTH_KEY),meta=read(META_KEY,{rev:null,dirty:false,ready:false});
-  let inFlight=null,delay=null;
+  let inFlight=null,delay=null,overridePending=false;
   const status=(message,phase="idle")=>onStatus(message,{connected:Boolean(auth.refreshToken),dirty:meta.dirty,ready:meta.ready,phase,busy:["checking","uploading","downloading"].includes(phase)});
   const storeMeta=()=>write(META_KEY,meta);
   const storeAuth=()=>write(AUTH_KEY,auth);
@@ -91,6 +91,7 @@ export function createDropboxSync({getState,applyRemote,onStatus}){
     throw new Error("Operazione iniziale non riconosciuta.");
   }
   async function sync(){
+    if(overridePending)return;
     if(inFlight)return inFlight;
     inFlight=(async()=>{
       if(!auth.refreshToken||!meta.ready)return;
@@ -112,12 +113,45 @@ export function createDropboxSync({getState,applyRemote,onStatus}){
       } else if(remote.rev!==meta.rev){
         status("Scaricamento delle modifiche da Dropbox…","downloading");
         const item=await download();
-        if(meta.dirty)throw new Error("Modifiche locali durante il download: sostituzione bloccata.");
+        if(meta.dirty||overridePending)throw new Error("Modifiche locali o sovrascrittura richiesta durante il download: sostituzione bloccata.");
         await applyRemote(item.file);
         meta.rev=item.rev;meta.dirty=false;storeMeta();status("Dati aggiornati da Dropbox");
       }else status("Dropbox sincronizzato");
     })().catch(e=>{status(e.message,"error");throw e;}).finally(()=>{inFlight=null;});
     return inFlight;
+  }
+  async function forceUpload(){
+    if(!auth.refreshToken)throw new Error("Collega prima Dropbox.");
+    if(overridePending)throw new Error("Sovrascrittura Dropbox già in corso.");
+    overridePending=true;
+    clearTimeout(delay);
+    try{
+      // Evita che una sincronizzazione automatica in corso applichi
+      // una versione remota mentre è stata scelta la copia locale.
+      if(inFlight)await inFlight.catch(()=>{});
+      if(!navigator.onLine)throw new Error("Connessione assente: impossibile sovrascrivere Dropbox.");
+      status("Controllo della revisione Dropbox…","checking");
+      const remote=await metadata();
+      const before=JSON.stringify(getState());
+      status("Sovrascrittura del backup Dropbox con i dati locali…","uploading");
+      // Usa la revisione remota appena letta come controllo atomico:
+      // se qualcuno modifica Dropbox nel frattempo, l'upload fallisce.
+      const rev=await upload(remote?.rev||null);
+      meta.rev=rev;
+      meta.dirty=JSON.stringify(getState())!==before;
+      meta.ready=true;
+      storeMeta();
+      status(meta.dirty?"Backup sovrascritto; nuove modifiche locali da caricare":"Backup Dropbox sovrascritto con i dati locali");
+    }catch(e){
+      status(e.message,"error");
+      throw e;
+    }finally{
+      overridePending=false;
+      if(meta.dirty&&meta.ready&&auth.refreshToken){
+        clearTimeout(delay);
+        delay=setTimeout(()=>sync().catch(e=>status(e.message,"error")),2500);
+      }
+    }
   }
   async function forceDownload(allowDirty=false){
     if(!auth.refreshToken||!meta.ready)throw new Error("Inizializza prima la sincronizzazione.");
@@ -128,5 +162,5 @@ export function createDropboxSync({getState,applyRemote,onStatus}){
   function disconnect(){clearTimeout(delay);auth={};meta={rev:null,dirty:false,ready:false};localStorage.removeItem(AUTH_KEY);localStorage.removeItem(META_KEY);status("Dropbox scollegato. Dati locali conservati.");}
   function info(){return {connected:Boolean(auth.refreshToken),ready:meta.ready,dirty:meta.dirty};}
   async function init(){await callback();status(auth.refreshToken?(meta.ready?"Dropbox connesso":"Dropbox collegato: inizializzazione necessaria"):"Dropbox non collegato");if(meta.ready)await sync().catch(()=>{});}
-  return {init,connect,firstSync,sync,changed,forceDownload,disconnect,info};
+  return {init,connect,firstSync,sync,changed,forceUpload,forceDownload,disconnect,info};
 }
