@@ -403,6 +403,8 @@ import { localDateString, timeToMinutes, dateTime, formatTime, formatDate, escap
     if(setup)setup.classList.toggle("hidden",info.connected);
     if(initial)initial.classList.toggle("hidden",!info.connected||info.ready);
     if(actions)actions.classList.toggle("hidden",!info.ready);
+    const account=$("dropbox-account");
+    if(account)account.classList.toggle("hidden",!info.connected);
     const recovery=$("dropbox-recovery");
     if(recovery)recovery.classList.toggle("hidden",!dropbox?.recovery());
   }
