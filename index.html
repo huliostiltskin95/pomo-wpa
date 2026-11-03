@@ -144,7 +144,8 @@
       <input type="hidden" id="task-id">
       <label class="field-label">Titolo<input id="task-title" type="text" maxlength="120" placeholder="Es. Preparare lezione di storia" required></label>
       <div class="two-fields">
-        <label class="field-label">Area<select id="task-area" required>
+        <label class="field-label">Area<select id="task-area">
+          <option value="">Da definire (Inbox)</option>
           <option>Personale</option><option>Lavoro</option><option selected>Studio</option>
         </select></label>
         <label class="field-label">Priorità<select id="task-priority">
@@ -159,7 +160,11 @@
         <input id="task-estimate" type="number" min="0.25" max="10000" step="0.25" placeholder="Facoltativa">
       </label>
       <div class="two-fields"><label class="field-label">Giorno previsto<input id="task-planned-date" type="date"></label><label class="field-label">Ora prevista<input id="task-planned-start" type="time"></label></div>
-      <label class="field-label">Scadenza (facoltativa)<input id="task-due-date" type="date"></label>
+      <div class="two-fields">
+        <label class="field-label">Scadenza<input id="task-due-date" type="date"></label>
+        <label class="field-label"><span>Alternativa alla scadenza</span><span class="check-label"><input type="checkbox" id="task-long-term"> A lungo termine</span></label>
+      </div>
+      <p class="form-hint">La task entra automaticamente in Agenda quando ha area, stima lorda e scadenza oppure «A lungo termine».</p>
       <p class="form-hint">Se indichi ora prevista e durata, TEMPVS crea una sessione Pomodoro associata alla task. Scadenza e svolgimento sono indipendenti; il completamento resta manuale.</p>
       <label class="field-label">Tag gerarchici
         <input id="task-tags" type="text" placeholder="Studio/Greco/Verbi, Studio/Didattica">
