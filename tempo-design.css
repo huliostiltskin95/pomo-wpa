@@ -278,3 +278,6 @@ html[data-tempo-density="comfortable"] .session-name{font-size:16px}
   .tempo-agenda-heading{min-height:32px}
   .tempo-inline-help summary,.tempo-advanced-actions summary{min-height:32px}
 }
+
+/* Inbox: inline syntax help uses the full width of the capture form. */
+.tempo-inbox-capture>.tempo-inline-help{grid-column:1/-1}
