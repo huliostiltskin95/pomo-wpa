@@ -679,7 +679,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
     if (currentSignature !== lastReminderSignature) render();
   }
   agendaV2 = createAgendaV2({getState,saveMutation,setTaskStatus,openTask,openPlan,showToast});
-  const inbox = mountInbox({getState,saveMutation,openTask,showToast});
+  const inbox = mountInbox({getState,saveMutation,openTask,showToast,parseTasks:parseBulk,prepareTasks:prepareNewTasks});
   render();
   return { render, tick };
 }
