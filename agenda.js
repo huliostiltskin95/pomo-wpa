@@ -484,10 +484,10 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
     }
     throw Error("Data non riconosciuta: "+value);
   };
-  function parseBulk(source = el.bulkInput.value) {
+  function parseBulk(source = el.bulkInput.value, defaultArea = "Studio") {
     return source.split(/\r?\n/).map((line,index)=>{
       if(!line.trim())return null;
-      const tags=[], values={dueDate:"",estimateMinutes:null,area:"Studio",priority:"media",plannedStart:"",plannedDate:""};
+      const tags=[], values={dueDate:"",estimateMinutes:null,area:defaultArea,priority:"media",plannedStart:"",plannedDate:""};
       // The first standalone pipe separates title/shortcuts from Markdown description.
       const separator=line.indexOf("|");
       const left=separator<0?line:line.slice(0,separator);
@@ -679,7 +679,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
     if (currentSignature !== lastReminderSignature) render();
   }
   agendaV2 = createAgendaV2({getState,saveMutation,setTaskStatus,openTask,openPlan,showToast});
-  const inbox = mountInbox({getState,saveMutation,openTask,showToast,parseTasks:parseBulk,prepareTasks:prepareNewTasks});
+  const inbox = mountInbox({getState,saveMutation,openTask,showToast,parseTasks:source=>parseBulk(source,"Personale"),prepareTasks:prepareNewTasks});
   render();
   return { render, tick };
 }
