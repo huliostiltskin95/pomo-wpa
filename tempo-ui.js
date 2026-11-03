@@ -62,7 +62,7 @@
     const stats = document.createElement("section");
     stats.dataset.tempoView = "statistiche";
     stats.className = "tempo-view-section tempo-statistics";
-    stats.innerHTML = '<p class="eyebrow">RIEPILOGO</p><h2>Statistiche</h2><p class="muted">Il tempo trascorso è una registrazione basata sul calendario, non una misura verificata dell’attenzione.</p><div id="tempo-stat-grid" class="tempo-stat-grid"></div><p class="tempo-stat-footnote">Tempo pianificato e tempo trascorso sono distinti. Le sessioni eliminate non contribuiscono più ai conteggi.</p>';
+    stats.innerHTML = '<p class="eyebrow">RIEPILOGO</p><h2>Statistiche</h2><p class="muted">Il tempo lordo trascorso segue le sessioni conservate, pause comprese, e non misura l'attenzione effettiva.</p><div id="tempo-stat-grid" class="tempo-stat-grid"></div><p class="tempo-stat-footnote">Tempo pianificato e tempo trascorso sono distinti; tutte le durate sono lorde. Le sessioni eliminate non contribuiscono più ai conteggi.</p>';
     main.appendChild(stats);
 
     const toolbar = document.querySelector(".agenda-extra-actions");
@@ -193,15 +193,14 @@
           nextEl.appendChild(row);
         }
       }
-      const loggedIds = new Set(history.map(h=>h.sessionId));
-      const planned = sessions.filter(s=>startOf(s)>now).reduce((sum,s)=>sum+focusMinutes(s),0);
-      const savedIds=new Set(sessions.map(s=>s.id));
-      const elapsed = sessions.filter(s=>endOf(s)<=now&&!loggedIds.has(s.id)).reduce((sum,s)=>sum+focusMinutes(s),0) + history.filter(h=>savedIds.has(h.sessionId)).reduce((sum,h)=>sum+(Number(h.minutes)||0),0);
+      const gross = s=>Math.max(0,(endOf(s)-startOf(s))/60000);
+      const planned = sessions.filter(s=>startOf(s)>now).reduce((sum,s)=>sum+gross(s),0);
+      const elapsed = sessions.reduce((sum,s)=>sum+Math.max(0,Math.min(now,endOf(s))-startOf(s))/60000,0);
       const completed = tasks.filter(t=>t.status==="done").length;
       const statsEl=document.getElementById("tempo-stat-grid");
       if(statsEl){
         statsEl.replaceChildren();
-        const metrics = [["Attività",String(tasks.length)],["Completate",String(completed)],["Concentrazione programmata futura",format(planned)],["Tempo registrato trascorso",format(elapsed)]];
+        const metrics = [["Attività",String(tasks.length)],["Completate",String(completed)],["Tempo lordo futuro programmato",format(planned)],["Tempo lordo trascorso",format(elapsed)]];
         for(const [label,value] of metrics){
           const item=document.createElement("div");item.className="tempo-stat-item";
           const heading=document.createElement("span");heading.textContent=label;
