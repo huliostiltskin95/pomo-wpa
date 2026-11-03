@@ -45,6 +45,8 @@ export function normalizeTask(value) {
       plannedStart: typeof value.plannedStart === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(value.plannedStart) ? value.plannedStart : "",
       plannedDate: typeof value.plannedDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.plannedDate) ? value.plannedDate : "",
       dueDate: typeof value.dueDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.dueDate) ? value.dueDate : "",
+      workDate: typeof value.workDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.workDate) ? value.workDate : "",
+      inbox: value.inbox === true,
       // Backward-compatible migration from the original completed boolean.
       status: value.status === undefined ? (value.completed === true ? "done" : "todo") : value.status,
       completed: (value.status === undefined ? value.completed === true : value.status === "done"),
