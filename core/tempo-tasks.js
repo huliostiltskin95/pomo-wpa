@@ -11,6 +11,17 @@ export function grossMinutesForTask(session, taskId) {
   }
   return sessionDurationMinutes(session)/ids.length;
 }
+/** Gross elapsed time includes Pomodoro breaks; an unstarted session counts zero. */
+export function elapsedGrossMinutes(session,now=new Date()) {
+  const {start,end}=sessionBounds(session);
+  return Math.max(0,Math.min(end.getTime(),now.getTime())-start.getTime())/60000;
+}
+export function elapsedGrossForTask(taskId,sessions,now=new Date()) {
+  return sessions.reduce((sum,s)=>{
+    const duration=sessionDurationMinutes(s);
+    return sum+(duration>0?elapsedGrossMinutes(s,now)*grossMinutesForTask(s,taskId)/duration:0);
+  },0);
+}
 export function allocatedGrossMinutes(session) {
   return sessionTaskIds(session).reduce((total,id)=>total+grossMinutesForTask(session,id),0);
 }
