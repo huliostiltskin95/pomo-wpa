@@ -160,7 +160,7 @@ export function createAgendaV2({getState,saveMutation,setTaskStatus,openTask,ope
       '<div class="av2-main"><div class="av2-header"><div><h2>'+escape(menus.find(x=>x[0]===ui.list)?.[1]||"Agenda")+'</h2><small>'+tasks.length+' attività nella selezione</small></div>'+
       '<div class="av2-tabs">'+[["list","Lista"],["calendar","Calendario"],["kanban","Kanban"],["timeline","Timeline"],["matrix","Eisenhower"]].map(([key,label])=>
       '<button data-view="'+key+'" '+(ui.view===key?'aria-pressed="true"':'aria-pressed="false"')+'>'+label+'</button>').join("")+'</div></div>'+
-      '<div class="tempo-day-launch"><button class="button button-secondary" type="button" data-open-day-plan="1">Pianifica sessioni del '+escape(ui.view==="calendar"?ui.anchor:today())+'</button></div>'+
+      '<div class="tempo-day-launch"><button class="button button-secondary" type="button" data-open-day-plan="1">Crea sessioni · '+escape(ui.view==="calendar"?ui.anchor:today())+'</button><button class="button button-secondary" type="button" data-fill-day="1">Riempi sessioni · '+escape(ui.view==="calendar"?ui.anchor:today())+'</button></div>'+
       '<div class="av2-tools"><input data-search="1" placeholder="Cerca nelle attività" value="'+escape(ui.search)+'" aria-label="Cerca attività">'+
       '<label>Raggruppa <select data-control="group">'+[["date","Data"],["area","Area"],["priority","Priorità"],["status","Stato"]].map(([v,l])=>
       '<option value="'+v+'" '+(ui.group===v?"selected":"")+'>'+l+'</option>').join("")+'</select></label>'+
@@ -183,7 +183,8 @@ export function createAgendaV2({getState,saveMutation,setTaskStatus,openTask,ope
   }
   root.addEventListener("click",event=>{
     const b=event.target.closest("button");if(!b)return;
-    if(b.dataset.openDayPlan){window.dispatchEvent(new CustomEvent("tempo:open-day-planner",{detail:{date:ui.view==="calendar"?ui.anchor:today()}}));}
+    if(b.dataset.fillDay){window.dispatchEvent(new CustomEvent("tempo:fill-day",{detail:{date:ui.view==="calendar"?ui.anchor:today()}}));}
+    else if(b.dataset.openDayPlan){window.dispatchEvent(new CustomEvent("tempo:open-day-planner",{detail:{date:ui.view==="calendar"?ui.anchor:today()}}));}
     else if(b.dataset.smart){ui.list=b.dataset.smart;if(ui.view==="calendar"||ui.view==="timeline")ui.view="list";render();}
     else if(b.hasAttribute("data-area-filter")){ui.area=b.dataset.areaFilter;render();}
     else if(b.dataset.view){ui.view=b.dataset.view;if(ui.view==="calendar"||ui.view==="timeline")ui.list="all";render();}
