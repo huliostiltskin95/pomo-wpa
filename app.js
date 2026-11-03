@@ -60,6 +60,7 @@ import { localDateString, timeToMinutes, dateTime, formatTime, formatDate, escap
             sessions: parsed.sessions.filter(validSession).map(s=>migrateSession(normalizeSession(s),[...tasksById.values()])),
             tasks: [...tasksById.values()],
             history: Array.isArray(parsed.history) ? parsed.history.filter(validHistory) : [],
+            syncDeleted:normalizeDeleted(parsed.syncDeleted),
             defaults: {
               workMinutes: clampInt(parsed.defaults?.workMinutes, 1, 240, 25),
               breakEnabled: parsed.defaults?.breakEnabled !== undefined ? Boolean(parsed.defaults.breakEnabled) : true
@@ -69,7 +70,7 @@ import { localDateString, timeToMinutes, dateTime, formatTime, formatDate, escap
         }
       }
     } catch (error) { console.warn("Impossibile leggere i dati locali.", error); }
-    return { sessions: [], tasks: [], history: [], defaults: { ...DEFAULTS }, appearance: normalizeAppearance(DEFAULT_APPEARANCE) };
+    return { sessions: [], tasks: [], history: [], syncDeleted:{tasks:[],sessions:[]}, defaults: { ...DEFAULTS }, appearance: normalizeAppearance(DEFAULT_APPEARANCE) };
   }
   function migrateSession(s,tasks){const area=sessionArea(s,tasks);return {...withSessionTasks(s,sessionTaskIds(s)),area,title:area};}
   function taskPicker(ids=[]){const area=els.sessionTitle.value;document.getElementById("session-task-picker").innerHTML=state.tasks.filter(t=>t.area===area).map(t=>'<label class="tempo-session-task"><input type="checkbox" value="'+escapeHtml(t.id)+'" '+(ids.includes(t.id)?'checked':'')+'><span>'+escapeHtml(t.title)+'</span></label>').join("")||"Nessuna task disponibile nell’area.";}
@@ -80,7 +81,36 @@ import { localDateString, timeToMinutes, dateTime, formatTime, formatDate, escap
     if((state.history||[]).some(h=>h.sessionId===session.id))return;
     state.history = [...(state.history||[]), {sessionId:session.id,taskId:session.taskId||"",date:session.date,minutes:focusMinutesInSession(session),title:session.title}];
   }
-  function persist(){try{localStorage.setItem(STORAGE_KEY,JSON.stringify(state));dropbox?.changed();return true;}catch(error){showToast("Non è stato possibile salvare i dati nel browser.");return false;}}
+  function normalizeDeleted(input) {
+    return {tasks:["tasks"],sessions:["sessions"]}.tasks && ["tasks","sessions"].reduce((out,key)=>{
+      out[key]=Array.isArray(input?.[key])?[...new Set(input[key].filter(id=>typeof id==="string"&&id))]:[];
+      return out;
+    },{});
+  }
+  function persist(){
+    const beforeDeleted=state.syncDeleted;
+    try {
+      // A tombstone must survive on Dropbox after an item is deleted locally.
+      const previousRaw=localStorage.getItem(STORAGE_KEY)||localStorage.getItem(OLD_STORAGE_KEY);
+      const previous=previousRaw?JSON.parse(previousRaw):null;
+      const tombstones=normalizeDeleted(state.syncDeleted);
+      for(const kind of ["tasks","sessions"]){
+        const present=new Set(state[kind].map(item=>item.id));
+        if(Array.isArray(previous?.[kind]))for(const item of previous[kind]){
+          if(item?.id && !present.has(item.id))tombstones[kind].push(item.id);
+        }
+        tombstones[kind]=[...new Set(tombstones[kind])].filter(id=>!present.has(id)).sort();
+      }
+      state.syncDeleted=tombstones;
+      localStorage.setItem(STORAGE_KEY,JSON.stringify(state));
+      dropbox?.changed();
+      return true;
+    } catch(error) {
+      state.syncDeleted=beforeDeleted;
+      showToast("Non è stato possibile salvare i dati nel browser.");
+      return false;
+    }
+  }
   function getActiveSession(now=new Date()){return findActiveSession(state.sessions,now);}
   function getNextSession(now=new Date()){return findNextSession(state.sessions,now);}
   function showToast(message){els.toast.textContent=message;els.toast.classList.add("show");clearTimeout(toastTimeout);toastTimeout=setTimeout(()=>els.toast.classList.remove("show"),3200);}
@@ -140,7 +170,7 @@ import { localDateString, timeToMinutes, dateTime, formatTime, formatDate, escap
     renderTimer();showToast("Preferenze salvate.");
   }
   function downloadFile(content,type,filename){const blob=new Blob([content],{type}),url=URL.createObjectURL(blob),link=document.createElement("a");link.href=url;link.download=filename;document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}
-  function exportBackup(){downloadFile(JSON.stringify({app:"TEMPVS",version:4,exportedAt:new Date().toISOString(),defaults:state.defaults,appearance:state.appearance,sessions:state.sessions,tasks:state.tasks,history:state.history || []},null,2),"application/json",`tempo-backup-${localDateString()}.json`);showToast("Backup esportato.");}
+  function exportBackup(){downloadFile(JSON.stringify({app:"TEMPVS",version:4,exportedAt:new Date().toISOString(),defaults:state.defaults,appearance:state.appearance,sessions:state.sessions,tasks:state.tasks,history:state.history || [],syncDeleted:state.syncDeleted || {tasks:[],sessions:[]}},null,2),"application/json",`tempo-backup-${localDateString()}.json`);showToast("Backup esportato.");}
   async function importBackup(file) {
     if (!file) return;
     const previous = state;
@@ -180,7 +210,13 @@ import { localDateString, timeToMinutes, dateTime, formatTime, formatDate, escap
       // Legacy backups may contain no task records: preserve their sessions as standalone.
       const validTaskIds = new Set(mergedTasks.map(task => task.id));
       mergedSessions=mergedSessions.map(session=>migrateSession(withSessionTasks(session,sessionTaskIds(session).filter(id=>validTaskIds.has(id))),mergedTasks));
-      state = { sessions: mergedSessions, tasks: mergedTasks, history: mergedHistory, defaults: replace ? defaults : state.defaults, appearance: replace ? normalizeAppearance(data.appearance) : state.appearance };
+      const incomingDeleted=normalizeDeleted(data.syncDeleted),currentDeleted=normalizeDeleted(state.syncDeleted);
+      const mergedDeleted=replace?incomingDeleted:{
+        tasks:[...new Set([...currentDeleted.tasks,...incomingDeleted.tasks])],
+        sessions:[...new Set([...currentDeleted.sessions,...incomingDeleted.sessions])]
+      };
+      state = { sessions: mergedSessions, tasks: mergedTasks, history: mergedHistory, syncDeleted:mergedDeleted,
+        defaults: replace ? defaults : state.defaults, appearance: replace ? normalizeAppearance(data.appearance) : state.appearance };
       if (!persist()) { state = previous; return; }
       els.filterDate.value = localDateString();
       renderAll();
@@ -237,7 +273,9 @@ import { localDateString, timeToMinutes, dateTime, formatTime, formatDate, escap
     const tasks=data.tasks.map(normalizeTask);
     if(tasks.some(t=>!t)||new Set(tasks.map(t=>t.id)).size!==tasks.length)throw new Error("Attività Dropbox non valide.");
     if(data.history.some(h=>!validHistory(h)))throw new Error("Storico Dropbox non valido.");
-    return {sessions,tasks,history:data.history,defaults:{workMinutes:clampInt(data.defaults?.workMinutes,1,240,25),breakEnabled:data.defaults?.breakEnabled!==false},appearance:normalizeAppearance(data.appearance)};
+    const syncDeleted=normalizeDeleted(data.syncDeleted);
+    if(["tasks","sessions"].some(key=>syncDeleted[key].some(id=>typeof id!=="string"||!id)))throw new Error("Registro delle eliminazioni non valido.");
+    return {sessions,tasks,history:data.history,syncDeleted,defaults:{workMinutes:clampInt(data.defaults?.workMinutes,1,240,25),breakEnabled:data.defaults?.breakEnabled!==false},appearance:normalizeAppearance(data.appearance)};
   }
   async function applyCloudBackup(data) {
     const next=validateCloudBackup(data),old=state;
@@ -273,7 +311,65 @@ import { localDateString, timeToMinutes, dateTime, formatTime, formatDate, escap
     if(initial)initial.classList.toggle("hidden",!info.connected||info.ready);
     if(actions)actions.classList.toggle("hidden",!info.ready);
   }
-  dropbox=createDropboxSync({getState:()=>state,applyRemote:applyCloudBackup,onStatus:cloudStatus});
+  async function resolveCloudConflicts(conflicts) {
+    return new Promise(resolve=>{
+      const dlg=document.createElement("dialog");
+      dlg.className="session-dialog tempo-merge-dialog";
+      dlg.setAttribute("aria-label","Risoluzione dei conflitti Dropbox");
+      const heading=document.createElement("h2");
+      heading.textContent="Risolvi i conflitti di sincronizzazione";
+      const note=document.createElement("p");
+      note.className="muted";
+      note.textContent="Le modifiche compatibili vengono unite automaticamente. Per questi elementi scegli quale modifica conservare.";
+      const form=document.createElement("form");
+      form.addEventListener("submit",event=>{
+        event.preventDefault();
+        const decisions={};
+        for(const [key,select] of controls) decisions[key]=select.value;
+        finish(decisions);
+      });
+      const controls=new Map();
+      for(const conflict of conflicts){
+        const field=document.createElement("label");
+        field.className="tempo-merge-choice";
+        const title=document.createElement("strong");
+        title.textContent=conflict.label;
+        const example=document.createElement("small");
+        example.textContent="Locale: "+conflict.localPreview+" | Dropbox: "+conflict.remotePreview;
+        const select=document.createElement("select");
+        select.required=true;
+        select.setAttribute("aria-label",conflict.label);
+        const blank=new Option("Scegli la versione da conservare","",true,true);
+        blank.disabled=true;
+        select.add(blank);
+        for(const option of conflict.options)select.add(new Option(option.label,option.value));
+        controls.set(conflict.key,select);
+        field.append(title,example,select);
+        form.append(field);
+      }
+      const buttons=document.createElement("div");
+      buttons.className="dialog-actions";
+      const cancel=document.createElement("button");
+      cancel.type="button";cancel.className="button button-secondary";cancel.textContent="Annulla";
+      cancel.addEventListener("click",()=>finish(null));
+      const ok=document.createElement("button");
+      ok.type="submit";ok.className="button button-primary";ok.textContent="Unisci e sincronizza";
+      buttons.append(cancel,ok);
+      form.append(buttons);
+      dlg.append(heading,note,form);
+      document.body.append(dlg);
+      let settled=false;
+      function finish(value){
+        if(settled)return;
+        settled=true;
+        dlg.close();dlg.remove();resolve(value);
+      }
+      dlg.addEventListener("cancel",e=>{e.preventDefault();finish(null);});
+      dlg.showModal();
+    });
+  }
+  dropbox=createDropboxSync({getState:()=>state,applyRemote:applyCloudBackup,
+    normalizeRemote:validateCloudBackup,resolveConflicts:resolveCloudConflicts,onStatus:cloudStatus});
   $("dropbox-connect").addEventListener("click",()=>dropbox.connect($("dropbox-key").value).catch(e=>showToast(e.message)));
   $("dropbox-initial-upload").addEventListener("click",()=>{if(confirm("Creare il primo backup Dropbox con i dati presenti in questo dispositivo? Se Dropbox contiene già un backup, l'operazione verrà bloccata."))dropbox.firstSync("upload").catch(e=>showToast(e.message));});
   $("dropbox-initial-download").addEventListener("click",()=>{if(confirm("Sostituire i dati locali con quelli di Dropbox? Esporta prima un backup manuale per sicurezza."))dropbox.firstSync("download").catch(e=>showToast(e.message));});
@@ -282,8 +378,21 @@ import { localDateString, timeToMinutes, dateTime, formatTime, formatDate, escap
     if(!confirm("ATTENZIONE: sovrascrivere il backup Dropbox con tutti i dati di QUESTO dispositivo? I dati presenti soltanto su Dropbox verranno sostituiti. Gli archivi non saranno uniti."))return;
     dropbox.forceUpload().catch(e=>showToast(e.message));
   }
+  $("dropbox-initial-merge").addEventListener("click",()=>mergeCloudArchives());
   $("dropbox-initial-overwrite").addEventListener("click",overwriteDropboxWithLocal);
   $("dropbox-force-upload").addEventListener("click",overwriteDropboxWithLocal);
+  $("dropbox-merge").addEventListener("click",()=>mergeCloudArchives());
+  $("dropbox-recovery").addEventListener("click",()=>{
+    const backup=dropbox.recovery();
+    if(!backup){showToast("Nessuna copia di sicurezza disponibile.");return;}
+    downloadFile(JSON.stringify(backup.data,null,2),"application/json",
+      "tempvs-copia-precedente-"+localDateString(new Date(backup.savedAt))+".json");
+    showToast("Copia di sicurezza scaricata.");
+  });
+  function mergeCloudArchives(){
+    if(!confirm("Unire i dati locali con Dropbox? Le modifiche compatibili verranno conservate. In caso di conflitti potrai scegliere; verrà archiviata una copia locale di sicurezza."))return;
+    dropbox.mergeNow().catch(e=>showToast(e.message));
+  }
   $("dropbox-sync").addEventListener("click",()=>dropbox.sync().catch(e=>showToast(e.message)));
   $("dropbox-download").addEventListener("click",()=>{if(dropbox.info().dirty){showToast("Modifiche locali in sospeso: usa la risoluzione conflitti.");return;}if(confirm("Scaricare il backup remoto e sostituire i dati locali?"))dropbox.forceDownload().catch(e=>showToast(e.message));});
   $("dropbox-resolve").addEventListener("click",()=>{if(!dropbox.info().ready)return;if(!confirm("ATTENZIONE: sostituire le modifiche locali con Dropbox? Verrà prima scaricata una copia JSON locale di sicurezza."))return;exportBackup();dropbox.forceDownload(true).catch(e=>showToast(e.message));});
