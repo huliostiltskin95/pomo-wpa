@@ -2,12 +2,12 @@
 (() => {
   "use strict";
   const views = [
-    ["oggi", "Oggi", "◷"],
-    ["inbox", "Inbox", "▤"],
-    ["agenda", "Agenda", "☑"],
-    ["sessioni", "Sessioni", "▦"],
-    ["statistiche", "Statistiche", "▥"],
-    ["impostazioni", "Impostazioni", "⚙"]
+    ["oggi", "Oggi", "◷", "Oggi"],
+    ["inbox", "Inbox", "▤", "Inbox"],
+    ["agenda", "Agenda", "☑", "Agenda"],
+    ["sessioni", "Sessioni", "▦", "Sessioni"],
+    ["statistiche", "Statistiche", "▥", "Dati"],
+    ["impostazioni", "Impostazioni", "⚙", "Opzioni"]
   ];
   const ready = () => {
     const main = document.querySelector("main.layout");
@@ -15,32 +15,12 @@
     const nav = document.createElement("nav");
     nav.id = "tempo-navigation";
     nav.setAttribute("aria-label", "Sezioni di Tempo");
-    nav.innerHTML = views.map(([id,label,icon]) => '<a class="tempo-nav-link" href="#'+id+'" data-view-link="'+id+'"><span class="tempo-nav-icon" aria-hidden="true">'+icon+'</span><span>'+label+'</span></a>').join("");
+    nav.innerHTML = views.map(([id,label,icon,compact]) => '<a class="tempo-nav-link" href="#'+id+'" data-view-link="'+id+'" aria-label="'+label+'"><span class="tempo-nav-icon" aria-hidden="true">'+icon+'</span><span class="tempo-nav-full" aria-hidden="true">'+label+'</span><span class="tempo-nav-short" aria-hidden="true">'+compact+'</span></a>').join("");
     document.body.insertBefore(nav, main);
-    const separator = document.createElement("div");
-    separator.className = "tempo-nav-divider";
-    nav.appendChild(separator);
-    const areaHeading = document.createElement("div");
-    areaHeading.className = "tempo-nav-label";
-    areaHeading.textContent = "AREE";
-    nav.appendChild(areaHeading);
-    for (const name of ["Studio","Lavoro","Personale"]) {
-      const item = document.createElement("div");
-      item.className = "tempo-nav-area";
-      item.dataset.area = name;
-      const dot = document.createElement("span");
-      dot.className = "tempo-area-dot";
-      dot.setAttribute("aria-hidden","true");
-      item.append(dot,document.createTextNode(name));
-      nav.appendChild(item);
-    }
-    const footer = document.createElement("div");
-    footer.className = "tempo-nav-footer";
-    footer.textContent = "TEMPVS · Quiet Focus";
-    nav.appendChild(footer);
+    // Le aree si filtrano in Agenda: non duplicarle come voci non cliccabili nella navigazione.
 
     const map = {
-      oggi: [".intro", ".timer-card"],
+      oggi: [".timer-card"],
       agenda: [".agenda-section"],
       inbox: [".tempo-inbox-section"],
       sessioni: [".schedule-section"],
@@ -62,7 +42,7 @@
     const stats = document.createElement("section");
     stats.dataset.tempoView = "statistiche";
     stats.className = "tempo-view-section tempo-statistics";
-    stats.innerHTML = '<p class="eyebrow">RIEPILOGO</p><h2>Statistiche</h2><p class="muted">Il tempo lordo trascorso segue le sessioni conservate, pause comprese, e non misura la concentrazione effettiva.</p><div id="tempo-stat-grid" class="tempo-stat-grid"></div><p class="tempo-stat-footnote">Tempo pianificato e tempo trascorso sono distinti; tutte le durate sono lorde. Le sessioni eliminate non contribuiscono più ai conteggi.</p>';
+    stats.innerHTML = '<h2>Statistiche</h2><div id="tempo-stat-grid" class="tempo-stat-grid"></div><p class="tempo-stat-footnote">Durate lorde (pause incluse), non concentrazione netta. Le sessioni eliminate non sono conteggiate.</p>';
     main.appendChild(stats);
 
     const toolbar = document.querySelector(".agenda-extra-actions");
@@ -103,6 +83,16 @@
         pill.querySelector(".tempo-cloud-compact-label").textContent=label;
         pill.title=d.message||label;
       });
+    }
+    const networkStatus = document.getElementById("connection-status");
+    if (networkStatus) {
+      const refreshNetworkStatus = () => {
+        networkStatus.hidden = navigator.onLine;
+        if (!navigator.onLine) networkStatus.textContent = "Offline";
+      };
+      window.addEventListener("online", refreshNetworkStatus);
+      window.addEventListener("offline", refreshNetworkStatus);
+      refreshNetworkStatus();
     }
     const appearanceForm = document.getElementById("tempo-appearance-form");
     if (appearanceForm) {
