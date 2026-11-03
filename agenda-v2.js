@@ -58,8 +58,8 @@ export function createAgendaV2({getState,saveMutation,setTaskStatus,openTask,ope
     return '<div class="av2-task" data-area="'+escape(t.area)+'" data-drag-id="'+escape(t.id)+'" '+(kanban?'draggable="true"':'')+'>'+
       '<button class="av2-check" data-complete="'+escape(t.id)+'" aria-label="'+(t.status==="done"?"Riapri":"Completa")+' '+escape(t.title)+'">'+(t.status==="done"?"☑":"□")+'</button>'+
       '<button class="av2-task-title '+(t.status==="done"?"av2-done":"")+'" data-task="'+escape(t.id)+'">'+escape(t.title)+'</button>'+
-      '<span class="av2-area" title="'+escape(t.area)+'">'+escape(t.area)+'</span>'+
-      '<span class="av2-priority av2-priority-'+escape(t.priority)+'">'+priorities[t.priority]+'</span>'+
+      (!ui.area?'<span class="av2-area" title="'+escape(t.area)+'">'+escape(t.area)+'</span>':'')+
+      (t.priority!=="nessuna"?'<span class="av2-priority av2-priority-'+escape(t.priority)+'">'+priorities[t.priority]+'</span>':'')+
       (t.workDate?'<span class="av2-date">Lavoro '+escape(formatDate(t.workDate))+'</span>':'')+
       (t.dueDate?'<span class="av2-date">Scade '+escape(formatDate(t.dueDate))+'</span>':t.longTerm?'<span class="av2-date">Lungo termine</span>':'')+
       '<button class="av2-more" data-plan="'+escape(t.id)+'" title="Programma una sessione">◷</button></div>';
@@ -156,16 +156,18 @@ export function createAgendaV2({getState,saveMutation,setTaskStatus,openTask,ope
     const state=getState(),tasks=visibleTasks(state);
     root.innerHTML='<div class="av2-shell"><nav class="av2-nav" aria-label="Liste intelligenti"><h3>Liste intelligenti</h3>'+
       menus.map(([key,label])=>'<button data-smart="'+key+'" '+(ui.list===key?'aria-current="page"':'')+'>'+escape(label)+'</button>').join("")+
-      '<h3>Aree</h3>'+["","Lavoro","Studio","Personale"].map(a=>'<button data-area-filter="'+escape(a)+'" '+(ui.area===a?'aria-current="true"':'')+'>'+escape(a||"Tutte le aree")+'</button>').join("")+'</nav>'+
+      '</nav>'+
       '<div class="av2-main"><div class="av2-header"><div><h2>'+escape(menus.find(x=>x[0]===ui.list)?.[1]||"Agenda")+'</h2><small>'+tasks.length+' attività nella selezione</small></div>'+
       '<div class="av2-tabs">'+[["list","Lista"],["calendar","Calendario"],["kanban","Kanban"],["timeline","Timeline"],["matrix","Eisenhower"]].map(([key,label])=>
       '<button data-view="'+key+'" '+(ui.view===key?'aria-pressed="true"':'aria-pressed="false"')+'>'+label+'</button>').join("")+'</div></div>'+
       '<div class="tempo-day-launch"><button class="button button-secondary" type="button" data-open-day-plan="1">Crea sessioni · '+escape(ui.view==="calendar"?ui.anchor:today())+'</button><button class="button button-secondary" type="button" data-fill-day="1">Riempi sessioni · '+escape(ui.view==="calendar"?ui.anchor:today())+'</button></div>'+
       '<div class="av2-tools"><input data-search="1" placeholder="Cerca nelle attività" value="'+escape(ui.search)+'" aria-label="Cerca attività">'+
-      '<label>Raggruppa <select data-control="group">'+[["date","Data"],["area","Area"],["priority","Priorità"],["status","Stato"]].map(([v,l])=>
-      '<option value="'+v+'" '+(ui.group===v?"selected":"")+'>'+l+'</option>').join("")+'</select></label>'+
-      '<label>Ordina <select data-control="sort">'+[["date","Data"],["priority","Priorità"],["title","Titolo"],["area","Area"]].map(([v,l])=>
-      '<option value="'+v+'" '+(ui.sort===v?"selected":"")+'>'+l+'</option>').join("")+'</select></label></div>'+
+      '<label>Area <select data-control="area">'+["","Lavoro","Studio","Personale"].map(a=>
+      '<option value="'+escape(a)+'" '+(ui.area===a?"selected":"")+'>'+escape(a||"Tutte")+'</option>').join("")+'</select></label>'+
+      (ui.view==="list"?'<label>Raggruppa <select data-control="group">'+[["date","Data"],["area","Area"],["priority","Priorità"],["status","Stato"]].map(([v,l])=>
+      '<option value="'+v+'" '+(ui.group===v?"selected":"")+'>'+l+'</option>').join("")+'</select></label>':"")+
+      (["list","kanban","matrix"].includes(ui.view)?'<label>Ordina <select data-control="sort">'+[["date","Data"],["priority","Priorità"],["title","Titolo"],["area","Area"]].map(([v,l])=>
+      '<option value="'+v+'" '+(ui.sort===v?"selected":"")+'>'+l+'</option>').join("")+'</select></label>':"")+'</div>'+
       dateHeader()+(ui.view==="calendar"?'<div class="av2-layers"><label><input type="checkbox" data-layer="task" '+(ui.taskLayer?"checked":"")+'> Scadenze task</label><label><input type="checkbox" data-layer="session" '+(ui.sessionLayer?"checked":"")+'> Sessioni</label></div>':"")+
       '<div class="av2-content">'+(ui.view==="list"?renderList(tasks,state):ui.view==="kanban"?renderKanban(tasks):ui.view==="calendar"?renderCalendar(state):ui.view==="timeline"?renderTimeline(state):renderMatrix(tasks))+'</div></div></div>';
     savePref();
@@ -186,7 +188,6 @@ export function createAgendaV2({getState,saveMutation,setTaskStatus,openTask,ope
     if(b.dataset.fillDay){window.dispatchEvent(new CustomEvent("tempo:fill-day",{detail:{date:ui.view==="calendar"?ui.anchor:today()}}));}
     else if(b.dataset.openDayPlan){window.dispatchEvent(new CustomEvent("tempo:open-day-planner",{detail:{date:ui.view==="calendar"?ui.anchor:today()}}));}
     else if(b.dataset.smart){ui.list=b.dataset.smart;if(ui.view==="calendar"||ui.view==="timeline")ui.view="list";render();}
-    else if(b.hasAttribute("data-area-filter")){ui.area=b.dataset.areaFilter;render();}
     else if(b.dataset.view){ui.view=b.dataset.view;if(ui.view==="calendar"||ui.view==="timeline")ui.list="all";render();}
     else if(b.dataset.task){window.dispatchEvent(new CustomEvent("tempo:show-task",{detail:{taskId:b.dataset.task}}));}
     else if(b.dataset.complete){const t=getState().tasks.find(t=>t.id===b.dataset.complete);if(t)setTaskStatus(t.id,t.status==="done"?"todo":"done");}
