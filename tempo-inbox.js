@@ -1,4 +1,4 @@
-import { normalizeTask, createTaskSession, sessionHasTask, sessionTaskIds } from "./core/tempo-tasks.js";
+import { normalizeTask, createTaskSession, sessionHasTask, sessionTaskIds, grossMinutesForTask } from "./core/tempo-tasks.js";
 import { localDateString, sessionBounds, sessionDurationMinutes, validSession, hasSessionOverlaps } from "./core/tempo-core.js";
 
 export function mountInbox({getState,saveMutation,openTask,showToast}) {
@@ -82,7 +82,7 @@ export function mountInbox({getState,saveMutation,openTask,showToast}) {
     for(const task of selected()){
       if(task.estimateMinutes==null){missing.push(task.title+" (senza stima)");continue;}
       const linked=scheduled.filter(s=>sessionHasTask(s,task.id));
-      const gross=linked.reduce((sum,s)=>sum+sessionDurationMinutes(s)/Math.max(1,sessionTaskIds(s).length),0);
+      const gross=linked.reduce((sum,s)=>sum+grossMinutesForTask(s,task.id),0);
       const remaining=Math.floor((task.estimateMinutes-gross)/15)*15;
       if(remaining<15)continue;
       const duration=Math.min(cap,remaining);
