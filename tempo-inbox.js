@@ -2,7 +2,7 @@ import { normalizeTask, createTaskSession, sessionHasTask, sessionTaskIds } from
 import { localDateString, sessionBounds, sessionDurationMinutes, validSession, hasSessionOverlaps } from "./core/tempo-core.js";
 
 export function mountInbox({getState,saveMutation,openTask,showToast}) {
-  const section=document.createElement("section");
+  const section=document.querySelector(".tempo-inbox-section") || document.createElement("section");
   section.className="tempo-inbox-section tempo-view-section";
   section.dataset.tempoView="inbox";
   section.innerHTML=`
@@ -24,7 +24,7 @@ export function mountInbox({getState,saveMutation,openTask,showToast}) {
       <button type="button" class="button button-primary hidden" id="tempo-day-save">Conferma sessioni proposte</button>
     </div>`;
   const agenda=document.querySelector(".agenda-section");
-  agenda.parentNode.insertBefore(section,agenda);
+  if(!section.isConnected)agenda.parentNode.insertBefore(section,agenda);
   const $=id=>section.querySelector("#"+id);
   const list=$("tempo-inbox-list"), date=$("tempo-day-date"), result=$("tempo-day-result");
   const preview=$("tempo-day-preview"), confirm=$("tempo-day-save"), slots=$("tempo-day-slots");
@@ -114,9 +114,10 @@ export function mountInbox({getState,saveMutation,openTask,showToast}) {
       const fingerprint=s=>s.date+"|"+s.start+"|"+s.end+"|"+s.area+"|"+sessionTaskIds(s).join(",");
       if(latest.created.length!==proposal.length||latest.created.some((s,i)=>fingerprint(s)!==fingerprint(proposal[i])))
         throw Error("La pianificazione è cambiata. Ricalcola la proposta.");
+      const count=proposal.length;
       if(!saveMutation(state=>{state.sessions=[...state.sessions,...proposal];}))
         throw Error("Salvataggio non riuscito.");
-      const count=proposal.length;proposal=[];confirm.classList.add("hidden");slots.replaceChildren();
+      proposal=[];confirm.classList.add("hidden");slots.replaceChildren();
       result.textContent=count+" sessioni programmate.";showToast("Sessioni create e associate alle task.");
     }catch(error){confirm.classList.add("hidden");result.textContent=error.message;}
   });
