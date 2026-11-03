@@ -4,7 +4,7 @@ import { mountSessionFiller } from "./tempo-fill-ui.js";
 import { reconcileSessionAllocations } from "./core/tempo-fill.js";
 import { DEFAULT_APPEARANCE, normalizeAppearance, applyAppearance } from "./core/tempo-appearance.js";
 import { createDropboxSync } from "./core/tempo-dropbox.js";
-import { normalizeTask, focusMinutesInSession, sessionTaskIds, sessionArea, withSessionTasks } from "./core/tempo-tasks.js";
+import { normalizeTask, focusMinutesInSession, sessionTaskIds, sessionArea, grossMinutesForTask, withSessionTasks } from "./core/tempo-tasks.js";
 import { localDateString, timeToMinutes, dateTime, formatTime, formatDate, escapeHtml, clampInt, pauseMinutes, normalizeSession, validSession, sessionBounds, getSessionStatus, getPhase, mmss, getActiveSession as findActiveSession, getNextSession as findNextSession, getAmbientFocusMode, hasSessionOverlaps } from "./core/tempo-core.js";
 
 (() => {
@@ -77,7 +77,7 @@ import { localDateString, timeToMinutes, dateTime, formatTime, formatDate, escap
   }
   function migrateSession(s,tasks){const area=sessionArea(s,tasks);return {...withSessionTasks(s,sessionTaskIds(s)),area,title:area};}
   function taskPicker(ids=[]){const area=els.sessionTitle.value;document.getElementById("session-task-picker").innerHTML=state.tasks.filter(t=>t.area===area).map(t=>'<label class="tempo-session-task"><input type="checkbox" value="'+escapeHtml(t.id)+'" '+(ids.includes(t.id)?'checked':'')+'><span>'+escapeHtml(t.title)+'</span></label>').join("")||"Nessuna task disponibile nell’area.";}
-  function checklist(s){return '<div class="tempo-session-tasks">'+state.tasks.filter(t=>sessionTaskIds(s).includes(t.id)).map(t=>'<label class="tempo-session-task"><input type="checkbox" data-check-task="'+escapeHtml(t.id)+'" '+(t.status==="done"?"checked":"")+'><span>'+escapeHtml(t.title)+'</span></label>').join("")+'</div>';}
+  function checklist(s){return '<div class="tempo-session-tasks">'+state.tasks.filter(t=>sessionTaskIds(s).includes(t.id)).map(t=>'<label class="tempo-session-task"><input type="checkbox" data-check-task="'+escapeHtml(t.id)+'" '+(t.status==="done"?"checked":"")+'><span>'+escapeHtml(t.title)+' · '+(grossMinutesForTask(s,t.id)/60).toLocaleString("it-IT",{maximumFractionDigits:2})+' h lorde</span></label>').join("")+'</div>';}
   function validHistory(h){return h && typeof h.sessionId==="string" && typeof h.minutes==="number" && Number.isFinite(h.minutes) && h.minutes>=0 && typeof h.taskId==="string" && typeof h.date==="string";}
   function archivePast(session){
     if(!session || sessionBounds(session).end > new Date()) return;
@@ -144,6 +144,15 @@ import { localDateString, timeToMinutes, dateTime, formatTime, formatDate, escap
     const {start,end}=sessionBounds(session);
     const overlaps=state.sessions.some(s=>{if(s.id===session.id)return false;const bounds=sessionBounds(s);return start<bounds.end&&end>bounds.start;});
     if(overlaps){els.formError.textContent="Questa sessione si sovrappone a un'altra sessione dello stesso giorno.";return;}
+    if(existingSession?.taskAllocations){
+      const originalIds=sessionTaskIds(existingSession);
+      const sameTasks=originalIds.length===session.taskIds.length&&originalIds.every(id=>session.taskIds.includes(id));
+      const assigned=Object.values(existingSession.taskAllocations).reduce((total,n)=>total+Number(n||0),0);
+      if(sameTasks && assigned>sessionDurationMinutes(session)){
+        els.formError.textContent="Durata inferiore alle quote lorde assegnate: modifica prima le assegnazioni.";
+        return;
+      }
+    }
     const previous=state.sessions, previousTasks=state.tasks, previousHistory=state.history;
     if(existingSession)archivePast(existingSession);
     const reconciled=reconcileSessionAllocations(existingSession,session);
