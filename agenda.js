@@ -3,7 +3,7 @@ import { mountInbox } from "./tempo-inbox.js";
 import { localDateString, validSession, sessionBounds, escapeHtml, hasSessionOverlaps, sessionDurationMinutes } from "./core/tempo-core.js";
 import { TASK_AREAS, TASK_PRIORITIES, TASK_STATUSES, parseTaskTags, normalizeTask, estimatedMinutesFromHours,
   hoursFromMinutes, plannedFocusMinutes, elapsedScheduledFocusMinutes, getTaskAttention,
-  taskTagAncestors, taskHasTag, createTaskSession, focusMinutesInSession, sessionHasTask, sessionTaskIds, withSessionTasks } from "./core/tempo-tasks.js";
+  taskTagAncestors, taskHasTag, createTaskSession, focusMinutesInSession, sessionHasTask, sessionTaskIds, grossMinutesForTask, withSessionTasks } from "./core/tempo-tasks.js";
 
 /**
  * PWA-only task manager. Tasks are separate from timed sessions; each scheduled
@@ -44,7 +44,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
   const escape = value => escapeHtml(value);
   const format = value => hoursFromMinutes(value) + " h";
   const grossPlanned = (taskId, sessions) => sessions.filter(s => sessionHasTask(s,taskId))
-    .reduce((sum, s) => sum + sessionDurationMinutes(s) / Math.max(1,sessionTaskIds(s).length), 0);
+    .reduce((sum, s) => sum + grossMinutesForTask(s,taskId), 0);
   const markdown = (value, interactive = false) => {
     // Escape user input first. Only generated checkbox controls become HTML.
     const checkboxes = [];
