@@ -1,4 +1,5 @@
 import { createAgendaV2 } from "./agenda-v2.js";
+import { mountInbox } from "./tempo-inbox.js";
 import { localDateString, validSession, sessionBounds, escapeHtml, hasSessionOverlaps, sessionDurationMinutes } from "./core/tempo-core.js";
 import { TASK_AREAS, TASK_PRIORITIES, TASK_STATUSES, parseTaskTags, normalizeTask, estimatedMinutesFromHours,
   hoursFromMinutes, plannedFocusMinutes, elapsedScheduledFocusMinutes, getTaskAttention,
@@ -217,6 +218,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
   }
 
   function render() {
+    inbox?.render();
     if(agendaV2) {el.statusFilter.value="all";el.areaFilter.value="";el.tagFilter.value="";el.search.value="";}
     renderLegacy(); agendaV2?.render();
   }
@@ -252,6 +254,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
       let task = normalizeTask({
         id: oldTask?.id || uuid(), title: el.title.value, area: el.area.value,
         priority: el.priority.value, estimateMinutes: minutes, dueDate: el.dueDate.value,
+        workDate: oldTask?.workDate || "", inbox: oldTask?.inbox === true,
         plannedDate: el.plannedStart.value ? (el.plannedDate.value || localDateString(new Date())) : "", plannedStart: el.plannedStart.value,
         autoSessionId: oldTask?.autoSessionId || "",
         tags: parseTaskTags(el.tags.value), description: el.description.value,
@@ -683,6 +686,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
     if (currentSignature !== lastReminderSignature) render();
   }
   agendaV2 = createAgendaV2({getState,saveMutation,setTaskStatus,openTask,openPlan,showToast});
+  const inbox = mountInbox({getState,saveMutation,openTask,showToast});
   render();
   return { render, tick };
 }
