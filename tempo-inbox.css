@@ -18,3 +18,14 @@
 .tempo-day-slot strong{text-align:right;font-size:13px}
 .tempo-day-launch{display:flex;justify-content:flex-end;margin:6px 0 12px}
 @media(max-width:600px){.tempo-inbox-item{align-items:stretch}.tempo-inbox-item label{flex:1 1 140px}.tempo-inbox-capture{flex-wrap:wrap}.tempo-inbox-capture input{flex-basis:100%}.tempo-day-planner{padding:15px}}
+
+.tempo-fill-dialog{max-width:min(620px,calc(100vw - 24px));width:100%}
+.tempo-fill-dialog form{display:grid;gap:12px;margin:16px 0}
+.tempo-fill-dialog .field-label select{width:100%;min-height:40px;border:1px solid var(--line);border-radius:9px;background:var(--surface);color:var(--text)}
+.tempo-fill-item{display:grid;gap:7px;border:1px solid var(--line);border-radius:12px;padding:12px;margin:8px 0;background:var(--surface-soft)}
+.tempo-fill-item strong{font-size:13px}
+.tempo-fill-item small{color:var(--muted)}
+.tempo-fill-item ul{margin:4px 0;padding-left:22px}
+.tempo-fill-item li{padding:2px 0;font-size:13px}
+.tempo-day-launch{gap:8px;flex-wrap:wrap}
+.session-actions [data-fill]{white-space:nowrap}
