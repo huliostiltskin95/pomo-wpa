@@ -1,6 +1,27 @@
 export const sessionTaskIds = s => [...new Set([...(Array.isArray(s.taskIds)?s.taskIds:[]),...(s.taskId?[s.taskId]:[])])];
 export const sessionHasTask = (s,id) => sessionTaskIds(s).includes(id);
-export const withSessionTasks = (s,ids) => {const {taskId,...rest}=s;return {...rest,taskIds:[...new Set(ids)]};};
+// Explicit gross-minute quotas coexist with legacy sessions, which used equal shares.
+export function grossMinutesForTask(session, taskId) {
+  const ids=sessionTaskIds(session);
+  if(!ids.includes(taskId))return 0;
+  const allocations=session.taskAllocations;
+  if(allocations && typeof allocations==="object" && !Array.isArray(allocations)) {
+    const value=Number(allocations[taskId]);
+    return Number.isFinite(value)&&value>0?value:0;
+  }
+  return sessionDurationMinutes(session)/ids.length;
+}
+export function allocatedGrossMinutes(session) {
+  return sessionTaskIds(session).reduce((total,id)=>total+grossMinutesForTask(session,id),0);
+}
+export const withSessionTasks = (s,ids) => {
+  const {taskId,...rest}=s;
+  const taskIds=[...new Set(ids)];
+  if(!s.taskAllocations)return {...rest,taskIds};
+  const taskAllocations={};
+  for(const id of taskIds)if(Number(s.taskAllocations[id])>0)taskAllocations[id]=Number(s.taskAllocations[id]);
+  return {...rest,taskIds,taskAllocations};
+};
 export const sessionArea = (s,tasks) => s.area || tasks.find(t=>sessionHasTask(s,t.id))?.area || (TASK_AREAS.includes(s.title)?s.title:"Personale");
 import { sessionBounds, sessionDurationMinutes, timeToMinutes, pauseMinutes } from "./tempo-core.js";
 
@@ -112,7 +133,7 @@ export function focusMinutesInSession(session) {
 
 export function plannedFocusMinutes(taskId, sessions) {
   return sessions.filter(session => sessionHasTask(session, taskId))
-    .reduce((sum, session) => sum + focusMinutesInSession(session) / Math.max(1,sessionTaskIds(session).length), 0);
+    .reduce((sum, session) => sum + focusMinutesInSession(session) * grossMinutesForTask(session,taskId) / sessionDurationMinutes(session), 0);
 }
 
 export function taskTagAncestors(tags) {
@@ -165,5 +186,5 @@ export function getTaskAttention(task, sessions, now = new Date()) {
 /** Calendar blocks elapsed, not guaranteed attention or actual work. */
 export function elapsedScheduledFocusMinutes(taskId, sessions, now = new Date()) {
   return sessions.filter(session => sessionHasTask(session, taskId) && sessionBounds(session).end <= now)
-    .reduce((sum, session) => sum + focusMinutesInSession(session) / Math.max(1,sessionTaskIds(session).length), 0);
+    .reduce((sum, session) => sum + focusMinutesInSession(session) * grossMinutesForTask(session,taskId) / sessionDurationMinutes(session), 0);
 }
