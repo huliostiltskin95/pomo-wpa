@@ -56,6 +56,8 @@ export function mergeSnapshots(base, local, remote, choices = {}) {
   }
   const field = (baseValue,localValue,remoteValue, key,section,label) => {
     if (same(localValue,remoteValue)) return localValue;
+    if (baseValue === absent && (localValue === absent || remoteValue === absent))
+      return localValue === absent ? remoteValue : localValue;
     if (baseValue !== absent) {
       if (same(localValue,baseValue)) return remoteValue;
       if (same(remoteValue,baseValue)) return localValue;
@@ -153,8 +155,8 @@ export function mergeSnapshots(base, local, remote, choices = {}) {
   const taskIds = new Set(merged.tasks.map(t=>t.id));
   const sessionIds = new Set(merged.sessions.map(s=>s.id));
   merged.sessions=merged.sessions.map(s=> {
-    const taskIdsInSession=Array.isArray(s.taskIds)?s.taskIds.filter(id=>taskIds.has(id)):[];
-    return {...s,taskIds:taskIdsInSession,...(typeof s.taskId === "string" && !taskIds.has(s.taskId)?{taskId:""}:{})};
+    const taskIdsInSession=Array.isArray(s.taskIds)?{taskIds:s.taskIds.filter(id=>taskIds.has(id))}:{};
+    return {...s,...taskIdsInSession,...(typeof s.taskId === "string" && !taskIds.has(s.taskId)?{taskId:""}:{})};
   });
   merged.tasks=merged.tasks.map(t =>
     t.autoSessionId && !sessionIds.has(t.autoSessionId)?{...t,autoSessionId:""}:t);
