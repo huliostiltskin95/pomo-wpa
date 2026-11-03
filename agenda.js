@@ -398,9 +398,8 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
       if(slots.some(session=>!validSession(session)))throw Error("Controlla data e ora di inizio.");
       const existing=hasSessionOverlaps([...getState().sessions,...slots]);
       const gross=slots.reduce((sum,s)=>sum+sessionDurationMinutes(s),0);
-      const net=slots.reduce((sum,s)=>sum+focusMinutesInSession(s),0);
       el.planPreview.textContent=slots.length+" "+(slots.length===1?"sessione":"sessioni")+
-        " · "+format(gross)+" lorde · "+format(net)+" nette previste · fine ultima sessione "+
+        " · "+format(gross)+" lorde (pause comprese) · fine ultima sessione "+
         slots[slots.length-1].date+" "+slots[slots.length-1].end;
       el.planError.textContent=existing?"Attenzione: almeno una sessione si sovrappone a un blocco esistente.":"";
     } catch(error) {
