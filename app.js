@@ -1,5 +1,7 @@
 import { TempoAmbientAudio } from "./core/tempo-audio.js";
 import { mountAgenda } from "./agenda.js";
+import { mountSessionFiller } from "./tempo-fill-ui.js";
+import { reconcileSessionAllocations } from "./core/tempo-fill.js";
 import { DEFAULT_APPEARANCE, normalizeAppearance, applyAppearance } from "./core/tempo-appearance.js";
 import { createDropboxSync } from "./core/tempo-dropbox.js";
 import { normalizeTask, focusMinutesInSession, sessionTaskIds, sessionArea, withSessionTasks } from "./core/tempo-tasks.js";
@@ -17,6 +19,7 @@ import { localDateString, timeToMinutes, dateTime, formatTime, formatDate, escap
   let state = loadState();
   applyAppearance(state.appearance);
   let agenda = null;
+  let filler = null;
   let dropbox = null;
   let deferredInstallPrompt = null;
   let lastPhaseKey = "";
@@ -143,7 +146,8 @@ import { localDateString, timeToMinutes, dateTime, formatTime, formatDate, escap
     if(overlaps){els.formError.textContent="Questa sessione si sovrappone a un'altra sessione dello stesso giorno.";return;}
     const previous=state.sessions, previousTasks=state.tasks, previousHistory=state.history;
     if(existingSession)archivePast(existingSession);
-    state.sessions=existingId?state.sessions.map(s=>s.id===existingId?session:s):[...state.sessions,session];
+    const reconciled=reconcileSessionAllocations(existingSession,session);
+    state.sessions=existingId?state.sessions.map(s=>s.id===existingId?reconciled:s):[...state.sessions,reconciled];
     if(existingSession){
       state.tasks=state.tasks.map(t=>t.autoSessionId===existingId && session.taskIds.includes(t.id)
         ? {...t,plannedDate:session.date,plannedStart:session.start} : t);
