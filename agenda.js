@@ -16,7 +16,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
     quickForm: $("quick-task-form"), quickInput: $("quick-task-input"), quickPreview: $("quick-task-preview"), quickError: $("quick-task-error"),
     newButton: $("new-task-button"), areaFilter: $("agenda-area-filter"),
     statusFilter: $("agenda-status-filter"), tagFilter: $("agenda-tag-filter"),
-    search: $("agenda-search"), dueDate: $("task-due-date"), plannedDate: $("task-planned-date"), plannedStart: $("task-planned-start"), markdownPreview: $("task-markdown-preview"),
+    search: $("agenda-search"), dueDate: $("task-due-date"), longTerm: $("task-long-term"), plannedDate: $("task-planned-date"), plannedStart: $("task-planned-start"), markdownPreview: $("task-markdown-preview"),
     bulkButton: $("bulk-task-button"), bulkDialog: $("bulk-dialog"), bulkForm: $("bulk-form"), bulkInput: $("bulk-input"), bulkPreview: $("bulk-preview"), bulkError: $("bulk-error"),
     tagsButton: $("manage-tags-button"), tagsDialog: $("tags-dialog"), tagsForm: $("tags-form"), tagsSource: $("tags-source"), tagsTarget: $("tags-target"), tagsError: $("tags-error"),
     dialog: $("task-dialog"), form: $("task-form"), dialogTitle: $("task-dialog-title"),
@@ -76,6 +76,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
   // The session always belongs to the task's area; the task remains manually controlled.
   function plannedSession(task, otherSessions, replacement = null) {
     if (!task.plannedStart || task.estimateMinutes == null || task.status === "done") return null;
+    if (!TASK_AREAS.includes(task.area)) throw Error("Per creare una sessione indica prima l’area.");
     const grossMinutes = replacement ? sessionDurationMinutes(replacement) : task.estimateMinutes;
     if (grossMinutes > 1440) throw Error("Per la programmazione automatica la durata non può superare 24 ore. Puoi creare la task senza +orario e suddividerla in più sessioni.");
     const session = createTaskSession(task, {
@@ -105,6 +106,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
     const previousTasks = state.tasks;
     const previousSessions = state.sessions;
     action(state);
+    state.tasks=state.tasks.map(normalizeTask).filter(Boolean);
     if (!persist()) {
       state.tasks = previousTasks;
       state.sessions = previousSessions;
@@ -223,11 +225,13 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
     el.id.value = task?.id || "";
     el.dialogTitle.textContent = task ? "Modifica attività" : "Nuova attività";
     el.title.value = task?.title || "";
-    el.area.value = task?.area || "Studio";
+    el.area.value = task?.area ?? "";
     el.priority.value = task?.priority || "media";
     el.status.value = task?.status || "todo";
     el.estimate.value = task?.estimateMinutes == null ? "" : String(task.estimateMinutes / 60);
     el.dueDate.value = task?.dueDate || "";
+    el.longTerm.checked = task?.longTerm === true;
+    el.dueDate.disabled = el.longTerm.checked;
     el.plannedDate.value = task?.plannedDate || "";
     el.plannedStart.value = task?.plannedStart || "";
     el.tags.value = task?.tags.join(", ") || "";
@@ -247,8 +251,9 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
       const oldTask = findTask(el.id.value);
       let task = normalizeTask({
         id: oldTask?.id || uuid(), title: el.title.value, area: el.area.value,
-        priority: el.priority.value, estimateMinutes: minutes, dueDate: el.dueDate.value,
-        workDate: oldTask?.workDate || "", inbox: oldTask?.inbox === true,
+        priority: el.priority.value, estimateMinutes: minutes, dueDate: el.longTerm.checked ? "" : el.dueDate.value,
+        longTerm: el.longTerm.checked,
+        workDate: oldTask?.workDate || "",
         plannedDate: el.plannedStart.value ? (el.plannedDate.value || localDateString(new Date())) : "", plannedStart: el.plannedStart.value,
         autoSessionId: oldTask?.autoSessionId || "",
         tags: parseTaskTags(el.tags.value), description: el.description.value,
@@ -504,7 +509,10 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
           values.plannedDate=due(day);
         }
         if(symbol==="#")tags.push(value);
-        if(symbol==="*")values.dueDate=due(value.toLowerCase());
+        if(symbol==="*"){
+          if(["lungo-termine","lungotermine","long-term"].includes(value.toLowerCase())){values.longTerm=true;values.dueDate="";}
+          else {if(values.longTerm)throw Error("Riga "+(index+1)+": scegli una scadenza oppure *lungo-termine.");values.dueDate=due(value.toLowerCase());}
+        }
         if(symbol==="^"){const area=TASK_AREAS.find(a=>a.toLowerCase()===value.toLowerCase());if(!area)throw Error("Riga "+(index+1)+": area sconosciuta: "+value);values.area=area;}
         if(symbol==="@"){
           const interval=value.match(/^(\d{1,2})(?::(\d{2}))?-(\d{1,2})(?::(\d{2}))?$/);
@@ -617,6 +625,13 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
       })){el.bulkDialog.close();showToast(parsed.length+" task importate · "+count+" sessioni programmate.");}
     } catch(e){el.bulkError.textContent=e.message;}
   });
+  el.longTerm.addEventListener("change",()=>{
+    el.dueDate.disabled=el.longTerm.checked;
+    if(el.longTerm.checked)el.dueDate.value="";
+  });
+  el.dueDate.addEventListener("input",()=>{
+    if(el.dueDate.value){el.longTerm.checked=false;el.dueDate.disabled=false;}
+  });
   el.newButton.addEventListener("click", () => openTask());
   el.form.addEventListener("submit", saveTask);
   el.deleteButton.addEventListener("click", () => deleteTask(el.id.value));
@@ -679,7 +694,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
     if (currentSignature !== lastReminderSignature) render();
   }
   agendaV2 = createAgendaV2({getState,saveMutation,setTaskStatus,openTask,openPlan,showToast});
-  const inbox = mountInbox({getState,saveMutation,openTask,showToast,parseTasks:source=>parseBulk(source,"Personale"),prepareTasks:prepareNewTasks});
+  const inbox = mountInbox({getState,saveMutation,openTask,showToast,parseTasks:source=>parseBulk(source,""),prepareTasks:prepareNewTasks});
   render();
   return { render, tick };
 }
