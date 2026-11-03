@@ -10,7 +10,7 @@ export function mountInbox({getState,saveMutation,openTask,showToast,parseTasks,
     <form id="tempo-inbox-capture" class="tempo-inbox-capture">
       <label for="tempo-inbox-title">Inserimento rapido multiplo</label>
       <textarea id="tempo-inbox-title" rows="4" maxlength="50000" required placeholder="Studio degli Assiri ^Studio @8h *martedì !2 #storia | Leggere il capitolo&#10;Leggere Tucidide ^Studio @10h *lungo-termine !2"></textarea>
-      <p class="form-hint">Una task per riga · !1–!4 priorità · ^Studio/^Lavoro/^Personale area · @durata lorda · *scadenza o *lungo-termine · #tag · | descrizione Markdown · +domani_16:30 programma anche una sessione, se è presente @durata.</p>
+      <details class="tempo-inline-help"><summary>Guida alle scorciatoie</summary><p>Una task per riga · !1–!4 priorità · ^Studio/^Lavoro/^Personale area · @durata lorda · *scadenza o *lungo-termine · #tag · | descrizione Markdown · +domani_16:30 programma anche una sessione, se è presente @durata.</p></details>
       <p id="tempo-inbox-capture-preview" class="tempo-inbox-capture-preview" aria-live="polite"></p>
       <p id="tempo-inbox-capture-error" class="form-error" role="alert"></p>
       <button class="button button-primary" type="submit">Aggiungi task</button>
