@@ -152,6 +152,9 @@ export function mergeSnapshots(base, local, remote, choices = {}) {
     }
   }
   merged.sessions=[...active.values()];
+  // Deleted sessions must not contribute to statistics, including on another device.
+  const retainedSessionIds=new Set(merged.sessions.map(session=>session.id));
+  merged.history=merged.history.filter(entry=>retainedSessionIds.has(entry.sessionId));
   const taskIds = new Set(merged.tasks.map(t=>t.id));
   const sessionIds = new Set(merged.sessions.map(s=>s.id));
   merged.sessions=merged.sessions.map(s=> {
