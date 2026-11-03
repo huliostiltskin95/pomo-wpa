@@ -3,7 +3,7 @@ import { mountInbox } from "./tempo-inbox.js";
 import { localDateString, validSession, sessionBounds, escapeHtml, hasSessionOverlaps, sessionDurationMinutes } from "./core/tempo-core.js";
 import { TASK_AREAS, TASK_PRIORITIES, TASK_STATUSES, parseTaskTags, normalizeTask, estimatedMinutesFromHours,
   hoursFromMinutes, plannedFocusMinutes, elapsedScheduledFocusMinutes, getTaskAttention,
-  taskTagAncestors, taskHasTag, createTaskSession, focusMinutesInSession, sessionHasTask, sessionTaskIds, grossMinutesForTask, withSessionTasks } from "./core/tempo-tasks.js";
+  taskTagAncestors, taskHasTag, createTaskSession, focusMinutesInSession, sessionHasTask, sessionTaskIds, grossMinutesForTask, elapsedGrossMinutes, elapsedGrossForTask, withSessionTasks } from "./core/tempo-tasks.js";
 
 /**
  * PWA-only task manager. Tasks are separate from timed sessions; each scheduled
@@ -68,13 +68,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
     }
     return s;
   };
-  const recorded = (taskId, state) => {
-    const keptIds = new Set(state.sessions.filter(s=>sessionHasTask(s,taskId)).map(s=>s.id));
-    return (state.history || []).filter(entry=>entry.taskId===taskId && keptIds.has(entry.sessionId))
-      .reduce((sum,entry)=>sum+entry.minutes,0);
-  };
-  const elapsed = (taskId, state, now) => recorded(taskId,state) +
-    elapsedScheduledFocusMinutes(taskId,state.sessions.filter(s=>!(state.history||[]).some(h=>h.sessionId===s.id)),now);
+  const elapsed = (taskId,state,now) => elapsedGrossForTask(taskId,state.sessions,now);
   const getUpcoming = taskId => getState().sessions.filter(session => sessionHasTask(session,taskId) &&
     sessionBounds(session).end > new Date());
 
@@ -163,7 +157,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
 
     const remaining = state.tasks.filter(task => task.status !== "done");
     const allMinutes = remaining.reduce((sum, task) => sum + (task.estimateMinutes || 0), 0);
-    const areaStats = TASK_AREAS.map(area => { const areaTasks = remaining.filter(t=>t.area===area); const estimated = areaTasks.reduce((sum,t)=>sum+(t.estimateMinutes||0),0); const blocks = state.sessions.filter(s=>(s.area||s.title)===area); const scheduled=blocks.reduce((sum,s)=>sum+sessionDurationMinutes(s),0); const elapsed=blocks.filter(s=>sessionBounds(s).end<=now).reduce((sum,s)=>sum+focusMinutesInSession(s),0); return area+": "+format(estimated)+" stimate · "+format(scheduled)+" programmate · "+format(elapsed)+" nette trascorse"; }).join(" | ");
+    const areaStats = TASK_AREAS.map(area => { const areaTasks = remaining.filter(t=>t.area===area); const estimated = areaTasks.reduce((sum,t)=>sum+(t.estimateMinutes||0),0); const blocks = state.sessions.filter(s=>(s.area||s.title)===area); const scheduled=blocks.reduce((sum,s)=>sum+sessionDurationMinutes(s),0); const elapsed=blocks.reduce((sum,s)=>sum+elapsedGrossMinutes(s,now),0); return area+": "+format(estimated)+" stimate · "+format(scheduled)+" programmate · "+format(elapsed)+" lorde trascorse"; }).join(" | ");
     el.summary.textContent = state.tasks.length + " attività · " + remaining.length + " aperte · " +
       state.tasks.filter(task => task.status === "in_progress").length + " in corso · " + format(allMinutes) + " stimate · " + areaStats;
     el.list.replaceChildren();
@@ -198,7 +192,7 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
         '<div class="task-estimate-line"><strong>' + (task.estimateMinutes == null ? 'Nessuna stima' : format(task.estimateMinutes)) +
         '</strong> stimate <span aria-hidden="true">·</span> ' + format(planned) +
         ' lorde pianificate <span aria-hidden="true">·</span> ' + format(completedMinutes) +
-        ' nette da sessioni trascorse <span aria-hidden="true">·</span> ' +
+        ' lorde trascorse <span aria-hidden="true">·</span> ' +
         (task.estimateMinutes == null ? 'stima libera' : planned > task.estimateMinutes ? format(planned - task.estimateMinutes) + ' oltre la stima' : format(left) + ' non ancora pianificate') + '</div>' +
         '<div class="task-progress" role="progressbar" aria-label="Tempo pianificato" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' +
         (task.estimateMinutes ? Math.min(100, Math.round(planned / task.estimateMinutes * 100)) : 0) + '"><span style="width:' +
