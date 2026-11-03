@@ -150,10 +150,17 @@ export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus
     }
     status("Caricamento dell'archivio unificato su Dropbox…","uploading");
     const revision=await upload(item.rev,merged);
-    if(stateJSON(current())===stateJSON(local)){
-      // The upload succeeded: now update the local copy and the common base.
-      await applyRemote(merged);
+    if(stateJSON(current())!==stateJSON(local)){
+      // Another edit happened mid-upload. Keep the old common base and
+      // revision, so the next pass merges that edit with the uploaded data.
+      // Updating the base here would let the next sync silently delete
+      // remote-only items that have not reached the local copy yet.
+      meta.dirty=true;storeMeta();
+      status("Backup unificato caricato, ma i dati locali sono cambiati: nuova unione necessaria.","pending");
+      return true;
     }
+    // The upload succeeded: now update the local copy and the common base.
+    await applyRemote(merged);
     synced(merged,revision);
     status(meta.dirty
       ?"Unione salvata su Dropbox; nuove modifiche locali ancora da inviare."
@@ -170,7 +177,10 @@ export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus
     if(direction==="download"){
       if(!remote)throw new Error("Nessun backup presente su Dropbox.");
       status("Scaricamento del backup Dropbox…","downloading");
+      const before=current();
       const item=await download();
+      if(stateJSON(current())!==stateJSON(before))
+        throw new Error("I dati locali sono cambiati durante il download. Riprova.");
       backupBeforeReplacement(item.file);
       await applyRemote(item.file);
       synced(item.file,item.rev);
@@ -284,7 +294,10 @@ export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus
     overridePending=true;clearTimeout(delay);
     try{
       if(inFlight)await inFlight.catch(()=>{});
+      const before=current();
       const item=await download();
+      if(stateJSON(current())!==stateJSON(before))
+        throw new Error("I dati locali sono cambiati durante il download. Riprova.");
       backupBeforeReplacement(item.file);
       await applyRemote(item.file);
       synced(item.file,item.rev);
