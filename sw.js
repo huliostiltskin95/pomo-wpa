@@ -1,5 +1,5 @@
-const CACHE_NAME = "tempo-pomodoro-v38";
-const APP_SHELL = ["./", "./index.html", "./styles.css", "./tempo-design.css", "./tempo-inbox.css", "./tempo-phase1.css", "./tempo-phase2.css", "./app.js", "./tempo-ui.js", "./tempo-details.js", "./tempo-phase1.js", "./tempo-phase2.js", "./core/tempo-appearance.js", "./agenda.js", "./tempo-inbox.js", "./tempo-fill-ui.js", "./core/tempo-fill.js", "./agenda-v2.js", "./agenda-v2.css", "./core/tempo-tasks.js", "./core/tempo-core.js", "./core/tempo-audio.js", "./core/tempo-dropbox.js", "./core/tempo-merge.js", "./manifest.webmanifest", "./icon.svg", "./icon-192.png", "./icon-512.png"];
+const CACHE_NAME = "tempo-pomodoro-v39";
+const APP_SHELL = ["./", "./index.html", "./styles.css", "./tempo-design.css", "./tempo-inbox.css", "./tempo-phase1.css", "./tempo-phase2.css", "./tempo-phase3.css", "./app.js", "./tempo-ui.js", "./tempo-details.js", "./tempo-phase1.js", "./tempo-phase2.js", "./core/tempo-appearance.js", "./agenda.js", "./tempo-inbox.js", "./tempo-fill-ui.js", "./core/tempo-fill.js", "./agenda-v2.js", "./agenda-v2.css", "./core/tempo-tasks.js", "./core/tempo-core.js", "./core/tempo-audio.js", "./core/tempo-dropbox.js", "./core/tempo-merge.js", "./manifest.webmanifest", "./icon.svg", "./icon-192.png", "./icon-512.png"];
 self.addEventListener("install", event => {
   event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(APP_SHELL.filter(Boolean))).then(() => self.skipWaiting()));
 });
