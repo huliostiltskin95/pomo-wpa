@@ -143,6 +143,7 @@ function mount() {
   sessionDetails.append(sessionsList);
 
   let firstMinute = 7 * 60;
+  let shownPlannerDay = "";
   function renderToday(state) {
     const iso = today();
     const slices = daySlices(state.sessions,iso);
@@ -189,6 +190,8 @@ function mount() {
   }
 
   function renderPlanner(state) {
+    const previousViewport = planner.querySelector(".tempo-planner-viewport");
+    const previousScroll = previousViewport?.scrollTop || 0;
     const iso = isIsoDay(dateField.value) ? dateField.value : today();
     const slices = daySlices(state.sessions,iso);
     const mondayOffset = (dayDate(iso).getDay()+6)%7;
@@ -247,6 +250,11 @@ function mount() {
       '<div class="tempo-planner-lane" style="height:'+height+'px" role="group" aria-label="Fasce orarie del giorno">'+
         nowLine+blocks+'</div></div>' +
       (!slices.length?'<p class="tempo-planner-no-sessions">Giornata libera: tocca un orario per programmare.</p>':"");
+    const viewport = planner.querySelector(".tempo-planner-viewport");
+    if (viewport) viewport.scrollTop = shownPlannerDay === iso ? previousScroll :
+      Math.max(0,(startMin-firstMinute)/60*HOUR_HEIGHT-65);
+    shownPlannerDay = iso;
+    sessionDetails.hidden = !state.sessions.some(session => session.date === iso);
   }
   function render() {
     const state=readState();
