@@ -313,7 +313,7 @@ function mount() {
     const offsets = {ArrowLeft:-1,ArrowRight:1,Home:-((dayDate(button.dataset.day).getDay()+6)%7)};
     let nextDay;
     if(event.key==="End")nextDay=addDays(button.dataset.day,6-(dayDate(button.dataset.day).getDay()+6)%7);
-    else if(Object.hasOwn(offsets,event.key))nextDay=addDays(button.dataset.day,offsets[event.key]);
+    else if(Object.prototype.hasOwnProperty.call(offsets,event.key))nextDay=addDays(button.dataset.day,offsets[event.key]);
     else return;
     event.preventDefault();
     dateField.value=nextDay;
