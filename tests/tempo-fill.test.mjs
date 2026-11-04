@@ -117,3 +117,10 @@ test("changing a session's focus duration invalidates old Pomodoro allocations",
   const edited={...previous,workMinutes:50,taskAllocations:undefined,pomodoroTaskIds:undefined};
   assert.equal(reconcileSessionAllocations(previous,edited).taskAllocations,undefined);
 });
+
+test("no focus period fits: existing links are not destroyed",()=>{
+  const short={...session("short","09:00","09:30"),workMinutes:50,taskIds:["assiri"]};
+  const result=proposeSessionFill(short,tasks,[short]);
+  assert.equal(result.slots.length,0);
+  assert.deepEqual(result.session,short);
+});
