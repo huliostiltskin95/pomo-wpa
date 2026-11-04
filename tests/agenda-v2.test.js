@@ -6,7 +6,7 @@ import { localDateString } from "../core/tempo-core.js";
 
 const sample = (id, title, overrides = {}) => normalizeTask({
   id, title, area:"Studio", priority:"media", status:"todo",
-  description:"- [ ] Prima verifica", tags:[], dueDate:localDateString(new Date()),
+  description:"- [ ] Prima verifica", tags:[], estimateMinutes:60, dueDate:localDateString(new Date()),
   ...overrides
 });
 
