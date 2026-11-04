@@ -47,7 +47,13 @@ try {
   // Select a future day and create two sessions, one crossing midnight.
   const date=await dateOffset(1), following=await dateOffset(2);
   await page.locator("[data-view-link=sessioni]").click();
+  await page.locator("#tempo-auto-plan-details").waitFor({state:"attached"});
+  assert.equal(await page.locator(".tempo-inbox-section .tempo-day-planner").count(),0);
   await page.locator("#filter-date").fill(date);
+  assert.equal(await page.locator("#tempo-day-date").inputValue(),date);
+  await page.locator("#tempo-auto-plan-details summary").click();
+  await page.locator("#tempo-day-preview").waitFor({state:"visible"});
+  await page.locator("#tempo-auto-plan-details summary").click();
   await addSession(date,"09:00","10:00");
   await addSession(date,"23:00","01:00");
   await page.locator("#tempo-day-timeline .tempo-planner-block").first().waitFor();
