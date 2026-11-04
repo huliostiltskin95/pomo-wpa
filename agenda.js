@@ -694,6 +694,9 @@ export function mountAgenda({ getState, persist, refresh, showToast, sendNotific
       (getTaskAttention(task, getState().sessions, now)?.kind || "scheduled")).join("|");
     if (currentSignature !== lastReminderSignature) render();
   }
+  window.addEventListener("tempo:open-task-plan",event=>{
+    if(event.detail?.taskId)openPlan(event.detail.taskId);
+  });
   agendaV2 = createAgendaV2({getState,saveMutation,setTaskStatus,openTask,openPlan,showToast});
   const inbox = mountInbox({getState,saveMutation,openTask,showToast,parseTasks:source=>parseBulk(source,""),prepareTasks:prepareNewTasks});
   render();

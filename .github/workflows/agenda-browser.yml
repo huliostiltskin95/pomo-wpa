@@ -3,6 +3,10 @@ on:
   pull_request:
     paths:
       - "agenda-v2.js"
+      - "tempo-phase2.js"
+      - "tempo-phase2.css"
+      - "tempo-inbox.js"
+      - "tests/phase2.e2e.mjs"
       - "agenda-v2.css"
       - "agenda.js"
       - "tempo-details.js"
@@ -30,4 +34,6 @@ jobs:
           nohup python3 -m http.server 8123 --bind 127.0.0.1 >/tmp/tempvs-http.log 2>&1 &
           sleep 2
       - name: Validate Agenda in Chromium
-        run: node tests/agenda-v2.e2e.mjs
+        run: |
+          node tests/agenda-v2.e2e.mjs
+          node tests/phase2.e2e.mjs

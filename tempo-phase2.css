@@ -1,0 +1,147 @@
+/* TEMPVS 3.0 · Phase 2: Today workspace and accessible time-blocking timeline. */
+.tempo-today-heading{display:flex;justify-content:space-between;align-items:center;gap:18px;margin:0 0 18px}
+.tempo-today-heading .eyebrow{margin-bottom:5px}
+.tempo-today-heading h1{margin:0;font-size:29px;line-height:1.15}
+.tempo-today-date{margin:5px 0 0;color:var(--muted);font-size:13px;text-transform:capitalize}
+.tempo-today-heading .button{flex:none}
+.tempo-today-grid{display:grid;grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr);align-items:stretch;gap:18px}
+.tempo-today-grid>.timer-card{min-width:0;align-self:stretch;display:flex;flex-direction:column;justify-content:space-between;border-radius:16px}
+.tempo-today-grid .timer-topline{align-items:flex-start}
+.tempo-today-grid .timer-topline h2{font-size:16px}
+.tempo-today-grid .timer-display{font-size:clamp(54px,6.5vw,80px);margin:18px 0 4px}
+.tempo-today-grid .timer-caption{margin-bottom:17px}
+.tempo-today-grid .timer-footer{flex-wrap:wrap}
+.tempo-today-grid .timer-controls{margin-top:17px;flex-wrap:wrap}
+.tempo-today-activities{min-width:0;border:1px solid var(--line);border-radius:16px;background:var(--surface);padding:21px}
+.tempo-today-card-heading{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:16px}
+.tempo-today-card-heading .eyebrow{margin-bottom:5px}
+.tempo-today-card-heading h2{margin:0;font-size:17px}
+.tempo-today-card-heading .text-button{white-space:nowrap;text-decoration:none}
+.tempo-today-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-bottom:17px}
+.tempo-today-metrics>div{display:flex;flex-direction:column;gap:5px;background:var(--surface-soft);border-radius:9px;padding:10px;min-width:0}
+.tempo-today-metrics strong{font-size:17px;line-height:1.1;font-variant-numeric:tabular-nums}
+.tempo-today-metrics span{font-size:10px;line-height:1.25;color:var(--muted)}
+.tempo-today-task-list{display:grid;gap:1px}
+.tempo-today-task{display:flex;align-items:center;gap:10px;min-height:50px;padding:7px 4px;border-bottom:1px solid var(--line)}
+.tempo-today-open-circle{display:grid;place-items:center;width:24px;flex:none;color:var(--tempo-area-color,var(--muted));font-size:23px;line-height:1}
+.tempo-today-task-title{display:grid;flex:1;min-width:0;gap:5px;border:0;background:none;text-align:left;color:var(--text);cursor:pointer;padding:4px 0}
+.tempo-today-task-title:hover strong,.tempo-today-task-title:focus-visible strong{color:var(--accent)}
+.tempo-today-task-title strong{font-size:13px;font-weight:650;overflow-wrap:anywhere}
+.tempo-today-task-title small{font-size:11px;line-height:1.3;color:var(--muted)}
+.tempo-today-task-plan{display:grid;place-items:center;flex:none;width:31px;height:31px;border:1px solid transparent;border-radius:8px;background:transparent;color:var(--accent);font-size:18px;cursor:pointer}
+.tempo-today-task-plan:hover{background:var(--accent-soft);border-color:var(--line)}
+.tempo-today-attention{display:flex;align-items:center;gap:9px;margin-top:15px;padding:11px;border-radius:10px;background:var(--surface-soft);font-size:12px;color:var(--text)}
+.tempo-today-attention[hidden]{display:none!important}
+.tempo-today-attention a{margin-left:auto;color:var(--accent);white-space:nowrap}
+.tempo-attention-dot{display:inline-block;flex:none;width:8px;height:8px;border-radius:50%;background:var(--amber)}
+.tempo-day-empty{padding:15px 6px;margin:0;color:var(--muted);font-size:12px;line-height:1.55}
+.tempo-today-more{display:block;padding:12px 5px;font-size:12px;color:var(--accent)}
+.tempo-today-next{margin-top:18px;border-radius:16px}
+.tempo-today-next .section-heading{align-items:center}
+.tempo-today-next .section-heading h2{font-size:17px}
+.tempo-today-next .tempo-upcoming-row{border-bottom:1px solid var(--line)}
+.tempo-today-next .tempo-upcoming-row:last-child{border-bottom:0}
+
+/* The original session date field remains the canonical selector. */
+.schedule-section>.section-heading{align-items:center}
+.schedule-section .date-toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:9px;margin:15px 0}
+.tempo-day-arrow{display:grid;place-items:center;flex:none;min-width:35px;min-height:37px;padding:0 8px;background:var(--surface);border:1px solid var(--line);border-radius:9px;color:var(--text);font-size:25px;line-height:1;cursor:pointer}
+.tempo-day-arrow:hover{background:var(--surface-soft)}
+.schedule-section .date-toolbar input{background:var(--surface);color:var(--text);border:1px solid var(--line);border-radius:9px;font-size:13px}
+.schedule-section .date-toolbar .text-button{font-size:12px}
+.schedule-section .date-toolbar .button-secondary{margin-left:auto}
+.tempo-planner-week{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px;margin:12px 0 19px}
+.tempo-week-day{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;min-width:0;min-height:82px;padding:9px 4px;border:1px solid var(--line);border-radius:11px;background:var(--surface);color:var(--text);cursor:pointer}
+.tempo-week-day:hover{background:var(--surface-soft)}
+.tempo-week-day[aria-current="date"]{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
+.tempo-week-day>span{font-size:12px;color:var(--muted);text-transform:capitalize}
+.tempo-week-day>strong{font-size:19px;line-height:1.1;font-variant-numeric:tabular-nums}
+.tempo-week-day>small{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+.tempo-day-timeline{border:1px solid var(--line);border-radius:15px;background:var(--surface);padding:20px;margin-bottom:18px}
+.tempo-planner-header{display:flex;align-items:center;justify-content:space-between;gap:15px}
+.tempo-planner-header .eyebrow{margin:0 0 5px}
+.tempo-planner-header h3{margin:0;font-size:18px;text-transform:capitalize}
+.tempo-planner-total{display:grid;gap:4px;text-align:right}
+.tempo-planner-total strong{font-size:22px;font-variant-numeric:tabular-nums}
+.tempo-planner-total span{color:var(--muted);font-size:11px}
+.tempo-planner-hint{margin:10px 0 18px;color:var(--muted);font-size:12px;line-height:1.45}
+.tempo-planner-viewport{display:grid;grid-template-columns:66px minmax(0,1fr);max-height:660px;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;padding:9px 9px 6px 0;border-top:1px solid var(--line);scrollbar-width:thin}
+.tempo-planner-ruler{position:relative;min-width:0}
+.tempo-time-mark{position:absolute;right:12px;transform:translateY(-50%);white-space:nowrap;font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+.tempo-planner-lane{position:relative;min-width:0;cursor:crosshair;background:
+ repeating-linear-gradient(to bottom,var(--line) 0,var(--line) 1px,transparent 1px,transparent 62px);
+ background-color:var(--surface-soft);border-left:1px solid var(--line);border-right:1px solid var(--line)}
+.tempo-planner-block{position:absolute;left:8px;right:8px;width:calc(100% - 16px);display:flex;flex-wrap:wrap;align-content:center;align-items:center;gap:4px 10px;overflow:hidden;padding:5px 12px;border:1px solid var(--line);border-left:4px solid var(--tempo-area-color,var(--accent));border-radius:8px;background:var(--surface);color:var(--text);text-align:left;box-shadow:0 1px 5px rgba(20,30,45,.065);cursor:pointer}
+.tempo-planner-block:hover,.tempo-planner-block:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;z-index:3}
+.tempo-planner-block strong{font-size:13px}
+.tempo-planner-block span{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.tempo-planner-block small{display:block;width:100%;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:11px;color:var(--muted)}
+.tempo-planner-compact{padding:0 8px;border-radius:5px;gap:5px}
+.tempo-planner-compact strong,.tempo-planner-compact span{font-size:10px;line-height:1}
+.tempo-now-line{position:absolute;left:0;right:0;z-index:5;height:2px;background:var(--danger);pointer-events:none}
+.tempo-now-line:before{content:"";position:absolute;left:-5px;top:-3px;width:8px;height:8px;background:var(--danger);border-radius:100%}
+.tempo-planner-no-sessions{margin:12px 0 0;color:var(--muted);font-size:12px}
+.tempo-session-details{border:1px solid var(--line);border-radius:13px;background:var(--surface);padding:0 14px 12px;margin:0 0 12px}
+.tempo-session-details>summary{display:flex;justify-content:space-between;align-items:center;gap:10px;min-height:54px;padding:10px 2px;cursor:pointer;color:var(--text);font-size:13px;font-weight:700;list-style-position:inside}
+.tempo-session-details:not([open]){padding-bottom:0}
+.tempo-session-details-hint{color:var(--muted);font-size:11px;font-weight:400;text-align:right}
+.tempo-session-details .sessions-list{margin:7px 0 0;gap:9px}
+.tempo-session-details .session-item{border-radius:10px}
+@media(max-width:1060px){
+  .tempo-today-grid{grid-template-columns:minmax(0,.95fr) minmax(0,1.05fr);gap:12px}
+  .tempo-today-grid .timer-card{padding:19px}
+  .tempo-today-activities{padding:17px}
+  .tempo-today-metrics strong{font-size:16px}
+  .tempo-today-metrics span{font-size:10px}
+}
+@media(max-width:900px){
+  .tempo-today-grid{grid-template-columns:1fr}
+  .tempo-today-grid .timer-card{min-height:285px}
+  .tempo-today-grid .timer-display{font-size:clamp(62px,9vw,83px)}
+  .tempo-today-activities{padding:20px}
+}
+@media(max-width:720px){
+  .tempo-today-heading{margin-bottom:14px}
+  .tempo-today-heading h1{font-size:25px}
+  .tempo-today-heading .button{font-size:12px;padding:0 10px}
+  .tempo-planner-week{gap:4px}
+  .tempo-week-day{min-height:70px;gap:4px}
+  .tempo-week-day>span{font-size:11px}
+  .tempo-week-day>strong{font-size:17px}
+  .tempo-week-day>small{font-size:10px}
+  .tempo-day-timeline{padding:14px 12px}
+  .tempo-planner-viewport{grid-template-columns:52px minmax(0,1fr);max-height:570px}
+  .tempo-time-mark{right:8px;font-size:10px}
+  .tempo-planner-block{left:5px;right:5px;width:calc(100% - 10px);padding:5px 8px}
+  .tempo-planner-block strong{font-size:12px}
+  .tempo-planner-block span{font-size:11px}
+  .tempo-session-details-hint{display:none}
+}
+@media(max-width:420px){
+  .tempo-today-heading .button{max-width:142px;text-align:center;line-height:1.3}
+  .tempo-today-metrics>div{padding:9px 7px}
+  .tempo-today-metrics strong{font-size:15px}
+  .tempo-today-metrics span{font-size:9px}
+  .tempo-planner-header h3{font-size:15px}
+  .tempo-planner-total strong{font-size:18px}
+  .schedule-section .date-toolbar .button-secondary{margin-left:0}
+  .tempo-week-day>small{font-size:9px}
+  .tempo-planner-block{gap:2px}
+  .tempo-planner-block small{font-size:10px}
+}
+/* Previously inside Inbox: the same planner instance now sits next to Sessioni. */
+.tempo-auto-plan-details{margin:0 0 18px;border:1px solid var(--line);border-radius:13px;background:var(--surface);overflow:hidden}
+.tempo-auto-plan-details>summary{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:16px 18px;cursor:pointer;font-size:13px;font-weight:700;color:var(--text)}
+.tempo-auto-plan-details>summary span{color:var(--muted);font-size:11px;font-weight:400}
+.tempo-auto-plan-details[open]>summary{border-bottom:1px solid var(--line)}
+.tempo-auto-plan-details .tempo-day-planner{margin:0;border:0;border-radius:0;padding:17px 18px;background:var(--surface)}
+.tempo-auto-plan-details .tempo-day-planner .section-heading{margin:0}
+.tempo-auto-plan-details .tempo-day-planner .eyebrow{display:none}
+@media(max-width:600px){
+  .tempo-auto-plan-details>summary{padding:14px 12px}
+  .tempo-auto-plan-details .tempo-day-planner{padding:15px 12px}
+}
+
+@media(prefers-reduced-motion:reduce){
+  .tempo-week-day,.tempo-day-arrow,.tempo-planner-block{transition:none}
+}
