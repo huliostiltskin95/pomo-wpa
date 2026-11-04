@@ -18,6 +18,7 @@ jobs:
         run: |
           node --check app.js
           node --check tempo-ui.js
+          node --check tempo-phase1.js
           node --check tempo-details.js
           node --check core/tempo-appearance.js
           node --check agenda.js

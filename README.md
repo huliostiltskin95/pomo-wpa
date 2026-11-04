@@ -1,5 +1,15 @@
 # TEMPVS
 
+## Interfaccia TEMPVS 3.0 — fase 1
+
+- **Inserimento rapido ovunque:** il pulsante **+ Nuova task** nell'intestazione apre l'inserimento con sintassi completa; scorciatoia **N** quando non stai scrivendo in un campo. L'anteprima, la validazione e la creazione di eventuali sessioni sono quelle originali.
+- **Un menu per aggiungere:** la freccia accanto al pulsante + offre scheda attività completa, inserimento multiplo, nuova sessione e gestione dei tag. I moduli di origine restano intatti e utilizzano gli stessi handler.
+- **Navigazione semplificata:** Oggi, Inbox, Agenda e Sessioni sono le destinazioni principali. Statistiche e Impostazioni sono nel menu **Altro**, raggiungibili anche da mobile.
+- **Agenda più leggibile:** liste intelligenti e filtri per area a sinistra (scorrimento orizzontale su schermi piccoli); viste Lista e Calendario in evidenza. Kanban, Timeline ed Eisenhower rimangono in **Altre viste**. Raggruppamento, ordinamento e strumenti di pianificazione sono disponibili dai menu contestuali.
+- **Ricerca istantanea:** l'elenco reagisce durante la digitazione mantenendo il cursore nel campo.
+- **Compatibilità:** nessuna modifica allo schema dei dati, al timer, al completamento manuale delle task, ai backup JSON/Dropbox o al plugin Obsidian. Nuovi asset `tempo-phase1.css` e `tempo-phase1.js`, inclusi nella cache offline versione 37.
+- **Verifica:** il test browser include ora il nuovo inserimento rapido, tutte e cinque le viste, i dettagli, il backup, l'interfaccia mobile e la ricarica offline.
+
 PWA installabile e utilizzabile offline per organizzare task, aree e sessioni Pomodoro.
 
 ## Aspetto — Quiet Focus
@@ -10,7 +20,7 @@ PWA installabile e utilizzabile offline per organizzare task, aree e sessioni Po
 - Navigazione laterale su desktop e inferiore su schermi stretti; pannello dettagli delle attività e indicatori di sincronizzazione.
 - Le preferenze estetiche sono incluse nello stato salvato, nel backup JSON e nel backup Dropbox. I backup più vecchi mantengono la compatibilità e utilizzano i colori predefiniti.
 
-## Agenda 2.0 (branch di sviluppo)
+## Agenda 2.0 (PWA)
 
 - **Cinque viste integrate:** Lista compatta, Calendario (giorno/settimana/mese), Kanban, Timeline, matrice Eisenhower.
 - **Liste intelligenti:** Oggi (task in scadenza, scadute e task collegate a sessioni odierne), Domani, Prossimi 7 giorni, Scadute, Senza data, Da riprogrammare, Tutte e Completate.
@@ -54,7 +64,7 @@ Il file `.ics` contiene anche i blocchi di attività programmati come normali se
 
 ## Aggiornamento dopo una modifica
 
-Il service worker usa una cache versionata (attualmente `tempo-pomodoro-v36`). Ad ogni rilascio occorre incrementare il numero della cache in `sw.js` per rinnovare anche i file CSS e JavaScript.
+Il service worker usa una cache versionata (attualmente `tempo-pomodoro-v37`). Ad ogni rilascio occorre incrementare il numero della cache in `sw.js` per rinnovare anche i file CSS e JavaScript.
 
 ## Limiti
 

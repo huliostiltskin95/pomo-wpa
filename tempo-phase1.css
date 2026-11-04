@@ -1,0 +1,190 @@
+/* TEMPVS 3.0 · Phase 1: progressive disclosure, one create entry point, uncluttered Agenda. */
+
+/* A single global entry point replaces the Agenda-only Add controls. */
+.tempo-global-create{position:relative;display:inline-flex;align-items:stretch;isolation:isolate;flex:none;margin-left:4px}
+.tempo-create-primary,.tempo-create-chevron{
+  min-height:38px;border:1px solid var(--accent);background:#365fcb;color:#fff;
+  font:inherit;font-size:12px;font-weight:700;cursor:pointer
+}
+.tempo-create-primary{display:inline-flex;align-items:center;gap:7px;padding:0 12px;border-radius:10px 0 0 10px}
+.tempo-create-plus{font-size:21px;line-height:1;font-weight:450}
+.tempo-create-chevron{padding:0 10px;border-left:1px solid rgba(255,255,255,.25);border-radius:0 10px 10px 0}
+.tempo-create-primary:hover,.tempo-create-chevron:hover{background:#294da9}
+.tempo-create-menu{
+  position:absolute;z-index:50;top:calc(100% + 9px);right:0;
+  width:242px;padding:6px;border:1px solid var(--line);border-radius:13px;
+  background:var(--surface);box-shadow:0 16px 42px rgba(24,38,62,.17)
+}
+.tempo-create-menu[hidden]{display:none!important}
+.tempo-create-menu button{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;
+  border:0;border-radius:8px;padding:11px 12px;background:transparent;color:var(--text);
+  text-align:left;font-size:13px
+}
+.tempo-create-menu button:hover,.tempo-create-menu button:focus-visible{background:var(--surface-soft)}
+.tempo-create-menu button span{color:var(--muted);font-size:11px}
+.tempo-create-menu-separator{height:1px;margin:5px 7px;background:var(--line)}
+
+/* Keep the original trigger IDs: the application logic still binds to them. */
+.tempo-agenda-heading,.agenda-extra-actions{display:none!important}
+.tempo-capture-dialog{width:min(100% - 24px,580px);max-height:min(90dvh,750px);padding:25px}
+.tempo-capture-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}
+.tempo-capture-heading .eyebrow{margin-bottom:5px}
+.tempo-capture-heading h2{margin:0;font-size:22px}
+.tempo-capture-heading .icon-button{flex:none}
+#tempo-capture-slot{margin:19px 0 0}
+.tempo-capture-dialog .tempo-quick-task{
+  padding:0;background:transparent;border:0;box-shadow:none;margin:0;
+}
+.tempo-capture-dialog .tempo-quick-task>label{font-size:12px;color:var(--muted)}
+.tempo-capture-dialog .tempo-quick-task-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:stretch}
+.tempo-capture-dialog #quick-task-input{
+  min-height:46px;width:100%;background:var(--surface-soft);
+  font-size:14px;padding:10px 12px;border:1px solid var(--line);border-radius:10px
+}
+.tempo-capture-dialog .tempo-quick-task-row button{min-height:46px}
+.tempo-capture-dialog .tempo-quick-preview{margin:10px 0 0;color:var(--muted);line-height:1.6}
+.tempo-capture-dialog .tempo-quick-help{margin:12px 0 0}
+.tempo-capture-footer{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  margin-top:19px;padding-top:13px;border-top:1px solid var(--line)
+}
+.tempo-capture-footer span{font-size:11px;color:var(--muted)}
+
+
+/* The bottom tab bar has four destinations plus "Altro", not six crowded links. */
+.tempo-nav-more{position:relative;display:flex;flex-direction:column;margin-top:auto;min-width:0}
+.tempo-nav-more-toggle{display:flex;align-items:center;width:100%;border:0;background:transparent;text-align:left;cursor:pointer}
+.tempo-nav-more-menu{
+  position:absolute;z-index:25;left:calc(100% + 10px);bottom:0;
+  display:flex;flex-direction:column;gap:3px;min-width:188px;
+  padding:8px;border:1px solid var(--line);border-radius:13px;
+  background:var(--surface);box-shadow:0 13px 35px rgba(18,31,53,.16)
+}
+.tempo-nav-more-menu[hidden]{display:none!important}
+.tempo-nav-more-menu .tempo-nav-link{display:flex;min-height:41px;white-space:nowrap}
+.tempo-nav-more-toggle.active{background:var(--accent-soft);color:var(--accent);font-weight:700}
+@media(max-width:720px){
+  .tempo-nav-more{flex:1;min-width:0;margin-top:0}
+  .tempo-nav-more-toggle{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:5px 0}
+  .tempo-nav-more-menu{left:auto;right:0;bottom:calc(100% + 9px);min-width:185px}
+  .tempo-nav-more-menu .tempo-nav-link{
+    display:flex;flex-direction:row;justify-content:flex-start;align-items:center;
+    padding:10px 12px;gap:9px;min-height:43px;font-size:12px
+  }
+  .tempo-nav-more-menu .tempo-nav-full{display:inline}
+  .tempo-nav-more-menu .tempo-nav-short{display:none}
+}
+
+/* TickTick-like task hierarchy: smart lists / areas on the left, content in the center.
+   Detail panel remains the existing non-destructive drawer. */
+#tempo-agenda-v2{margin:0}
+.av2-shell{grid-template-columns:208px minmax(0,1fr);gap:25px}
+.av2-nav{padding:3px 15px 14px 0;gap:18px;border-color:var(--line)}
+.av2-nav-group{display:flex;flex-direction:column;gap:3px}
+.av2-nav-group h3{margin:12px 0 8px;padding-left:10px}
+.av2-nav-group button{display:flex;align-items:center;gap:9px;min-height:37px;padding:9px 11px;font-size:13px;line-height:1.3}
+.av2-nav-group button[aria-pressed="true"]{background:var(--accent-soft);color:var(--accent);font-weight:700}
+.av2-nav-group button[data-area-filter] .tempo-area-dot{flex:none}
+.av2-all-areas{display:inline-grid;place-items:center;width:10px;color:var(--muted)}
+.av2-header{gap:16px;align-items:center;margin:0 0 17px}
+.av2-title-block h2{font-size:25px;letter-spacing:-.035em}
+.av2-title-block small{display:block;margin-top:5px;color:var(--muted);font-size:12px}
+.av2-header-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-left:auto}
+.av2-tabs{padding:3px}
+.av2-tabs button{font-size:12px;padding:8px 12px;min-height:35px}
+.av2-dropdown{position:relative;flex:none}
+.av2-dropdown>summary{
+  display:flex;align-items:center;justify-content:center;gap:7px;
+  min-height:39px;padding:8px 12px;border:1px solid var(--line);border-radius:9px;
+  background:var(--surface);color:var(--text);font-size:12px;font-weight:650;
+  cursor:pointer;list-style:none;white-space:nowrap;user-select:none
+}
+.av2-dropdown>summary::-webkit-details-marker{display:none}
+.av2-dropdown>summary:hover{background:var(--surface-soft)}
+.av2-dropdown[open]>summary{border-color:var(--accent);color:var(--accent)}
+.av2-dropdown-body{
+  position:absolute;z-index:10;top:calc(100% + 6px);right:0;
+  min-width:207px;padding:6px;border:1px solid var(--line);border-radius:12px;
+  background:var(--surface);box-shadow:0 14px 35px rgba(20,32,52,.14)
+}
+.av2-dropdown-body button{
+  display:block;width:100%;padding:10px 11px;border:0;border-radius:7px;
+  background:transparent;color:var(--text);text-align:left;font-size:12px
+}
+.av2-dropdown-body button:hover,.av2-dropdown-body button[aria-current]{background:var(--accent-soft);color:var(--accent)}
+.av2-plan-menu>summary{color:var(--accent);border-color:var(--accent-soft);background:var(--accent-soft)}
+.av2-tools{display:flex;align-items:center;gap:9px;padding:0 0 15px}
+.av2-search-wrap{flex:1;min-width:150px;display:flex!important;align-items:center;gap:7px}
+.av2-search-wrap .av2-search-icon{font-size:22px;line-height:1;color:var(--muted);font-weight:300}
+.av2-tools .av2-search-wrap input{flex:1;width:100%;min-width:0;min-height:39px}
+.av2-filter-body{min-width:218px;display:grid;gap:9px;padding:12px}
+.av2-filter-body label{display:grid;align-items:start;gap:7px;font-size:12px}
+.av2-filter-body select{width:100%;max-width:none;min-height:37px}
+.av2-content{padding-top:15px}
+.av2-group{margin-bottom:22px}
+.av2-group h3{padding:0 5px 7px;border-bottom:1px solid var(--line);font-size:13px}
+.av2-task{min-height:48px;padding:9px 10px;border-left:0;border-radius:8px}
+.av2-task:hover{background:var(--surface-soft)}
+.av2-check{font-size:23px;width:29px}
+.av2-task-title{font-size:14px;font-weight:570}
+.av2-task-title:hover{text-decoration:none;color:var(--accent)}
+.av2-area{font-size:11px}
+.av2-priority{font-size:11px}
+.av2-more{font-size:20px;min-height:32px;min-width:32px;border-radius:7px}
+.av2-more:hover{background:var(--accent-soft);color:var(--accent)}
+.av2-date{font-size:11px}
+.av2-fold{padding:11px 5px}
+.av2-board{gap:13px}
+.av2-column{padding:14px}
+.av2-column .av2-task,.av2-quadrant .av2-task{border-left:3px solid var(--tempo-area-color,var(--line))}
+
+/* Prefer content over chrome on narrower laptop and tablet sizes. */
+@media(max-width:1150px){
+  .av2-shell{grid-template-columns:170px minmax(0,1fr);gap:17px}
+  .av2-nav{padding-right:9px}
+  .av2-header-actions{gap:5px}
+  .av2-dropdown>summary{padding:8px 9px}
+  .av2-tabs button{padding:8px 9px}
+}
+@media(max-width:760px){
+  .av2-shell{display:block}
+  .av2-nav{
+    display:flex;flex-direction:row;gap:12px;overflow-x:auto;
+    border-right:0;border-bottom:1px solid var(--line);padding:0 0 10px;margin-bottom:15px
+  }
+  .av2-nav-group{display:flex;flex-direction:row;gap:5px;flex:none;align-items:center}
+  .av2-nav-group h3{display:none}
+  .av2-nav-group+ .av2-nav-group{padding-left:12px;border-left:1px solid var(--line)}
+  .av2-nav-group button{white-space:nowrap;min-height:37px;padding:8px 11px}
+  .av2-header{align-items:flex-start;gap:12px}
+  .av2-title-block h2{font-size:22px}
+  .av2-header-actions{max-width:100%;justify-content:flex-start}
+  .av2-tabs{width:auto;overflow:visible}
+  .av2-search-wrap{min-width:0}
+}
+@media(max-width:720px){
+  .tempo-create-label{display:none}
+  .tempo-create-primary{padding:0 11px}
+  .tempo-create-chevron{padding:0 9px}
+  .tempo-create-plus{font-size:23px}
+  .tempo-global-create{margin-left:1px}
+}
+@media(max-width:520px){
+  .av2-header{display:block}
+  .av2-header-actions{margin:12px 0 0;flex-wrap:wrap}
+  .av2-tabs{flex:none}
+  .av2-tools{flex-wrap:wrap}
+  .av2-search-wrap{flex:1 1 100%}
+  .av2-filter-menu{margin-left:auto}
+  .av2-task{gap:6px;padding:10px 5px}
+  .av2-area{display:none}
+  .av2-date{display:none}
+  .tempo-capture-dialog{padding:18px}
+  .tempo-capture-dialog .tempo-quick-task-row{grid-template-columns:1fr}
+  .tempo-capture-footer{flex-wrap:wrap}
+  .tempo-create-menu{right:-3px}
+}
+@media(prefers-reduced-motion:reduce){
+  .tempo-create-primary,.tempo-create-chevron,.av2-task{transition:none!important}
+}
