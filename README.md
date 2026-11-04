@@ -5,7 +5,7 @@
 La PWA carica soltanto `simple.js` e `simple.css`: Timer, Sessioni e Statistiche. I moduli della precedente Agenda restano nel repository per la cronologia del progetto, ma non vengono caricati dalla PWA. Il plugin Obsidian non è stato ridisegnato.
 
 - Avvio immediato per area e durata lorda; pause Pomodoro 5:1 opzionali. La pausa manuale sospende il conteggio, senza spostare la fine programmata.
-- Fasce per singola data, anche oltre mezzanotte. Inserimento `Studio @2h` o `Lavoro @45m`, una riga per sessione. La proposta usa i primi spazi liberi, divide tra fasce e richiede conferma; se manca spazio non salva parzialmente.
+- Fasce per singola data, anche oltre mezzanotte. Inserimento `Studio @2h` o `Lavoro @45m`, una riga per sessione. Con `Lavoro @1,5h +08:30` l’inizio è fisso nel giorno scelto e non richiede fasce; gli orari passati o sovrapposti vengono rifiutati. Le righe senza orario usano le fasce e rispettano gli orari già fissati. La proposta usa i primi spazi liberi, divide tra fasce e richiede conferma; se manca spazio non salva parzialmente.
 - Aree personalizzate con descrizioni Markdown (titoli, grassetto, corsivo, codice, citazioni, link e checkbox). Link Obsidian consentiti; HTML utente non eseguito.
 - Statistiche del focus effettivamente osservato, esclusi pausa e intervalli di sospensione superiori a 15 secondi. Non è una verifica della presenza: se il timer gira, il tempo viene registrato. App chiusa o sospesa non registra il tempo mancante.
 - Backup JSON e Dropbox includono sessioni, statistiche, aree e fasce. Aree/fasce sono in `defaults.simple`, compatibile con il merge Dropbox esistente.

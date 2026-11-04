@@ -1,4 +1,4 @@
-import {sessionBounds, localDateString, formatTime, validSession, hasSessionOverlaps, getPhase, normalizeSession} from './tempo-core.js';
+import {sessionBounds, localDateString, formatTime, validSession, hasSessionOverlaps, getPhase, normalizeSession, dateTime} from './tempo-core.js';
 export function normalizeArchive(data) {
   if (!data || !Array.isArray(data.sessions) || data.sessions.some(s=>!validSession(s)) || new Set(data.sessions.map(s=>s.id)).size!==data.sessions.length) throw Error('Archivio sessioni non valido.');
   if(data.sessions.some(s=>s.actualSeconds!==undefined&&(!Number.isFinite(s.actualSeconds)||s.actualSeconds<0)))throw Error('Tempo registrato non valido.');
@@ -11,9 +11,19 @@ export function normalizeArchive(data) {
   const names=[...new Set(['Studio','Lavoro','Personale',...data.sessions.map(s=>s.area||s.title)])];
   return {...data,sessions:data.sessions.map(normalizeSession),tasks:data.tasks||[],history:data.history||[],syncDeleted:data.syncDeleted||{tasks:[],sessions:[]},defaults:{...data.defaults,workMinutes:data.defaults?.workMinutes||25,breakEnabled:data.defaults?.breakEnabled!==false,simple:{...config,areas:config.areas||names.map(name=>({name,description:''})),windows:config.windows||[]}}};
 }
-export function planSessions(requests, windows, existing, defaults, now=new Date(), id=()=>crypto.randomUUID()) {
+export function planSessions(requests, windows, existing, defaults, now=new Date(), id=()=>crypto.randomUUID(), selectedDate=localDateString(now)) {
   const result=[];let remainder=0;
-  for(const request of requests){
+  // Reserve explicit times first so automatic rows cannot occupy them.
+  for(const request of requests.filter(r=>r.start)){
+    if(request.minutes>1440)throw Error('Una sessione con orario fisso può durare al massimo 24 ore.');
+    const start=dateTime(selectedDate,request.start),end=new Date(+start+request.minutes*60000);
+    const session={id:id(),title:request.area,area:request.area,date:selectedDate,start:request.start,end:formatTime(end),workMinutes:defaults.workMinutes,breakEnabled:defaults.breakEnabled,actualSeconds:0};
+    if(!validSession(session))throw Error('Data o orario non valido.');
+    if(+start<+now)throw Error('L’orario '+request.start+' è già passato nel giorno scelto. Cambia giorno o orario.');
+    result.push(session);
+  }
+  if(hasSessionOverlaps([...existing,...result]))throw Error('Gli orari indicati si sovrappongono a un’altra sessione.');
+  for(const request of requests.filter(r=>!r.start)){
     let left=request.minutes;
     for(const window of [...windows].sort((a,b)=>sessionBounds(a).start-sessionBounds(b).start)){
       const bounds=sessionBounds(window);let cursor=Math.max(+bounds.start,Math.ceil(+now/60000)*60000);
@@ -31,12 +41,12 @@ export function planSessions(requests, windows, existing, defaults, now=new Date
 }
 export function parseQuick(text,areas) {
   return text.trim().split('\n').filter(s=>s.trim()).map(line=>{
-    const match=line.trim().match(/^(.+?)\s+@(\d+(?:[.,]\d+)?)\s*(h|min|m)$/i);
-    if(!match)throw Error('Usa una riga per sessione: Studio @2h oppure Lavoro @45m.');
+    const match=line.trim().match(/^(.+?)\s+@(\d+(?:[.,]\d+)?)\s*(h|min|m)(?:\s+\+([01]\d|2[0-3]):([0-5]\d))?$/i);
+    if(!match)throw Error('Usa una riga per sessione: Studio @2h oppure Lavoro @1,5h +08:30.');
     const area=areas.find(a=>a.name.toLocaleLowerCase()===match[1].trim().toLocaleLowerCase());
     const minutes=Math.round(Number(match[2].replace(',','.'))*(match[3].toLowerCase()==='h'?60:1));
     if(!area || minutes<1 || minutes>10080)throw Error('Controlla area e durata (da 1 minuto a 168 ore).');
-    return {area:area.name,minutes};
+    return {area:area.name,minutes,...(match[4]?{start:match[4]+':'+match[5]}:{})};
   });
 }
 // Only observable time counts. Long suspended/offline gaps never become completed work.

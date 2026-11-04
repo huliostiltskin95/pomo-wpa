@@ -46,3 +46,30 @@ test('every planned fragment retains automatic pause preferences',()=>{
   assert.equal(sessions.length,2);
   for(const s of sessions){assert.equal(s.breakEnabled,true);assert.equal(s.workMinutes,25);}
 });
+
+test('explicit quick times accept the requested three lines and need no availability windows',()=>{
+ const requests=parseQuick('Lavoro @1,5h +08:30\nStudio @1h +13:45\nStudio @2h +17:30',[{name:'Studio'},{name:'Lavoro'}]);
+ const {sessions,remainder}=planSessions(requests,[],[],defaults,now,id,'2026-11-06');
+ assert.equal(remainder,0);
+ assert.deepEqual(sessions.map(s=>[s.title,s.date,s.start,s.end]),[['Lavoro','2026-11-06','08:30','10:00'],['Studio','2026-11-06','13:45','14:45'],['Studio','2026-11-06','17:30','19:30']]);
+ for(const s of sessions){assert.equal(s.breakEnabled,true);assert.equal(s.workMinutes,25);}
+});
+test('automatic rows reserve explicit slots first regardless of input order',()=>{
+ const requests=parseQuick('Studio @1h\nLavoro @1h +09:00',[{name:'Studio'},{name:'Lavoro'}]);
+ const {sessions,remainder}=planSessions(requests,[w('2026-11-06','09:00','11:00')],[],defaults,now,id,'2026-11-06');
+ assert.equal(remainder,0);assert.equal(sessions.find(s=>s.title==='Studio').start,'10:00');
+});
+test('explicit slots reject collisions, past dates and invalid clock syntax',()=>{
+ const areas=[{name:'Studio'}];
+ for(const time of ['24:00','12:60','8:30','08:30 garbage'])assert.throws(()=>parseQuick('Studio @1h +'+time,areas));
+ const request=parseQuick('Studio @1h +09:00',areas);
+ assert.throws(()=>planSessions(request,[],[session],defaults,now,id,'2026-11-06'),/sovrappongono/);
+ assert.throws(()=>planSessions([...request,...request],[],[],defaults,now,id,'2026-11-06'),/sovrappongono/);
+ assert.throws(()=>planSessions(request,[],[],defaults,new Date('2026-11-06T10:00:00'),id,'2026-11-06'),/passato/);
+});
+test('explicit sessions cross midnight and retain disabled breaks',()=>{
+ const requests=parseQuick('Studio @2h +23:30',[{name:'Studio'}]);
+ const {sessions:[s]}=planSessions(requests,[],[],{workMinutes:50,breakEnabled:false},now,id,'2026-11-06');
+ assert.equal(s.end,'01:30');assert.equal(s.date,'2026-11-06');assert.equal(s.breakEnabled,false);assert.equal(s.workMinutes,50);
+ assert.throws(()=>planSessions([{area:'Studio',minutes:1500,start:'09:00'}],[],[],defaults,now,id,'2026-11-06'),/24 ore/);
+});
