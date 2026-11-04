@@ -87,7 +87,7 @@ test("deleted sessions cannot contribute gross elapsed time",()=>{
 
 test("editing session while preserving its task IDs retains gross quotas",()=>{
   const s={...session(),taskIds:["assiri","latino"],taskAllocations:{assiri:120,latino:60}};
-  const moved={...s,start:"14:00",taskAllocations:undefined};
+  const moved={...s,start:"14:00",end:"17:00",taskAllocations:undefined};
   const reconciled=reconcileSessionAllocations(s,moved);
   assert.deepEqual(reconciled.taskAllocations,s.taskAllocations);
 });
