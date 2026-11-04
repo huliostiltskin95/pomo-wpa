@@ -1,0 +1,36 @@
+import assert from 'node:assert/strict';
+import {chromium} from 'playwright';
+const browser=await chromium.launch({headless:true});
+try {
+ const page=await browser.newPage({viewport:{width:390,height:844}}),errors=[];
+ page.on('pageerror',e=>errors.push(e.message));
+ await page.goto('http://127.0.0.1:8123/');
+ await page.getByRole('button',{name:'Sessioni',exact:true}).click();
+ await page.locator('#window-date').fill('2099-11-06');
+ await page.getByRole('button',{name:'Aggiungi fascia'}).click();
+ await page.getByLabel('Una sessione per riga').fill('Studio @2h\nLavoro @45m');
+ await page.getByRole('button',{name:'Prepara programma'}).click();
+ assert.match(await page.locator('#proposal-list').innerText(),/09:00–11:00/);
+ await page.getByRole('button',{name:'Conferma programma'}).click();
+ await page.locator('#session-date').fill('2099-11-06');
+ assert.match(await page.locator('#session-list').innerText(),/11:00–11:45/);
+ await page.getByRole('button',{name:'Impostazioni',exact:true}).click();
+ await page.getByLabel('Descrizione Markdown').fill('## Latino\n[Apri nota](obsidian://open?vault=Archivio&file=Latino)\n- [ ] Ripasso');
+ await page.getByRole('button',{name:'Salva descrizione'}).click();
+ await page.getByRole('button',{name:'Chiudi',exact:true}).click();
+ await page.getByRole('button',{name:'Timer',exact:true}).click();
+ await page.locator('#resources summary').click();
+ assert.equal(await page.getByRole('link',{name:'Apri nota'}).getAttribute('href'),'obsidian://open?vault=Archivio&file=Latino');
+ await page.getByRole('checkbox',{name:'Ripasso'}).check();
+ await page.reload();
+ await page.locator('#resources summary').click();
+ assert.equal(await page.getByRole('checkbox',{name:'Ripasso'}).isChecked(),true);
+ await page.getByRole('button',{name:'Inizia ora',exact:true}).click();
+ await page.getByRole('button',{name:'Pausa',exact:true}).click();
+ assert.match(await page.locator('#timer-note').innerText(),/Conteggio sospeso/);
+ await page.getByRole('button',{name:'Riprendi',exact:true}).click();
+ await page.getByRole('button',{name:'Concludi',exact:true}).click();
+ assert.equal(await page.getByRole('button',{name:'Inizia ora',exact:true}).isVisible(),true);
+ assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+ assert.deepEqual(errors,[]);
+} finally { await browser.close(); }

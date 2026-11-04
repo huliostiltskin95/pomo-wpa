@@ -1,7 +1,11 @@
-name: Browser check — Agenda 2.0
+name: Browser check — Timer semplice
 on:
   pull_request:
     paths:
+      - "simple.js"
+      - "simple.css"
+      - "core/tempo-simple.js"
+      - "tests/simple.e2e.mjs"
       - "agenda-v2.js"
       - "tempo-phase2.js"
       - "tempo-phase2.css"
@@ -38,8 +42,6 @@ jobs:
         run: |
           nohup python3 -m http.server 8123 --bind 127.0.0.1 >/tmp/tempvs-http.log 2>&1 &
           sleep 2
-      - name: Validate Agenda in Chromium
+      - name: Validate simple timer in Chromium
         run: |
-          node tests/agenda-v2.e2e.mjs
-          node tests/phase2.e2e.mjs
-          node tests/phase3.e2e.mjs
+          node tests/simple.e2e.mjs

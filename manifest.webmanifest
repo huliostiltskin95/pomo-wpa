@@ -2,7 +2,7 @@
   "id": "./",
   "name": "TEMPVS",
   "short_name": "TEMPVS",
-  "description": "Agenda di concentrazione con sessioni programmabili, suoni ambientali e modalità focus.",
+  "description": "Timer di concentrazione, sessioni nelle fasce giornaliere, aree con risorse e backup delle statistiche.",
   "lang": "it",
   "start_url": "./",
   "scope": "./",

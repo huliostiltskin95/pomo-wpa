@@ -52,6 +52,11 @@ export function sessionDurationMinutes(session) {
   return (end - start + 1440) % 1440 || 1440;
 }
 export function sessionBounds(session) {
+  // Immediate timers retain second precision; scheduled sessions keep local calendar times.
+  if (session.timerStartedAt && session.timerEndsAt) {
+    const start = new Date(session.timerStartedAt), end = new Date(session.timerEndsAt);
+    if (Number.isFinite(+start) && Number.isFinite(+end) && end > start) return { start, end };
+  }
   const start = dateTime(session.date, session.start);
   const end = dateTime(session.date, session.end);
   if (timeToMinutes(session.end) <= timeToMinutes(session.start)) end.setDate(end.getDate() + 1);

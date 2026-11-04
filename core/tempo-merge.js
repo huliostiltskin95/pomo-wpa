@@ -154,7 +154,7 @@ export function mergeSnapshots(base, local, remote, choices = {}) {
   merged.sessions=[...active.values()];
   // Deleted sessions must not contribute to statistics, including on another device.
   const retainedSessionIds=new Set(merged.sessions.map(session=>session.id));
-  merged.history=merged.history.filter(entry=>retainedSessionIds.has(entry.sessionId));
+  merged.history=merged.history.filter(entry=>entry.measured || retainedSessionIds.has(entry.sessionId));
   const taskIds = new Set(merged.tasks.map(t=>t.id));
   const sessionIds = new Set(merged.sessions.map(s=>s.id));
   merged.sessions=merged.sessions.map(s=> {
@@ -172,7 +172,9 @@ export function mergeSnapshots(base, local, remote, choices = {}) {
   return {merged,conflicts};
 }
 function isOverlap(a,b) {
+  if(a.finished || b.finished)return false;
   const bounds = session => {
+    if(session.timerStartedAt && session.timerEndsAt)return [+new Date(session.timerStartedAt),+new Date(session.timerEndsAt)];
     if(!/^\d{4}-\d{2}-\d{2}$/.test(session.date||"")||
        !/^\d\d:\d\d$/.test(session.start||"")||
        !/^\d\d:\d\d$/.test(session.end||""))return null;

@@ -1,5 +1,21 @@
 # TEMPVS
 
+## Timer semplice — versione attuale
+
+La PWA carica soltanto `simple.js` e `simple.css`: Timer, Sessioni e Statistiche. I moduli della precedente Agenda restano nel repository per la cronologia del progetto, ma non vengono caricati dalla PWA. Il plugin Obsidian non è stato ridisegnato.
+
+- Avvio immediato per area e durata lorda; pause Pomodoro 5:1 opzionali. La pausa manuale sospende il conteggio, senza spostare la fine programmata.
+- Fasce per singola data, anche oltre mezzanotte. Inserimento `Studio @2h` o `Lavoro @45m`, una riga per sessione. La proposta usa i primi spazi liberi, divide tra fasce e richiede conferma; se manca spazio non salva parzialmente.
+- Aree personalizzate con descrizioni Markdown (titoli, grassetto, corsivo, codice, citazioni, link e checkbox). Link Obsidian consentiti; HTML utente non eseguito.
+- Statistiche del focus effettivamente osservato, esclusi pausa e intervalli di sospensione superiori a 15 secondi. Non è una verifica della presenza: se il timer gira, il tempo viene registrato. App chiusa o sospesa non registra il tempo mancante.
+- Backup JSON e Dropbox includono sessioni, statistiche, aree e fasce. Aree/fasce sono in `defaults.simple`, compatibile con il merge Dropbox esistente.
+- Alla prima apertura una copia integrale locale è salvata in `tempo-before-simple-v1`, esportabile da Statistiche. Task e vecchio storico rimangono nei backup; lo storico precedente viene segnalato come non verificato. Dati malformati non vengono azzerati.
+- Le sessioni concluse anticipatamente liberano la disponibilità. Eliminare una sessione conserva il suo tempo misurato, anche dopo un merge Dropbox.
+
+Verifica locale: `node --test tests/*.test.js tests/*.test.mjs`. La pipeline browser esegue `tests/simple.e2e.mjs`; i precedenti test e2e Agenda documentano la vecchia UI.
+
+Le sezioni seguenti descrivono le versioni precedenti.
+
 ## Interfaccia TEMPVS 3.0 — fase 3 (rifinitura e collaudo)
 
 - **Coerenza grafica:** uno stile uniforme per Oggi, Agenda e Sessioni, con superfici semplici, testi più leggibili, gerarchia visiva e contrasto nel tema scuro.
