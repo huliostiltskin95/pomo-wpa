@@ -5,6 +5,11 @@ on:
       - "agenda-v2.js"
       - "tempo-phase2.js"
       - "tempo-phase2.css"
+      - "tempo-phase3.css"
+      - "tempo-phase1.js"
+      - "index.html"
+      - "sw.js"
+      - "tests/phase3.e2e.mjs"
       - "tempo-inbox.js"
       - "tests/phase2.e2e.mjs"
       - "agenda-v2.css"
@@ -37,3 +42,4 @@ jobs:
         run: |
           node tests/agenda-v2.e2e.mjs
           node tests/phase2.e2e.mjs
+          node tests/phase3.e2e.mjs
