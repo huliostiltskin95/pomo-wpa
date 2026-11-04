@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { proposeSessionFill, grossAssignedToTask, reconcileSessionAllocations } from "../core/tempo-fill.js";
+import { proposeSessionFill, grossAssignedToTask, reconcileSessionAllocations, pomodoroSlots } from "../core/tempo-fill.js";
 import { grossMinutesForTask, allocatedGrossMinutes, elapsedGrossForTask, normalizeTask, isTaskInInbox } from "../core/tempo-tasks.js";
 
 const session=(id="s1",start="15:00",end="18:00")=>({
@@ -17,33 +17,68 @@ const tasks=[
   task("greco","bassa",180,"2026-11-08")
 ];
 
-test("fills a gross session by priority without exceeding its 180-minute capacity",()=>{
-  const s=session();
-  const {session:filled,additions,freeMinutes}=proposeSessionFill(s,tasks,[s],{mode:"priority"});
-  assert.deepEqual(additions.map(a=>[a.taskId,a.minutes]),[["latino",60],["assiri",120]]);
-  assert.equal(allocatedGrossMinutes(filled),180);
-  assert.equal(freeMinutes,0);
+test("two long-term Studio tasks share a two-hour session in whole Pomodoros",()=>{
+  const s=session("s","09:00","11:00");
+  const ts=[task("A","media",240,""),task("B","media",360,"")];
+  const r=proposeSessionFill(s,ts,[s]);
+  assert.deepEqual(r.additions.map(x=>[x.taskId,x.minutes,x.pomodoros]),[["A",60,2],["B",60,2]]);
+  assert.deepEqual(r.session.pomodoroTaskIds,["A","A","B","B"]);
+  assert.equal(r.freeMinutes,0);
 });
 
-test("deducts earlier gross quotas before filling another session",()=>{
-  const first=session();
-  const filled=proposeSessionFill(first,tasks,[first]).session;
-  const next=session("s2","10:00","11:00");
-  const result=proposeSessionFill(next,tasks,[filled,next]);
-  assert.deepEqual(result.additions.map(a=>[a.taskId,a.minutes]),[["assiri",60]]);
-  assert.equal(grossAssignedToTask("assiri",[filled,result.session]),180);
+test("a three-hour Lavoro session gives the 30m task one Pomodoro, the other five",()=>{
+  const s={...session("work","09:00","12:00"),title:"Lavoro",area:"Lavoro"};
+  const ts=[{...task("short","media",30,""),area:"Lavoro"},
+    {...task("long","media",180,""),area:"Lavoro"}];
+  const r=proposeSessionFill(s,ts,[s]);
+  assert.deepEqual(r.additions.map(x=>[x.taskId,x.minutes,x.pomodoros]),
+    [["short",30,1],["long",150,5]]);
 });
 
-test("legacy links retain their equal gross shares and fill no extra space",()=>{
+test("already scheduled gross quotas reduce the estimate in later sessions",()=>{
+  const s=session("first","09:00","11:00");
+  const second=session("second","12:00","13:00");
+  const ts=[task("short","media",60,""),task("long","media",240,"")];
+  const first=proposeSessionFill(s,ts,[s,second]);
+  const later=proposeSessionFill(second,ts,[first.session,second]);
+  assert.equal(grossAssignedToTask("short",[first.session,later.session]),60);
+  assert.equal(later.additions.find(x=>x.taskId==="short"),undefined);
+});
+
+test("50-minute focus periods produce 60-minute gross Pomodoros",()=>{
+  const s={...session("longFocus","09:00","11:00"),workMinutes:50};
+  const r=proposeSessionFill(s,[task("a","media",300,""),task("b","media",300,"")],[s]);
+  assert.equal(r.slots.length,2);
+  assert.deepEqual(r.additions.map(x=>x.minutes),[60,60]);
+});
+
+test("a final incomplete focus block cannot be assigned to any task",()=>{
+  const s=session("partial","09:00","11:10");
+  const r=proposeSessionFill(s,[task("a","media",300,"")],[s]);
+  assert.equal(r.slots.length,4);
+  assert.equal(r.unassignableMinutes,10);
+  assert.equal(r.freeMinutes,10);
+});
+
+test("when breaks are disabled, each slot lasts exactly one focus period",()=>{
+  const s={...session("nobreak","09:00","10:30"),workMinutes:30,breakEnabled:false};
+  const r=proposeSessionFill(s,[task("a","media",300,""),task("b","media",300,"")],[s]);
+  assert.deepEqual(r.additions.map(x=>x.minutes),[60,30]);
+});
+
+test("manual assignment changes complete slots, never fractions",()=>{
+  const s=session("custom","09:00","11:00");
+  const ts=[task("a","media",240,""),task("b","media",360,"")];
+  const r=proposeSessionFill(s,ts,[s],{taskIds:["a","b"],slotTaskIds:["a","b","b","b"]});
+  assert.deepEqual(r.additions.map(x=>[x.taskId,x.minutes]),[["a",30],["b",90]]);
+  assert.throws(()=>proposeSessionFill(s,ts,[s],{taskIds:["a","b"],slotTaskIds:["a","unknown","b","b"]}));
+});
+
+test("legacy sessions preserve their original equal-share gross durations",()=>{
   const legacy={...session(),taskIds:["assiri","greco"]};
   assert.equal(grossMinutesForTask(legacy,"assiri"),90);
-  assert.equal(proposeSessionFill(legacy,tasks,[legacy]).additions.length,0);
 });
 
-test("disabling partial filling skips estimates that do not fit",()=>{
-  const s=session("s3","15:00","16:00");
-  assert.deepEqual(proposeSessionFill(s,tasks,[s],{partial:false}).additions.map(a=>a.taskId),["latino"]);
-});
 
 test("deleted sessions cannot contribute gross elapsed time",()=>{
   const now=new Date("2026-11-07T12:00:00");
@@ -74,4 +109,11 @@ test("legacy Inbox flags are reclassified without changing task identity",()=>{
   assert.equal(migrated.id,"legacy");
   assert.equal(migrated.inbox,false);
   assert.equal(normalizeTask({...base,dueDate:"",inbox:false}).inbox,true);
+});
+
+test("changing a session's focus duration invalidates old Pomodoro allocations",()=>{
+  const previous={...session(),taskIds:["assiri"],taskAllocations:{assiri:180},
+    pomodoroTaskIds:["assiri","assiri","assiri","assiri","assiri","assiri"]};
+  const edited={...previous,workMinutes:50,taskAllocations:undefined,pomodoroTaskIds:undefined};
+  assert.equal(reconcileSessionAllocations(previous,edited).taskAllocations,undefined);
 });
