@@ -27,6 +27,48 @@
       '</div>';
     topActions.append(create);
 
+    // Four primary destinations. Statistics and settings remain fully accessible in "Altro".
+    const nav = document.getElementById("tempo-navigation");
+    if (nav && !nav.querySelector(".tempo-nav-more")) {
+      const statsLink = nav.querySelector('[data-view-link="statistiche"]');
+      const settingsLink = nav.querySelector('[data-view-link="impostazioni"]');
+      if (statsLink && settingsLink) {
+        const more = document.createElement("div");
+        more.className = "tempo-nav-more";
+        more.innerHTML =
+          '<button type="button" class="tempo-nav-more-toggle tempo-nav-link" aria-label="Altre sezioni" aria-expanded="false" aria-controls="tempo-nav-more-menu">' +
+            '<span class="tempo-nav-icon" aria-hidden="true">⋯</span>' +
+            '<span class="tempo-nav-full" aria-hidden="true">Altro</span><span class="tempo-nav-short" aria-hidden="true">Altro</span>' +
+          '</button>' +
+          '<div id="tempo-nav-more-menu" class="tempo-nav-more-menu" hidden></div>';
+        nav.append(more);
+        const extraMenu = more.querySelector(".tempo-nav-more-menu");
+        extraMenu.append(statsLink, settingsLink);
+        const moreToggle = more.querySelector(".tempo-nav-more-toggle");
+        const toggleMore = open => {
+          extraMenu.hidden = !open;
+          moreToggle.setAttribute("aria-expanded", String(open));
+        };
+        const syncMore = () => {
+          const hash = location.hash.replace("#", "").toLowerCase();
+          moreToggle.classList.toggle("active", hash === "statistiche" || hash === "impostazioni");
+          toggleMore(false);
+        };
+        moreToggle.addEventListener("click", () => toggleMore(extraMenu.hidden));
+        extraMenu.addEventListener("click", event => {
+          if (event.target.closest("[data-view-link]")) toggleMore(false);
+        });
+        document.addEventListener("pointerdown", event => {
+          if (!more.contains(event.target)) toggleMore(false);
+        });
+        document.addEventListener("keydown", event => {
+          if (event.key === "Escape") toggleMore(false);
+        });
+        window.addEventListener("hashchange", syncMore);
+        syncMore();
+      }
+    }
+
     const dialog = document.createElement("dialog");
     dialog.id = "tempo-capture-dialog";
     dialog.className = "session-dialog tempo-capture-dialog";
