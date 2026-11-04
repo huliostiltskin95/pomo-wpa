@@ -1,5 +1,16 @@
 # TEMPVS
 
+## Interfaccia TEMPVS 3.0 — fase 2
+
+- **Oggi operativa:** timer Pomodoro originale affiancato alle task pertinenti alla giornata (in scadenza/scadute, assegnate al giorno o associate a sessioni odierne). Il riepilogo mostra ore lorde programmate, blocchi giornalieri e attività aperte; le task da riprogrammare vengono segnalate senza cambiarne lo stato.
+- **Azioni contestuali:** da Oggi puoi aprire i dettagli della task oppure il modulo esistente per programmarne una quota; il pulsante Pianifica la giornata apre Sessioni sulla data odierna.
+- **Settimana navigabile:** sette giorni selezionabili con carico lordo calcolato per ciascuna data; frecce per il giorno precedente e successivo, calendario e comando Oggi sincronizzati con il filtro originale.
+- **Sessioni come time blocking:** timeline oraria con blocchi colorati per area. Tocca un blocco per modificarlo tramite il modulo originale, oppure uno spazio libero per aprire una nuova sessione con data e ora precompilate. Il salvataggio continua a validare gli intervalli e a vietare sovrapposizioni.
+- **Oltre mezzanotte:** i blocchi vengono suddivisi visivamente fra la giornata iniziale e quella seguente; una sessione di 23:00–01:00 è visibile su entrambi i giorni, ma resta un'unica sessione nei dati.
+- **Dettagli conservati:** l'elenco con checkbox delle task associate e comandi di assegnazione/modifica/eliminazione rimane disponibile sotto la timeline in un pannello espandibile.
+- **Compatibilità:** nessuna modifica ai formati persistenti, alla sincronizzazione Dropbox, ai calcoli del Pomodoro e al plugin Obsidian. Nuovi asset `tempo-phase2.js` e `tempo-phase2.css` inclusi nella cache offline `tempo-pomodoro-v38`.
+- **Test:** smoke test in Chromium per dashboard Oggi, avvio del planning contestuale, sessioni oltre mezzanotte, navigazione, mobile e offline.
+
 ## Interfaccia TEMPVS 3.0 — fase 1
 
 - **Inserimento rapido ovunque:** il pulsante **+ Nuova task** nell'intestazione apre l'inserimento con sintassi completa; scorciatoia **N** quando non stai scrivendo in un campo. L'anteprima, la validazione e la creazione di eventuali sessioni sono quelle originali.
@@ -64,7 +75,7 @@ Il file `.ics` contiene anche i blocchi di attività programmati come normali se
 
 ## Aggiornamento dopo una modifica
 
-Il service worker usa una cache versionata (attualmente `tempo-pomodoro-v37`). Ad ogni rilascio occorre incrementare il numero della cache in `sw.js` per rinnovare anche i file CSS e JavaScript.
+Il service worker usa una cache versionata (attualmente `tempo-pomodoro-v38`). Ad ogni rilascio occorre incrementare il numero della cache in `sw.js` per rinnovare anche i file CSS e JavaScript.
 
 ## Limiti
 
