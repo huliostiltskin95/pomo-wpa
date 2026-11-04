@@ -146,6 +146,25 @@ function mount() {
   sessionsList.before(sessionDetails);
   sessionDetails.append(sessionsList);
 
+  // The automatic day planner belongs beside Sessioni, not in the capture Inbox.
+  const autoPlanner = main.querySelector(".tempo-day-planner");
+  let autoDate = null;
+  if (autoPlanner) {
+    const autoDetails = document.createElement("details");
+    autoDetails.className = "tempo-auto-plan-details";
+    autoDetails.id = "tempo-auto-plan-details";
+    autoDetails.innerHTML =
+      '<summary>Pianificazione automatica delle task <span>Apri strumenti</span></summary>';
+    sessionDetails.after(autoDetails);
+    autoDetails.append(autoPlanner);
+    autoDate = document.getElementById("tempo-day-date");
+    autoDate?.addEventListener("change", () => {
+      if (!isIsoDay(autoDate.value) || autoDate.value === dateField.value) return;
+      dateField.value = autoDate.value;
+      dateField.dispatchEvent(new Event("change",{bubbles:true}));
+    });
+  }
+
   let firstMinute = 7 * 60;
   let shownPlannerDay = "";
   function renderToday(state) {
@@ -197,6 +216,10 @@ function mount() {
     const previousViewport = planner.querySelector(".tempo-planner-viewport");
     const previousScroll = previousViewport?.scrollTop || 0;
     const iso = isIsoDay(dateField.value) ? dateField.value : today();
+    if (autoDate && autoDate.value !== iso) {
+      autoDate.value = iso;
+      autoDate.dispatchEvent(new Event("change",{bubbles:true}));
+    }
     const slices = daySlices(state.sessions,iso);
     const mondayOffset = (dayDate(iso).getDay()+6)%7;
     const monday = addDays(iso,-mondayOffset);
