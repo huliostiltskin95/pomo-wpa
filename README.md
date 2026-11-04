@@ -1,5 +1,14 @@
 # TEMPVS
 
+## Interfaccia TEMPVS 3.0 — fase 3 (rifinitura e collaudo)
+
+- **Coerenza grafica:** uno stile uniforme per Oggi, Agenda e Sessioni, con superfici semplici, testi più leggibili, gerarchia visiva e contrasto nel tema scuro.
+- **Accessibilità:** menu globale e menu Altro utilizzabili da tastiera, navigazione settimanale tramite frecce/Home/End, focus visibile e pulsante accessibile per creare una sessione dalla timeline.
+- **Touch e dispositivi meno potenti:** target più grandi su smartphone/tablet, animazioni disattivabili con Preferisci movimento ridotto, niente nuovi framework, font remoti o effetti GPU non necessari.
+- **Rendering efficiente:** Oggi e la timeline vengono ricalcolati soltanto quando è visibile la rispettiva sezione e cambiano dati, giorno oppure minuto; il timer Pomodoro resta indipendente.
+- **Cache offline:** risorse di fase 3 precache nella versione `tempo-pomodoro-v39`; struttura dati, backup Dropbox e plugin Obsidian invariati.
+- **Collaudo dell'utente:** vedi [COLLAUDO_TEMPVS_3.md](./COLLAUDO_TEMPVS_3.md) per una checklist di verifica tra più dispositivi.
+
 ## Interfaccia TEMPVS 3.0 — fase 2
 
 - **Oggi operativa:** timer Pomodoro originale affiancato alle task pertinenti alla giornata (in scadenza/scadute, assegnate al giorno o associate a sessioni odierne). Il riepilogo mostra ore lorde programmate, blocchi giornalieri e attività aperte; le task da riprogrammare vengono segnalate senza cambiarne lo stato.
@@ -9,7 +18,7 @@
 - **Oltre mezzanotte:** i blocchi vengono suddivisi visivamente fra la giornata iniziale e quella seguente; una sessione di 23:00–01:00 è visibile su entrambi i giorni, ma resta un'unica sessione nei dati.
 - **Dettagli conservati:** l'elenco con checkbox delle task associate e comandi di assegnazione/modifica/eliminazione rimane disponibile sotto la timeline in un pannello espandibile.
 - **Pianificazione automatica trasferita:** il pannello di distribuzione delle task, già presente nell’Inbox, è ora nella pagina Sessioni come sezione espandibile, mantenendo i comandi e i controlli di programmazione originali.
-- **Compatibilità:** nessuna modifica ai formati persistenti, alla sincronizzazione Dropbox, ai calcoli del Pomodoro e al plugin Obsidian. Nuovi asset `tempo-phase2.js` e `tempo-phase2.css` inclusi nella cache offline `tempo-pomodoro-v38`.
+- **Compatibilità:** nessuna modifica ai formati persistenti, alla sincronizzazione Dropbox, ai calcoli del Pomodoro e al plugin Obsidian. Nuovi asset `tempo-phase2.js` e `tempo-phase2.css` inclusi nella cache offline `tempo-pomodoro-v39`.
 - **Test:** smoke test in Chromium per dashboard Oggi, avvio del planning contestuale, sessioni oltre mezzanotte, navigazione, mobile e offline.
 
 ## Interfaccia TEMPVS 3.0 — fase 1
