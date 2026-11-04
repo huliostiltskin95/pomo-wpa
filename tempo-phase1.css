@@ -51,6 +51,31 @@
 }
 .tempo-capture-footer span{font-size:11px;color:var(--muted)}
 
+
+/* The bottom tab bar has four destinations plus "Altro", not six crowded links. */
+.tempo-nav-more{position:relative;display:flex;flex-direction:column;margin-top:auto;min-width:0}
+.tempo-nav-more-toggle{display:flex;align-items:center;width:100%;border:0;background:transparent;text-align:left;cursor:pointer}
+.tempo-nav-more-menu{
+  position:absolute;z-index:25;left:calc(100% + 10px);bottom:0;
+  display:flex;flex-direction:column;gap:3px;min-width:188px;
+  padding:8px;border:1px solid var(--line);border-radius:13px;
+  background:var(--surface);box-shadow:0 13px 35px rgba(18,31,53,.16)
+}
+.tempo-nav-more-menu[hidden]{display:none!important}
+.tempo-nav-more-menu .tempo-nav-link{display:flex;min-height:41px;white-space:nowrap}
+.tempo-nav-more-toggle.active{background:var(--accent-soft);color:var(--accent);font-weight:700}
+@media(max-width:720px){
+  .tempo-nav-more{flex:1;min-width:0;margin-top:0}
+  .tempo-nav-more-toggle{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:5px 0}
+  .tempo-nav-more-menu{left:auto;right:0;bottom:calc(100% + 9px);min-width:185px}
+  .tempo-nav-more-menu .tempo-nav-link{
+    display:flex;flex-direction:row;justify-content:flex-start;align-items:center;
+    padding:10px 12px;gap:9px;min-height:43px;font-size:12px
+  }
+  .tempo-nav-more-menu .tempo-nav-full{display:inline}
+  .tempo-nav-more-menu .tempo-nav-short{display:none}
+}
+
 /* TickTick-like task hierarchy: smart lists / areas on the left, content in the center.
    Detail panel remains the existing non-destructive drawer. */
 #tempo-agenda-v2{margin:0}
