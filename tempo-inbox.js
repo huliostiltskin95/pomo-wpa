@@ -29,7 +29,8 @@ export function mountInbox({getState,saveMutation,openTask,showToast,parseTasks,
     </div>`;
   const agenda=document.querySelector(".agenda-section");
   if(!section.isConnected)agenda.parentNode.insertBefore(section,agenda);
-  const $=id=>section.querySelector("#"+id);
+  // Controls can move to Sessioni without breaking the existing handlers.
+  const $=id=>document.getElementById(id);
   const list=$("tempo-inbox-list"), date=$("tempo-day-date"), result=$("tempo-day-result");
   const preview=$("tempo-day-preview"), confirm=$("tempo-day-save"), slots=$("tempo-day-slots");
   const uuid=()=>globalThis.crypto?.randomUUID?.() || Date.now()+"-"+Math.random().toString(36).slice(2);
@@ -153,8 +154,20 @@ export function mountInbox({getState,saveMutation,openTask,showToast,parseTasks,
     const next=event.detail?.date;
     if(next)date.value=next;
     proposal=[];confirm.classList.add("hidden");slots.replaceChildren();result.textContent="";
-    location.hash="inbox";
-    section.scrollIntoView({behavior:"smooth",block:"start"});
+    const plannerPanel=document.getElementById("tempo-auto-plan-details");
+    if(plannerPanel){
+      plannerPanel.open=true;
+      const filter=document.getElementById("filter-date");
+      if(filter && filter.value!==date.value){
+        filter.value=date.value;
+        filter.dispatchEvent(new Event("change",{bubbles:true}));
+      }
+      location.hash="sessioni";
+      requestAnimationFrame(()=>plannerPanel.scrollIntoView({behavior:"smooth",block:"start"}));
+    }else{
+      location.hash="inbox";
+      section.scrollIntoView({behavior:"smooth",block:"start"});
+    }
   });
   render();
   return {render};
