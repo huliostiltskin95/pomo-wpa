@@ -20,6 +20,7 @@ jobs:
           node --check tempo-ui.js
           node --check tempo-phase1.js
           node --check tempo-phase2.js
+          node --check tests/phase3.e2e.mjs
           node --check tempo-details.js
           node --check core/tempo-appearance.js
           node --check agenda.js

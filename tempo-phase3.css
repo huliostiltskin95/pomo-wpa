@@ -1,0 +1,183 @@
+/* TEMPVS 3.0 — Phase 3: visual consistency, accessibility, and low-cost rendering.
+   Pure CSS: no third-party dependencies, fonts, filters, or JS animation loops. */
+:root{
+  --tempo-ui-radius:14px;
+  --tempo-ui-radius-sm:9px;
+  --tempo-ui-focus:var(--accent);
+  --tempo-ui-shadow:0 2px 8px rgba(24,42,76,.045);
+  --tempo-ui-hover:var(--surface-soft);
+}
+html[data-tempo-theme="dark"]{
+  --tempo-ui-shadow:none;
+  --tempo-ui-hover:#303F53;
+}
+body{line-height:1.48;overflow-x:hidden}
+.layout{max-width:var(--tempo-content-max);min-width:0}
+button,select,input,textarea{max-width:100%}
+button{touch-action:manipulation}
+button:disabled{cursor:not-allowed;opacity:.55}
+:where(.timer-card,.tempo-today-activities,.tempo-next-card,.tempo-appearance-settings,.settings-card,.sound-card,.backup-card,.tempo-day-timeline){
+  border-color:var(--line);border-radius:var(--tempo-ui-radius);
+  box-shadow:var(--tempo-ui-shadow);
+}
+.timer-card,.tempo-today-activities,.tempo-day-timeline,.tempo-next-card{background:var(--surface)}
+.tempo-next-card{border:1px solid var(--line)}
+:where(.av2-title-block h2,.tempo-today-heading h1,.tempo-planner-header h3){letter-spacing:-.035em}
+.tempo-today-date,.tempo-today-task-title small,.tempo-today-attention,.tempo-planner-hint{
+  line-height:1.5;
+}
+.tempo-today-metrics span{font-size:11px;line-height:1.35}
+.tempo-today-task-title strong,.tempo-planner-block strong{line-height:1.36}
+.tempo-today-task{border-bottom-color:var(--line)}
+.tempo-today-task:last-child{border-bottom:0}
+.tempo-today-task-plan{width:42px;height:42px;font-size:19px;flex:none}
+.tempo-today-task-title{min-height:42px;justify-content:center}
+.tempo-attention-dot{background:var(--amber)}
+.tempo-today-attention{flex-wrap:wrap}
+.tempo-today-attention a{text-decoration:underline;text-underline-offset:2px}
+
+/* Navigation: preserve the existing responsive layout, improve selection cues. */
+#tempo-navigation{background:var(--surface)}
+#tempo-navigation .tempo-nav-link{border-radius:9px}
+#tempo-navigation .tempo-nav-link.active,
+#tempo-navigation .tempo-nav-more-toggle.active{
+  background:var(--accent-soft);color:var(--accent);font-weight:700
+}
+#tempo-navigation .tempo-nav-link:not(.active):hover,
+#tempo-navigation .tempo-nav-more-toggle:hover{background:var(--tempo-ui-hover);color:var(--text)}
+.tempo-nav-more-menu{
+  border-color:var(--line);background:var(--surface);
+  box-shadow:0 8px 22px rgba(24,42,76,.12)
+}
+.tempo-nav-more-menu[hidden],.tempo-create-menu[hidden]{display:none!important}
+
+/* One consistent primary CTA, accessible in both light and dark themes. */
+.tempo-create-primary,.tempo-create-chevron{
+  min-height:42px;background:#365FCB;color:#fff;border-color:#365FCB;
+}
+.tempo-create-primary:hover,.tempo-create-chevron:hover{background:#284DAF;border-color:#284DAF}
+.tempo-create-chevron{min-width:39px}
+.tempo-create-menu{border-color:var(--line);box-shadow:0 8px 22px rgba(24,42,76,.13)}
+.tempo-create-menu button{min-height:44px;font-size:13px;line-height:1.3}
+.tempo-capture-dialog .tempo-quick-task-row button{min-height:44px}
+.tempo-capture-dialog .tempo-quick-help summary{min-height:40px;display:list-item}
+.tempo-capture-footer .text-button{min-height:42px}
+.tempo-capture-footer span{line-height:1.4}
+
+/* Agenda: clean separation of hierarchy without reducing available functions. */
+.av2-shell{gap:22px}
+.av2-nav{border-color:var(--line)}
+.av2-nav-group button{min-height:40px}
+.av2-nav-group button:hover{background:var(--tempo-ui-hover)}
+.av2-header{border-bottom:1px solid var(--line);padding-bottom:13px}
+.av2-tabs{background:var(--surface-soft);border:1px solid var(--line)}
+.av2-tabs button{min-height:39px}
+.av2-tools .av2-search-wrap input{min-height:42px}
+.av2-dropdown>summary{min-height:42px}
+.av2-dropdown-body button{min-height:42px}
+.av2-dropdown[open]>summary{background:var(--accent-soft)}
+.av2-task{min-height:50px}
+.av2-task .av2-task-title{min-height:38px;line-height:1.35}
+.av2-check,.av2-more{display:grid;place-items:center;flex:none;min-height:40px;min-width:40px}
+.av2-check{font-size:21px}
+.av2-more{font-size:19px}
+.av2-group h3{line-height:1.5}
+.av2-calendar-day,.av2-column,.av2-quadrant{border-color:var(--line)}
+.av2-calendar-day{border-radius:var(--tempo-ui-radius-sm)}
+.av2-event,.av2-timeline-session{line-height:1.4}
+.av2-event:focus-visible,.av2-timeline-session:focus-visible{position:relative;z-index:2}
+
+/* Keep contextual session creation visible and accessible without clicking empty canvas. */
+.tempo-planner-header-actions{display:flex;align-items:center;justify-content:flex-end;gap:13px;flex-wrap:wrap}
+.tempo-planner-new{min-height:42px;white-space:nowrap}
+@media(max-width:520px){
+  .tempo-planner-header-actions{gap:9px}
+  .tempo-planner-new{font-size:11px;padding:0 9px}
+}
+/* Timeline: larger day targets, clearer time markers, unchanged time math. */
+.tempo-day-arrow{min-width:44px;min-height:44px;font-size:24px}
+.tempo-week-day{min-height:86px;outline-offset:3px}
+.tempo-week-day[aria-current="date"]{box-shadow:inset 0 0 0 1px var(--accent)}
+.tempo-week-day[aria-current="date"] strong{font-weight:800}
+.tempo-planner-viewport{scrollbar-width:thin}
+.tempo-time-mark{font-variant-numeric:tabular-nums}
+.tempo-planner-block{box-shadow:none;min-height:0}
+.tempo-planner-block:focus-visible{outline:3px solid var(--tempo-ui-focus)!important;outline-offset:2px;z-index:6}
+.tempo-planner-no-sessions{line-height:1.5}
+.tempo-session-details>summary,.tempo-auto-plan-details>summary{min-height:48px;line-height:1.4}
+.tempo-session-details>summary:hover,.tempo-auto-plan-details>summary:hover{background:var(--tempo-ui-hover)}
+.tempo-session-details .session-item{border-color:var(--line)}
+
+/* Explicit keyboard focus that stays distinguishable on both themes. */
+:where(button,a,summary,input,textarea,select,[role="menuitem"]):focus-visible{
+  outline:3px solid var(--tempo-ui-focus)!important;outline-offset:3px
+}
+:where(.tempo-week-day,.av2-nav-group button,.tempo-nav-link,.tempo-create-primary,.tempo-create-chevron):focus-visible{
+  position:relative;z-index:2
+}
+:where(.tempo-today-activities,.tempo-day-timeline,.tempo-capture-dialog) a{
+  text-underline-offset:3px
+}
+:where(.tempo-today-activities,.tempo-day-timeline) button:not(:disabled){-webkit-tap-highlight-color:transparent}
+
+/* Override legacy white surfaces in dark mode; retain user-selected area colours. */
+html[data-tempo-theme="dark"] .small-button,
+html[data-tempo-theme="dark"] .icon-button,
+html[data-tempo-theme="dark"] .button-secondary,
+html[data-tempo-theme="dark"] .sound-controls select,
+html[data-tempo-theme="dark"] .tempo-day-arrow,
+html[data-tempo-theme="dark"] .tempo-planner-block{
+  background:var(--surface);color:var(--text);border-color:var(--line)
+}
+html[data-tempo-theme="dark"] .small-button:hover,
+html[data-tempo-theme="dark"] .icon-button:hover,
+html[data-tempo-theme="dark"] .button-secondary:hover,
+html[data-tempo-theme="dark"] .tempo-day-arrow:hover,
+html[data-tempo-theme="dark"] .tempo-planner-block:hover{background:var(--tempo-ui-hover)}
+html[data-tempo-theme="dark"] .button-danger{
+  background:var(--surface);color:var(--danger);border-color:var(--danger)
+}
+html[data-tempo-theme="dark"] .tempo-create-menu,
+html[data-tempo-theme="dark"] .av2-dropdown-body,
+html[data-tempo-theme="dark"] .tempo-nav-more-menu{
+  box-shadow:0 6px 16px rgba(0,0,0,.3)
+}
+html[data-tempo-theme="dark"] .tempo-planner-lane{background-color:var(--surface-soft)}
+html[data-tempo-theme="dark"] .tempo-week-day[aria-current="date"]{background:var(--accent-soft)}
+html[data-tempo-theme="dark"] .tempo-next-card{box-shadow:none}
+
+/* Small touch devices: consistent targets and no clipped horizontal controls. */
+@media(hover:none),(pointer:coarse){
+  :where(.tempo-create-primary,.tempo-create-chevron,.tempo-day-arrow,.tempo-week-day,
+    .tempo-create-menu button,.tempo-nav-more-menu a,.av2-nav-group button,
+    .av2-dropdown>summary,.av2-dropdown-body button,.av2-tabs button){min-height:44px}
+  .tempo-planner-block{min-width:0}
+  .tempo-today-task-plan{min-width:44px;min-height:44px}
+}
+@media(max-width:760px){
+  .av2-shell{gap:14px}
+  .av2-header{padding-bottom:12px}
+  .tempo-today-activities{padding:17px}
+  .tempo-day-timeline{padding:14px}
+  .tempo-create-menu{max-width:calc(100vw - 16px)}
+  .tempo-capture-dialog{max-width:calc(100vw - 16px)}
+  .tempo-planner-header{align-items:flex-start}
+}
+@media(max-width:460px){
+  .tempo-today-metrics>div{padding:10px 7px}
+  .tempo-today-metrics span{font-size:10px}
+  .tempo-week-day{min-height:72px}
+  .tempo-week-day small{font-size:10px}
+  .tempo-planner-block{padding:5px 7px}
+  .tempo-session-details,.tempo-auto-plan-details{margin-bottom:12px}
+}
+@media(prefers-reduced-motion:reduce){
+  *,*::before,*::after{
+    animation-duration:.01ms!important;animation-iteration-count:1!important;
+    transition-duration:.01ms!important;scroll-behavior:auto!important
+  }
+}
+/* Avoid GPU-heavy overlay filters on older phones and e-ink readers. */
+@media(max-width:760px){
+  .session-dialog::backdrop,.task-dialog::backdrop{backdrop-filter:none!important}
+}

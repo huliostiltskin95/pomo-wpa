@@ -16,7 +16,7 @@
       '<button type="button" class="tempo-create-primary" id="tempo-create-primary" aria-haspopup="dialog" aria-keyshortcuts="N" title="Aggiungi una task (N)">' +
         '<span class="tempo-create-plus" aria-hidden="true">+</span><span class="tempo-create-label">Nuova task</span>' +
       '</button>' +
-      '<button type="button" class="tempo-create-chevron" id="tempo-create-menu-button" aria-label="Altre azioni di inserimento" aria-expanded="false" aria-controls="tempo-create-menu">▾</button>' +
+      '<button type="button" class="tempo-create-chevron" id="tempo-create-menu-button" aria-label="Altre azioni di inserimento" aria-haspopup="menu" aria-expanded="false" aria-controls="tempo-create-menu">▾</button>' +
       '<div class="tempo-create-menu" id="tempo-create-menu" role="menu" hidden>' +
         '<button type="button" role="menuitem" data-tempo-create="quick">Inserimento rapido <span>N</span></button>' +
         '<button type="button" role="menuitem" data-tempo-create="task">Scheda attività completa</button>' +
@@ -62,7 +62,13 @@
           if (!more.contains(event.target)) toggleMore(false);
         });
         document.addEventListener("keydown", event => {
-          if (event.key === "Escape") toggleMore(false);
+          if(event.key !== "Escape" || extraMenu.hidden)return;
+          event.preventDefault();
+          toggleMore(false);
+          moreToggle.focus({preventScroll:true});
+        });
+        more.addEventListener("focusout", event => {
+          if (!more.contains(event.relatedTarget)) toggleMore(false);
         });
         window.addEventListener("hashchange", syncMore);
         syncMore();
@@ -94,6 +100,22 @@
       toggle.setAttribute("aria-expanded", String(open));
     };
     const closeMenu = () => setMenu(false);
+    const menuButtons = () => [...menu.querySelectorAll('[role="menuitem"]:not([disabled])')];
+    const focusMenu = (index = 0) => {
+      const buttons=menuButtons();
+      if(!buttons.length)return;
+      buttons[(index+buttons.length)%buttons.length].focus({preventScroll:true});
+    };
+    menu.addEventListener("keydown", event => {
+      const buttons=menuButtons(),index=buttons.indexOf(document.activeElement);
+      if(event.key==="ArrowDown"){event.preventDefault();focusMenu(index+1);}
+      else if(event.key==="ArrowUp"){event.preventDefault();focusMenu(index<0?buttons.length-1:index-1);}
+      else if(event.key==="Home"){event.preventDefault();focusMenu(0);}
+      else if(event.key==="End"){event.preventDefault();focusMenu(buttons.length-1);}
+    });
+    create.addEventListener("focusout", event => {
+      if(!create.contains(event.relatedTarget)) closeMenu();
+    });
 
     const runAction = action => {
       closeMenu();
@@ -117,7 +139,12 @@
     toggle.addEventListener("click", () => {
       const opening = menu.hidden;
       setMenu(opening);
-      if (opening) menu.querySelector("button")?.focus();
+      if(opening) focusMenu();
+    });
+    toggle.addEventListener("keydown", event => {
+      if(event.key!=="ArrowDown" && event.key!=="ArrowUp")return;
+      event.preventDefault();setMenu(true);
+      focusMenu(event.key==="ArrowDown"?0:menuButtons().length-1);
     });
     create.addEventListener("click", event => {
       const action = event.target.closest("[data-tempo-create]");
@@ -132,7 +159,12 @@
       if (!create.contains(event.target)) closeMenu();
     });
     document.addEventListener("keydown", event => {
-      if (event.key === "Escape") closeMenu();
+      if (event.key === "Escape" && !menu.hidden){
+        event.preventDefault();
+        closeMenu();
+        toggle.focus({preventScroll:true});
+        return;
+      }
       if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.repeat ||
           event.key.toLowerCase() !== "n") return;
       if (event.target.closest("input, textarea, select, [contenteditable], dialog") ||
@@ -144,7 +176,10 @@
     quickForm.addEventListener("submit", () => {
       if (dialog.open && !quickInput.value.trim() && !quickError.textContent.trim()) dialog.close();
     });
-    dialog.addEventListener("close", () => primary.focus({ preventScroll: true }));
+    dialog.addEventListener("close", () => {
+      // A secondary editor may open immediately after quick capture.
+      if(!document.querySelector("dialog[open]")) primary.focus({preventScroll:true});
+    });
   };
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", ready);
