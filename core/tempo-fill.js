@@ -1,5 +1,5 @@
 import { sessionDurationMinutes } from './tempo-core.js';
-import { sessionArea, sessionTaskIds, grossMinutesForTask } from './tempo-tasks.js';
+import { sessionArea, sessionTaskIds, grossMinutesForTask, allocatedGrossMinutes } from './tempo-tasks.js';
 
 export const grossAssignedToTask = (taskId, sessions) => sessions.reduce(
   (sum, s) => sum + grossMinutesForTask(s, taskId), 0);
@@ -28,6 +28,11 @@ export function pomodoroSlots(session) {
 export function proposeSessionFill(session, tasks, sessions, options = {}) {
   if (!session) throw Error('Sessione inesistente.');
   const { slots, unassignableMinutes, duration } = pomodoroSlots(session);
+  if (!slots.length) {
+    const occupied = allocatedGrossMinutes(session);
+    return { session, additions: [], slots, unassignableMinutes, capacity: duration, occupied,
+      freeMinutes: duration - occupied };
+  }
   const area = sessionArea(session, tasks);
   const selected = Array.isArray(options.taskIds) ? new Set(options.taskIds) : null;
   const candidates = tasks.map((task, index) => ({ task, index })).filter(({ task }) =>
@@ -87,7 +92,8 @@ export function proposeSessionFill(session, tasks, sessions, options = {}) {
     minutes: taskAllocations[taskId], pomodoros: counts.get(taskId)
   }));
   const occupied = Object.values(taskAllocations).reduce((sum, value) => sum + value, 0);
-  return { session: { ...session, taskIds, taskAllocations, pomodoroTaskIds: slotTaskIds },
+  const { taskId: legacyTaskId, ...baseSession } = session;
+  return { session: { ...baseSession, taskIds, taskAllocations, pomodoroTaskIds: slotTaskIds },
     additions, slots, unassignableMinutes, capacity: duration, occupied,
     freeMinutes: duration - occupied };
 }
