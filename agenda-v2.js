@@ -154,22 +154,57 @@ export function createAgendaV2({getState,saveMutation,setTaskStatus,openTask,ope
   }
   function render() {
     const state=getState(),tasks=visibleTasks(state);
-    root.innerHTML='<div class="av2-shell"><nav class="av2-nav" aria-label="Liste intelligenti"><h3>Liste intelligenti</h3>'+
-      menus.map(([key,label])=>'<button data-smart="'+key+'" '+(ui.list===key?'aria-current="page"':'')+'>'+escape(label)+'</button>').join("")+
+    const currentView=[["list","Lista"],["calendar","Calendario"],["kanban","Kanban"],["timeline","Timeline"],["matrix","Eisenhower"]]
+      .find(([key])=>key===ui.view)?.[1] || "Lista";
+    const otherViews=[["kanban","Kanban"],["timeline","Timeline"],["matrix","Eisenhower"]];
+    root.innerHTML='<div class="av2-shell">'+
+      '<nav class="av2-nav" aria-label="Liste e aree">'+
+        '<div class="av2-nav-group"><h3>Liste intelligenti</h3>'+
+        menus.map(([key,label])=>'<button type="button" data-smart="'+key+'" '+(ui.list===key?'aria-current="page"':'')+'>'+escape(label)+'</button>').join("")+
+        '</div><div class="av2-nav-group av2-area-nav"><h3>Aree</h3>'+
+        [["","Tutte le aree"],["Studio","Studio"],["Lavoro","Lavoro"],["Personale","Personale"]].map(([key,label])=>
+          '<button type="button" data-area-filter="'+escape(key)+'" data-area="'+escape(key)+'" '+(ui.area===key?'aria-pressed="true"':'aria-pressed="false"')+'>'+
+          (key?'<span class="tempo-area-dot" aria-hidden="true"></span>':'<span class="av2-all-areas" aria-hidden="true">◉</span>')+escape(label)+'</button>').join("")+
+        '</div>'+
       '</nav>'+
-      '<div class="av2-main"><div class="av2-header"><div><h2>'+escape(menus.find(x=>x[0]===ui.list)?.[1]||"Agenda")+'</h2><small>'+tasks.length+' attività nella selezione</small></div>'+
-      '<div class="av2-tabs">'+[["list","Lista"],["calendar","Calendario"],["kanban","Kanban"],["timeline","Timeline"],["matrix","Eisenhower"]].map(([key,label])=>
-      '<button data-view="'+key+'" '+(ui.view===key?'aria-pressed="true"':'aria-pressed="false"')+'>'+label+'</button>').join("")+'</div></div>'+
-      '<div class="tempo-day-launch"><button class="button button-secondary" type="button" data-open-day-plan="1">Crea sessioni · '+escape(ui.view==="calendar"?ui.anchor:today())+'</button><button class="button button-secondary" type="button" data-fill-day="1">Riempi sessioni · '+escape(ui.view==="calendar"?ui.anchor:today())+'</button></div>'+
-      '<div class="av2-tools"><input data-search="1" placeholder="Cerca nelle attività" value="'+escape(ui.search)+'" aria-label="Cerca attività">'+
-      '<label>Area <select data-control="area">'+["","Lavoro","Studio","Personale"].map(a=>
-      '<option value="'+escape(a)+'" '+(ui.area===a?"selected":"")+'>'+escape(a||"Tutte")+'</option>').join("")+'</select></label>'+
-      (ui.view==="list"?'<label>Raggruppa <select data-control="group">'+[["date","Data"],["area","Area"],["priority","Priorità"],["status","Stato"]].map(([v,l])=>
-      '<option value="'+v+'" '+(ui.group===v?"selected":"")+'>'+l+'</option>').join("")+'</select></label>':"")+
-      (["list","kanban","matrix"].includes(ui.view)?'<label>Ordina <select data-control="sort">'+[["date","Data"],["priority","Priorità"],["title","Titolo"],["area","Area"]].map(([v,l])=>
-      '<option value="'+v+'" '+(ui.sort===v?"selected":"")+'>'+l+'</option>').join("")+'</select></label>':"")+'</div>'+
-      dateHeader()+(ui.view==="calendar"?'<div class="av2-layers"><label><input type="checkbox" data-layer="task" '+(ui.taskLayer?"checked":"")+'> Scadenze task</label><label><input type="checkbox" data-layer="session" '+(ui.sessionLayer?"checked":"")+'> Sessioni</label></div>':"")+
-      '<div class="av2-content">'+(ui.view==="list"?renderList(tasks,state):ui.view==="kanban"?renderKanban(tasks):ui.view==="calendar"?renderCalendar(state):ui.view==="timeline"?renderTimeline(state):renderMatrix(tasks))+'</div></div></div>';
+      '<div class="av2-main"><div class="av2-header">'+
+        '<div class="av2-title-block"><h2>'+escape(menus.find(x=>x[0]===ui.list)?.[1]||"Agenda")+'</h2>'+
+          '<small>'+tasks.length+' '+(tasks.length===1?"attività":"attività")+(ui.area?" · "+escape(ui.area):"")+'</small></div>'+
+        '<div class="av2-header-actions">'+
+          '<div class="av2-tabs" role="group" aria-label="Vista principale">'+
+            [["list","Lista"],["calendar","Calendario"]].map(([key,label])=>
+            '<button type="button" data-view="'+key+'" aria-pressed="'+(ui.view===key?'true':'false')+'">'+label+'</button>').join("")+
+          '</div>'+
+          '<details class="av2-dropdown av2-more-views"><summary aria-label="Altre viste">'+
+            (otherViews.some(([key])=>key===ui.view)?escape(currentView):"Altre viste")+' <span aria-hidden="true">▾</span></summary>'+
+            '<div class="av2-dropdown-body">'+otherViews.map(([key,label])=>
+              '<button type="button" data-view="'+key+'" '+(ui.view===key?'aria-current="true"':'')+'>'+label+'</button>').join("")+
+            '</div></details>'+
+          '<details class="av2-dropdown av2-plan-menu"><summary>Pianifica <span aria-hidden="true">▾</span></summary>'+
+            '<div class="av2-dropdown-body">'+
+              '<button type="button" data-open-day-plan="1">Crea sessioni per il giorno</button>'+
+              '<button type="button" data-fill-day="1">Riempi sessioni esistenti</button>'+
+            '</div></details>'+
+        '</div></div>'+
+        '<div class="av2-tools">'+
+          '<label class="av2-search-wrap"><span class="av2-search-icon" aria-hidden="true">⌕</span>'+
+            '<input type="search" data-search="1" placeholder="Cerca nelle attività" value="'+escape(ui.search)+'" aria-label="Cerca nelle attività"></label>'+
+          (ui.view==="list"||ui.view==="kanban"||ui.view==="matrix"?
+            '<details class="av2-dropdown av2-filter-menu"><summary>Ordina e filtra <span aria-hidden="true">▾</span></summary>'+
+              '<div class="av2-dropdown-body av2-filter-body">'+
+              (ui.view==="list"?'<label>Raggruppa <select data-control="group">'+
+                [["date","Data"],["area","Area"],["priority","Priorità"],["status","Stato"]].map(([v,l])=>
+                '<option value="'+v+'" '+(ui.group===v?"selected":"")+'>'+l+'</option>').join("")+
+              '</select></label>':"")+
+              '<label>Ordina <select data-control="sort">'+
+                [["date","Data"],["priority","Priorità"],["title","Titolo"],["area","Area"]].map(([v,l])=>
+                '<option value="'+v+'" '+(ui.sort===v?"selected":"")+'>'+l+'</option>').join("")+
+              '</select></label></div></details>':"")+
+        '</div>'+
+        dateHeader()+
+        (ui.view==="calendar"?'<div class="av2-layers"><label><input type="checkbox" data-layer="task" '+(ui.taskLayer?"checked":"")+'> Scadenze task</label><label><input type="checkbox" data-layer="session" '+(ui.sessionLayer?"checked":"")+'> Sessioni</label></div>':"")+
+        '<div class="av2-content">'+(ui.view==="list"?renderList(tasks,state):ui.view==="kanban"?renderKanban(tasks):ui.view==="calendar"?renderCalendar(state):ui.view==="timeline"?renderTimeline(state):renderMatrix(tasks))+'</div>'+
+      '</div></div>';
     savePref();
   }
   function patch(id,fields){
@@ -188,6 +223,7 @@ export function createAgendaV2({getState,saveMutation,setTaskStatus,openTask,ope
     if(b.dataset.fillDay){window.dispatchEvent(new CustomEvent("tempo:fill-day",{detail:{date:ui.view==="calendar"?ui.anchor:today()}}));}
     else if(b.dataset.openDayPlan){window.dispatchEvent(new CustomEvent("tempo:open-day-planner",{detail:{date:ui.view==="calendar"?ui.anchor:today()}}));}
     else if(b.dataset.smart){ui.list=b.dataset.smart;if(ui.view==="calendar"||ui.view==="timeline")ui.view="list";render();}
+    else if(b.hasAttribute("data-area-filter")){ui.area=b.dataset.areaFilter;render();}
     else if(b.dataset.view){ui.view=b.dataset.view;if(ui.view==="calendar"||ui.view==="timeline")ui.list="all";render();}
     else if(b.dataset.task){window.dispatchEvent(new CustomEvent("tempo:show-task",{detail:{taskId:b.dataset.task}}));}
     else if(b.dataset.complete){const t=getState().tasks.find(t=>t.id===b.dataset.complete);if(t)setTaskStatus(t.id,t.status==="done"?"todo":"done");}
@@ -199,6 +235,14 @@ export function createAgendaV2({getState,saveMutation,setTaskStatus,openTask,ope
       else ui.anchor=day(ui.anchor,(ui.calendar==="week"?7:1)*delta);
       render();}
     else if(b.dataset.currentDate){ui.anchor=today();render();}
+  });
+  root.addEventListener("input",event=>{
+    const target=event.target;
+    if(!target.matches("[data-search]"))return;
+    const cursor=target.selectionStart;
+    ui.search=target.value;render();
+    const input=root.querySelector("[data-search]");
+    if(input){input.focus({preventScroll:true});input.setSelectionRange(cursor,cursor);}
   });
   root.addEventListener("change",event=>{
     const t=event.target;
