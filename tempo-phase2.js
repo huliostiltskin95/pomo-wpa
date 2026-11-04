@@ -20,9 +20,9 @@ const formatDate = (iso, options = {weekday:"long",day:"numeric",month:"long"}) 
 const hhmm = total => String(Math.floor(total / 60) % 24).padStart(2,"0") + ":" +
   String(total % 60).padStart(2,"0");
 const hours = minutes => (minutes / 60).toLocaleString("it-IT", {maximumFractionDigits:2}) + " h";
-function readState() {
+function readState(raw = null) {
   try {
-    const value = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+    const value = JSON.parse(raw ?? localStorage.getItem(STORAGE_KEY) ?? "{}");
     return {tasks:Array.isArray(value.tasks)?value.tasks:[],
       sessions:Array.isArray(value.sessions)?value.sessions:[]};
   } catch { return {tasks:[], sessions:[]}; }
@@ -270,8 +270,9 @@ function mount() {
     planner.innerHTML =
       '<div class="tempo-planner-header"><div><p class="eyebrow">PROGRAMMA DEL GIORNO</p>' +
       '<h3>'+escape(formatDate(iso))+'</h3></div>' +
-      '<div class="tempo-planner-total"><strong>'+hours(total)+'</strong>'+
-      '<span>lorde · '+slices.length+' '+(slices.length===1?'sessione':'blocchi')+'</span></div></div>' +
+      '<div class="tempo-planner-header-actions"><div class="tempo-planner-total"><strong>'+hours(total)+'</strong>'+
+      '<span>lorde · '+slices.length+' '+(slices.length===1?'sessione':'blocchi')+'</span></div>'+
+      '<button type="button" class="button button-secondary tempo-planner-new" data-planner-new="1">＋ Nuova sessione</button></div></div>' +
       '<p class="tempo-planner-hint">Seleziona un blocco per modificarlo; tocca uno spazio libero per proporre una nuova sessione.</p>' +
       '<div class="tempo-planner-viewport"><div class="tempo-planner-ruler" style="height:'+height+'px">'+marks+'</div>' +
       '<div class="tempo-planner-lane" style="height:'+height+'px" role="group" aria-label="Fasce orarie del giorno">'+
@@ -283,10 +284,22 @@ function mount() {
     shownPlannerDay = iso;
     sessionDetails.hidden = !state.sessions.some(session => session.date === iso);
   }
+  // Only build the currently visible panel, and only if data, day or displayed minute changed.
+  // Saves repeated DOM construction on older phones while preserving active timer updates in app.js.
+  let lastRenderKey = "";
   function render() {
-    const state=readState();
-    renderToday(state);
-    renderPlanner(state);
+    const view = document.body.dataset.tempoActiveView ||
+      (location.hash === "#sessioni" ? "sessioni" : "oggi");
+    if (view !== "oggi" && view !== "sessioni") return;
+    const raw = localStorage.getItem(STORAGE_KEY) || "{}";
+    const day = isIsoDay(dateField.value) ? dateField.value : today();
+    const minute = Math.floor(Date.now() / 60000);
+    const key = view + "|" + day + "|" + minute + "|" + raw;
+    if (key === lastRenderKey) return;
+    lastRenderKey = key;
+    const state = readState(raw);
+    if (view === "oggi") renderToday(state);
+    else renderPlanner(state);
   }
   week.addEventListener("click",event=>{
     const b=event.target.closest("button[data-day]");
@@ -294,7 +307,25 @@ function mount() {
     dateField.value=b.dataset.day;
     dateField.dispatchEvent(new Event("change",{bubbles:true}));
   });
+  week.addEventListener("keydown",event=>{
+    const button = event.target.closest("button[data-day]");
+    if(!button)return;
+    const offsets = {ArrowLeft:-1,ArrowRight:1,Home:-((dayDate(button.dataset.day).getDay()+6)%7)};
+    let nextDay;
+    if(event.key==="End")nextDay=addDays(button.dataset.day,6-(dayDate(button.dataset.day).getDay()+6)%7);
+    else if(Object.hasOwn(offsets,event.key))nextDay=addDays(button.dataset.day,offsets[event.key]);
+    else return;
+    event.preventDefault();
+    dateField.value=nextDay;
+    dateField.dispatchEvent(new Event("change",{bubbles:true}));
+    week.querySelector('button[data-day="'+nextDay+'"]')?.focus({preventScroll:true});
+  });
   planner.addEventListener("click",event=>{
+    const createButton = event.target.closest("[data-planner-new]");
+    if(createButton){
+      document.getElementById("new-session-button")?.click();
+      return;
+    }
     const button=event.target.closest("[data-session-id]");
     if(button){
       window.dispatchEvent(new CustomEvent("tempo:edit-session",
