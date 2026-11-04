@@ -28,10 +28,12 @@ export function allocatedGrossMinutes(session) {
 export const withSessionTasks = (s,ids) => {
   const {taskId,...rest}=s;
   const taskIds=[...new Set(ids)];
-  if(!s.taskAllocations)return {...rest,taskIds};
+  if(!s.taskAllocations){const {pomodoroTaskIds,...clean}=rest;return {...clean,taskIds};}
   const taskAllocations={};
   for(const id of taskIds)if(Number(s.taskAllocations[id])>0)taskAllocations[id]=Number(s.taskAllocations[id]);
-  return {...rest,taskIds,taskAllocations};
+  const pomodoroTaskIds=Array.isArray(s.pomodoroTaskIds)
+    ? s.pomodoroTaskIds.map(id=>taskIds.includes(id)?id:null) : undefined;
+  return {...rest,taskIds,taskAllocations,...(pomodoroTaskIds?{pomodoroTaskIds}:{})};
 };
 export const sessionArea = (s,tasks) => s.area || tasks.find(t=>sessionHasTask(s,t.id))?.area || (TASK_AREAS.includes(s.title)?s.title:"Personale");
 import { sessionBounds, sessionDurationMinutes, timeToMinutes, pauseMinutes } from "./tempo-core.js";
