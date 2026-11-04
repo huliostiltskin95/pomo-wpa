@@ -84,6 +84,10 @@ function mount() {
     '<div class="tempo-today-task-list" id="tempo-today-tasks"></div>' +
     '<div class="tempo-today-attention" id="tempo-today-attention"></div>';
   grid.append(activities);
+  if (document.body.dataset.tempoActiveView && document.body.dataset.tempoActiveView !== "oggi") {
+    heading.hidden = true;
+    grid.hidden = true;
+  }
   const upcoming = main.querySelector(".tempo-next-card");
   if (upcoming) upcoming.classList.add("tempo-today-next");
 
