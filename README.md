@@ -54,7 +54,7 @@ Il file `.ics` contiene anche i blocchi di attività programmati come normali se
 
 ## Aggiornamento dopo una modifica
 
-Il service worker usa una cache versionata (attualmente `tempo-pomodoro-v25`). Ad ogni rilascio occorre incrementare il numero della cache in `sw.js` per rinnovare anche i file CSS e JavaScript.
+Il service worker usa una cache versionata (attualmente `tempo-pomodoro-v36`). Ad ogni rilascio occorre incrementare il numero della cache in `sw.js` per rinnovare anche i file CSS e JavaScript.
 
 ## Limiti
 
@@ -65,6 +65,12 @@ Il service worker usa una cache versionata (attualmente `tempo-pomodoro-v25`). A
 - Quando contrassegni manualmente una task come completata, puoi scegliere se conservare o annullare i blocchi non ancora terminati. Eliminare una task rimuove i blocchi futuri e scollega quelli passati.
 
 ## Architettura condivisa
+
+### Assegnazione dei Pomodori alle task
+
+Nella pagina Sessioni, **＋ Task** e **Riempi le sessioni del giorno** propongono una distribuzione delle task dell'area. Le task selezionate condividono equamente i Pomodori disponibili; una stima residua breve limita i Pomodori assegnati a quella task, lasciando gli altri alle attività più lunghe. Le stime sono lorde, comprese le pause.
+
+L'unità minima è **un intero periodo di concentrazione** configurato per la sessione (con la pausa prevista, se presente), non un intervallo arbitrario di 15 minuti. L'eventuale periodo di concentrazione finale troppo breve rimane non assegnato. L'anteprima consente di personalizzare singolarmente ogni Pomodoro prima di confermare. Le assegnazioni non completano automaticamente le task e non modificano il timer né l'orario della sessione.
 
 La gestione delle attività PWA è in `agenda.js` e `core/tempo-tasks.js`; **non è integrata nel plugin Obsidian**. La logica indipendente dalla piattaforma è in `core/tempo-core.js`: validazione e normalizzazione delle sessioni, calcolo delle pause, individuazione delle sessioni attive/prossime e calcolo della fase Pomodoro. La PWA importa direttamente questo modulo ES; il service worker include il modulo nella cache offline.
 

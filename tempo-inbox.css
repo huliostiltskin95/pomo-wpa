@@ -40,3 +40,23 @@
 .tempo-inbox-capture-preview{margin:0;color:var(--muted);font-size:12px;line-height:1.5;overflow-wrap:anywhere}
 .tempo-inbox-capture>.form-error{margin:0}
 @media(max-width:600px){.tempo-inbox-capture{grid-template-columns:1fr}.tempo-inbox-capture textarea,.tempo-inbox-capture>button{grid-column:1;max-width:100%}}
+
+/* Pomodoro-aware session filling */
+.tempo-fill-task-choices{margin:16px 0;padding:12px;border:1px solid var(--line);border-radius:12px}
+.tempo-fill-task-choices h3{margin:0 0 10px;font-size:14px}
+.tempo-fill-task-choice{display:flex;align-items:center;gap:10px;padding:7px 0;font-size:13px}
+.tempo-fill-task-choice+.tempo-fill-task-choice{border-top:1px solid var(--line)}
+.tempo-fill-task-choice input{flex:none}
+.tempo-fill-task-choice span{flex:1;min-width:0;overflow-wrap:anywhere}
+.tempo-fill-task-choice small{white-space:nowrap;color:var(--muted)}
+.tempo-fill-item ul{margin:4px 0}
+.tempo-fill-warning{color:var(--amber)!important}
+.tempo-fill-custom{border-top:1px solid var(--line);margin-top:5px;padding-top:10px}
+.tempo-fill-custom summary{cursor:pointer;font-size:13px;font-weight:600}
+.tempo-fill-custom ol{list-style:none;padding:0;margin:10px 0 0;display:grid;gap:10px}
+.tempo-fill-slot{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.tempo-fill-slot>div{display:grid;gap:3px;min-width:0}
+.tempo-fill-slot strong{font-size:12px}
+.tempo-fill-slot small{font-size:11px}
+.tempo-fill-slot select{width:min(235px,52%);min-height:38px;border:1px solid var(--line);border-radius:9px;padding:5px 8px;color:var(--text);background:var(--surface)}
+@media(max-width:440px){.tempo-fill-task-choice{flex-wrap:wrap}.tempo-fill-task-choice small{margin-left:25px}.tempo-fill-slot{align-items:stretch;flex-direction:column}.tempo-fill-slot select{width:100%}}

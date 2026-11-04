@@ -11,7 +11,8 @@ test("task fields and hierarchical tags are normalized and validated", () => {
   assert.deepEqual(parseTaskTags(" Studio / Greco / Verbi, Studio/Greco/Verbi, Personale "), ["Studio/Greco/Verbi", "Personale"]);
   assert.throws(() => parseTaskTags("Studio//Greco"));
   assert.equal(normalizeTask(task).title, task.title);
-  assert.equal(normalizeTask({ ...task, area: "Errata" }), null);
+  assert.equal(normalizeTask({ ...task, area: "Errata" }).area, "");
+  assert.equal(normalizeTask({ ...task, area: "Errata" }).inbox, true);
   assert.deepEqual(taskTagAncestors(task.tags), ["Storia", "Storia/Grecia", "Storia/Grecia/Atene"]);
   assert.equal(taskHasTag(task, "Storia/Grecia"), true);
   assert.equal(taskHasTag(task, "Storia/Roma"), false);

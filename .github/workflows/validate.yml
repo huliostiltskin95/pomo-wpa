@@ -22,10 +22,13 @@ jobs:
           node --check core/tempo-appearance.js
           node --check agenda.js
           node --check agenda-v2.js
+          node --check tempo-fill-ui.js
+          node --check core/tempo-fill.js
           node --check core/tempo-tasks.js
           node --check core/tempo-core.js
           node --check core/tempo-audio.js
           node --experimental-default-type=module --test tests/*.test.js
+          npm test
       - name: Install Obsidian plugin build dependencies
         working-directory: obsidian
         run: npm install
