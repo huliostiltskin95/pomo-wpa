@@ -5,6 +5,7 @@ on:
       - "agenda-v2.js"
       - "tempo-phase2.js"
       - "tempo-phase2.css"
+      - "tempo-inbox.js"
       - "tests/phase2.e2e.mjs"
       - "agenda-v2.css"
       - "agenda.js"
