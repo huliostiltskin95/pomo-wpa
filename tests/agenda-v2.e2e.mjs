@@ -9,10 +9,14 @@ page.on("pageerror",error=>errors.push(error.message));
 try {
   await page.goto("http://127.0.0.1:8123/",{waitUntil:"networkidle"});
   await page.locator("#tempo-agenda-v2").waitFor({state:"attached"});
-  await page.locator("[data-view-link=agenda]").click();
+  // The quick form is now a global modal and must work outside Agenda.
+  await page.locator("#tempo-create-primary").click();
+  await page.locator("#tempo-capture-dialog[open]").waitFor({state:"visible"});
   await page.locator("#quick-task-input").fill("Collaudo multivista !1 ^Lavoro @30m *oggi | **Descrizione** Markdown");
   await page.locator("#quick-task-form button[type=submit]").click();
-
+  await page.locator("#tempo-capture-dialog").waitFor({state:"hidden"});
+  await page.locator("[data-view-link=agenda]").click();
+  assert.equal(await page.locator("#tempo-agenda-v2 .av2-nav-group").count(),2);
   const task=page.locator(".av2-task-title",{hasText:"Collaudo multivista"});
   await task.waitFor({state:"visible"});
   await task.click();
@@ -28,6 +32,8 @@ try {
     ["calendar",".av2-calendar-day"],["kanban",".av2-board"],
     ["timeline",".av2-timeline"],["matrix",".av2-matrix"],["list",".av2-group"]
   ]){
+    if (!["calendar","list"].includes(view))
+      await page.locator(".av2-more-views summary").click();
     await page.locator('#tempo-agenda-v2 [data-view="'+view+'"]').click();
     await page.locator("#tempo-agenda-v2 "+selector).first().waitFor({state:"visible"});
   }
@@ -44,6 +50,7 @@ try {
   assert.equal(t.status,"todo","No view should auto-complete a task");
   assert.equal(t.description,"**Descrizione** Markdown");
   // Exported JSON must include the new fields and the original Markdown.
+  await page.locator(".tempo-nav-more-toggle").click();
   await page.locator("[data-view-link=impostazioni]").click();
   const downloadPromise=page.waitForEvent("download");
   await page.locator("#export-button").click();
@@ -57,6 +64,7 @@ try {
   // Confirm the same task is accessible on a narrow mobile viewport.
   await page.setViewportSize({width:390,height:844});
   await page.locator("[data-view-link=agenda]").click();
+  assert.equal(await page.locator("#tempo-navigation > .tempo-nav-link").count(),4);
   await page.locator('#tempo-agenda-v2 [data-smart="all"]').click();
   await page.locator('#tempo-agenda-v2 [data-view="list"]').click();
   await page.locator(".av2-task-title",{hasText:"Collaudo multivista"}).click();
@@ -70,7 +78,7 @@ try {
   await page.locator("#tempo-agenda-v2").waitFor({state:"attached",timeout:12000});
   await page.context().setOffline(false);
   assert.deepEqual(errors,[],"Unexpected uncaught browser errors");
-  console.log("PASS: all five views, details, subtasks, persistence, JSON backup, mobile and offline reload");
+  console.log("PASS: phase-one global capture, streamlined navigation, five views, details, subtasks, backup, mobile and offline");
 } finally {
   await browser.close();
 }
