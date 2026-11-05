@@ -16,6 +16,8 @@ jobs:
           node-version: 22
       - name: Check PWA JavaScript syntax
         run: |
+          node --check simple.js
+          node --check core/tempo-simple.js
           node --check app.js
           node --check tempo-ui.js
           node --check tempo-phase1.js

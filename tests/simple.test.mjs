@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {normalizeArchive,parseQuick,planSessions,measuredFocus} from '../core/tempo-simple.js';
+import {normalizeArchive,parseQuick,planSessions,measuredFocus,normalizeAreaColor,focusCycle} from '../core/tempo-simple.js';
 import {mergeSnapshots} from '../core/tempo-merge.js';
 const defaults={workMinutes:25,breakEnabled:true};
 const w=(date,start,end)=>({date,start,end});
@@ -72,4 +72,51 @@ test('explicit sessions cross midnight and retain disabled breaks',()=>{
  const {sessions:[s]}=planSessions(requests,[],[],{workMinutes:50,breakEnabled:false},now,id,'2026-11-06');
  assert.equal(s.end,'01:30');assert.equal(s.date,'2026-11-06');assert.equal(s.breakEnabled,false);assert.equal(s.workMinutes,50);
  assert.throws(()=>planSessions([{area:'Studio',minutes:1500,start:'09:00'}],[],[],defaults,now,id,'2026-11-06'),/24 ore/);
+});
+
+test('migration restores legacy appearance colors and supplies safe defaults',()=>{
+ const migrated=normalizeArchive({
+   sessions:[],
+   appearance:{areaColors:{Studio:'#123abc'}},
+   defaults:{simple:{areas:[{name:'Studio',description:'[Nota](obsidian://open?vault=V)'},{name:'Personale',description:''}],windows:[]}}
+ });
+ assert.equal(migrated.defaults.simple.areas[0].color,'#123ABC');
+ assert.equal(migrated.defaults.simple.areas[1].color,'#D6A323');
+ assert.equal(migrated.defaults.simple.areas[0].description,'[Nota](obsidian://open?vault=V)');
+ assert.equal(normalizeAreaColor('red','Altro'),'#54769B');
+ assert.equal(normalizeArchive(migrated).defaults.simple.areas[0].color,'#123ABC');
+});
+test('focus durations generate proportionate rounded automatic pauses',()=>{
+ assert.deepEqual(focusCycle(15),{focusMinutes:15,breakMinutes:3});
+ assert.deepEqual(focusCycle(40),{focusMinutes:40,breakMinutes:8});
+ assert.deepEqual(focusCycle(50),{focusMinutes:50,breakMinutes:10});
+ assert.deepEqual(focusCycle(90),{focusMinutes:90,breakMinutes:18});
+ assert.deepEqual(focusCycle(40,false),{focusMinutes:40,breakMinutes:0});
+ for(const minutes of [0,-1,241,10.5,NaN])assert.throws(()=>focusCycle(minutes));
+});
+test('quick entry keeps gross duration and supports per-row focus overrides',async()=>{
+ const requests=parseQuick('Studio @2h +09:00 ~40m\nLavoro @1,5h ~50m +14:00\nStudio @1h +17:30',[{name:'Studio'},{name:'Lavoro'}]);
+ assert.deepEqual(requests.map(r=>r.focusMinutes),[40,50,undefined]);
+ const {sessions,remainder}=planSessions(requests,[],[],{workMinutes:30,breakEnabled:true},now,id,'2026-11-06');
+ assert.equal(remainder,0);
+ assert.deepEqual(sessions.map(s=>[s.start,s.end,s.workMinutes]),[['09:00','11:00',40],['14:00','15:30',50],['17:30','18:30',30]]);
+ const {getPhase}=await import('../core/tempo-core.js');
+ assert.equal(getPhase(sessions[0],new Date('2026-11-06T09:39:59')).kind,'work');
+ assert.equal(getPhase(sessions[0],new Date('2026-11-06T09:40:00')).kind,'break');
+ assert.equal(getPhase(sessions[0],new Date('2026-11-06T09:48:00')).kind,'work');
+ assert.equal(getPhase(sessions[1],new Date('2026-11-06T14:50:00')).kind,'break');
+});
+test('automatic placement uses individual cycle and disable-breaks preference',()=>{
+ const req=parseQuick('Studio @1h ~15m',[{name:'Studio'}]);
+ const out=planSessions(req,[w('2026-11-06','09:00','10:00')],[],{workMinutes:25,breakEnabled:false},now,id);
+ assert.equal(out.sessions.length,1);
+ assert.equal(out.sessions[0].workMinutes,15);
+ assert.equal(out.sessions[0].breakEnabled,false);
+ assert.equal(out.sessions[0].end,'10:00');
+});
+test('invalid or duplicate focus modifiers do not create sessions',()=>{
+ const areas=[{name:'Studio'}];
+ for(const suffix of ['~0m','~241m','~12.5m','~40m ~50m','~40m +24:00','+08:00 +09:00'])
+   assert.throws(()=>parseQuick('Studio @1h '+suffix,areas));
+ assert.throws(()=>planSessions([{area:'Studio',minutes:60,focusMinutes:999}],[],[],defaults,now,id,'2026-11-06'));
 });

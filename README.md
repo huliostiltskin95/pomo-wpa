@@ -159,3 +159,23 @@ Il core condiviso è coperto da test Node.js per validazione di date e orari, ri
 ## Stato delle attività e avvisi
 
 La durata stimata non determina la conclusione: l'attività può essere completata prima, dopo, oppure richiedere ulteriori sessioni. Anche la fine delle sessioni non marca mai la task come Completata o In corso: **lo stato cambia solo se lo imposti tu**. L'Agenda distingue le attività senza sessioni da quelle da riprogrammare perché l'ultima sessione è già terminata; non manda notifiche ripetute per i vecchi impegni. Se il browser dispone già del permesso, può segnalare con notifica la conclusione dell'ultimo blocco senza alterare alcun dato. Le notifiche, come i timer, non funzionano a PWA completamente chiusa.
+
+
+## Timer semplice — Focus, colori e cicli personalizzati
+
+Nella PWA semplificata (pagina **Timer**):
+
+- **Schermo intero**: durante una sessione usa **Schermo intero** per mostrare timer, fase e comandi essenziali. **Esci da schermo intero** o `Esc` per tornare all'app. Il layout immersivo funziona anche dove l'API Fullscreen non è disponibile (ad esempio su alcuni browser iOS).
+- **Colori delle aree**: da **Impostazioni → Aree e risorse** scegli un'area e imposta il suo colore. Il colore accompagna il timer e l'elenco delle sessioni ed è conservato nei backup JSON e nella sincronizzazione Dropbox.
+- **Durata flessibile**: scegli i minuti di **focus per ciclo** (da 1 a 240, anche valori non standard). La pausa automatica è calcolata come circa un quinto del focus, arrotondata ai minuti (es. 40+8; 50+10; 90+18). L'opzione per disattivare le pause resta nelle impostazioni.
+- **Durata lorda distinta**: il numero `@` indica sempre quanto spazio occupa la sessione nel calendario, **pause comprese**; la durata di concentrazione di ogni ciclo è indipendente e non sposta gli orari programmati.
+
+Inserimento rapido (il suffisso `~40m` è facoltativo e può precedere o seguire `+HH:MM`):
+
+```text
+Lavoro @1,5h +08:30 ~40m
+Studio @1h +13:45
+Studio @2h +17:30 ~50m
+```
+
+Il campo **Focus predefinito** nella pagina Sessioni si applica alle righe senza `~`; le preferenze globali si applicano alle nuove sessioni, senza modificare quelle esistenti. Le pause sono interne alla durata lorda e vengono registrati soltanto i minuti effettivamente osservati in fase di concentrazione.

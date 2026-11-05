@@ -1,1 +1,48 @@
 :root{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#263831;background:#f7f8fa;font-size:16px;--accent:#276c53}*{box-sizing:border-box}body{margin:0}header{max-width:1100px;margin:auto;padding:24px;display:flex;justify-content:space-between;align-items:center}.brand{font:600 25px Georgia,serif;text-decoration:none;letter-spacing:2px;color:inherit}.brand small{display:block;font:12px system-ui;letter-spacing:1px;color:#697970;margin-top:5px}nav{display:flex;gap:8px;max-width:1052px;margin:auto;border-bottom:1px solid #dde5df;padding-bottom:12px}nav button{background:transparent;border-color:transparent}nav button[aria-current]{color:var(--accent);background:#e2eee7;font-weight:700}main{max-width:1000px;margin:32px auto;padding:0 24px 70px}h1{font-size:28px;letter-spacing:-.8px}h2{font-size:20px}h3{font-size:17px}p{line-height:1.6}.muted,.hint{color:#697970}.hint{font-size:13px}.eyebrow{font-size:11px;letter-spacing:2px;color:var(--accent)}button,.file{font:inherit;font-size:14px;cursor:pointer;padding:11px 16px;border:1px solid #d4ded7;background:white;color:inherit;border-radius:10px;min-height:44px}button:hover{background:#edf3ef}button.primary{background:var(--accent);color:white;border-color:var(--accent)}button:disabled{opacity:.5;cursor:default}input,select,textarea{font:inherit;background:white;color:inherit;border:1px solid #cbd7cf;border-radius:8px;padding:10px;width:100%;min-height:44px}textarea{resize:vertical}label{display:block;font-size:13px;margin:12px 0;flex:1}label input,label select,label textarea{display:block;margin-top:6px}input[type=checkbox]{width:18px;min-height:18px;margin:0}input[type=range]{max-width:130px}form button{margin-top:8px}.row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.row label{min-width:100px}.center{justify-content:center}.between{justify-content:space-between}.columns{display:grid;grid-template-columns:1fr 1fr;gap:20px}article,details{background:#fff;border:1px solid #e0e7e2;border-radius:16px;padding:22px;margin-bottom:20px}summary{cursor:pointer;font-weight:600;min-height:28px}.timer-card{text-align:center;background:#edf3ef;border-radius:24px;padding:36px 24px}.timer-card form{max-width:520px;margin:16px auto}.timer-card details{background:transparent;border:0;margin:12px 0 0;padding:12px}.timer-card h1{margin-bottom:8px}#clock{font-size:clamp(72px,14vw,128px);font-weight:300;letter-spacing:-6px;font-variant-numeric:tabular-nums}#timer-note{min-height:26px}#next{text-align:center;margin:24px 0}.item{padding:15px 0;border-bottom:1px solid #e0e7e2;display:flex;justify-content:space-between;align-items:center;gap:12px}.item small{display:block;color:#697970;margin-top:6px}.metric{font-size:36px;font-weight:500}.check{display:flex;gap:8px;align-items:center}.markdown{overflow-wrap:anywhere;line-height:1.6;margin:20px 0}.markdown a{color:var(--accent)}.markdown code{background:#edf3ef;padding:2px 5px}.markdown pre{overflow:auto}.markdown blockquote{border-left:3px solid #9eb5a7;padding-left:16px;margin-left:0}.file input{max-width:230px;font-size:12px}dialog{border:1px solid #d4ded7;border-radius:20px;padding:24px;width:min(620px,94vw);max-height:90vh;color:inherit}dialog::backdrop{background:#1a302a66}#toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#243e32;color:white;padding:15px 24px;border-radius:12px;max-width:90vw;width:max-content;z-index:20}#proposal{padding:16px;background:#edf3ef;border-radius:12px;margin-top:20px}progress{width:100%}[hidden]{display:none!important}:focus-visible{outline:3px solid #6e9e87;outline-offset:3px}@media(max-width:640px){.columns{grid-template-columns:1fr}header{padding:18px}nav{padding:0 18px 12px;justify-content:center}main{padding:0 16px 50px;margin-top:22px}.timer-card{padding:28px 15px}.item{flex-wrap:wrap}.brand{font-size:22px}article,details{padding:18px}#clock{letter-spacing:-3px}}
+
+
+/* Colored areas and an immersive focus surface, with an iOS-safe CSS fallback. */
+#timer{--area-color:#276c53}
+.timer-card{
+  background:#edf3ef;
+  background:color-mix(in srgb,var(--area-color) 12%,white);
+  border:1px solid color-mix(in srgb,var(--area-color) 26%,white);
+}
+#phase-progress{display:block;width:min(320px,85%);height:7px;margin:8px auto 14px;accent-color:var(--area-color)}
+#cycle-note{font-size:13px;margin:8px auto}
+.cycle-preview{flex-basis:100%;margin:0 auto 8px;max-width:520px;text-align:center}
+#area-color{width:112px;height:48px;padding:3px;cursor:pointer}
+.session-item{position:relative;padding-left:16px}
+.session-item::before{content:"";position:absolute;left:0;top:12px;bottom:12px;width:5px;border-radius:12px;background:var(--area-color,#276c53)}
+body.focus-immersive{overflow:hidden}
+body.focus-immersive #timer{
+  position:fixed;inset:0;z-index:50;overflow:auto;
+  padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px);
+  background:#edf3ef;
+  background:color-mix(in srgb,var(--area-color) 19%,#f7f8fa)
+}
+body.focus-immersive .timer-card{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  min-height:100%;width:100%;border:0;border-radius:0;
+  padding:80px 24px 70px;background:transparent
+}
+body.focus-immersive #timer h1{font-size:clamp(28px,4vw,52px)}
+body.focus-immersive #clock{font-size:clamp(86px,20vw,200px);line-height:1.2;letter-spacing:-.045em}
+body.focus-immersive #phase{font-size:13px;font-weight:700}
+body.focus-immersive #cycle-note{font-size:clamp(13px,1.6vw,19px)}
+body.focus-immersive #timer-note{font-size:clamp(14px,1.6vw,18px)}
+body.focus-immersive #next,body.focus-immersive #resources,body.focus-immersive #timer details,body.focus-immersive #instant,body.focus-immersive #focus-open{display:none!important}
+body.focus-immersive #focus-close{
+  display:block!important;position:fixed;top:calc(14px + env(safe-area-inset-top,0px));right:calc(14px + env(safe-area-inset-right,0px));z-index:55
+}
+body.focus-immersive #timer .row.center{justify-content:center}
+body.focus-immersive #phase-progress{width:min(500px,75vw)}
+#toast{z-index:90}
+@media(max-width:640px){
+  body.focus-immersive #clock{font-size:clamp(76px,21vw,136px)}
+  body.focus-immersive .timer-card{padding:72px 14px 48px}
+  body.focus-immersive #focus-close{font-size:12px;padding:8px 12px}
+}
+@media(prefers-reduced-motion:no-preference){
+  #phase-progress{transition:all .3s ease}
+}
