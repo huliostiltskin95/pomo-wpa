@@ -32,7 +32,7 @@ try {
  assert.equal(await page.getByRole('checkbox',{name:'Ripasso'}).isChecked(),true);
  await page.locator('#instant-minutes').fill('45');
  const previewEnd=await page.locator('#instant-end-time').innerText();
- assert.match(previewEnd,/\\d{2}:\\d{2}/);
+ assert.match(previewEnd,/\d{2}:\d{2}/);
  assert.match(await page.locator('#instant-end-note').innerText(),/45 min lordi/);
  await page.locator('#instant-focus').fill('50');
  assert.match(await page.locator('#instant-pause-preview').innerText(),/10 min pausa/);
