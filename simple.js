@@ -1,5 +1,5 @@
 import {localDateString,formatDate,formatTime,escapeHtml as esc,sessionBounds,getActiveSession,getNextSession,getPhase,mmss,hasSessionOverlaps} from './core/tempo-core.js';
-import {normalizeArchive,planSessions,parseQuick,measuredFocus,focusCycle,normalizeAreaColor} from './core/tempo-simple.js';
+import {normalizeArchive,planSessions,parseQuick,measuredFocus,focusCycle,normalizeAreaColor,manualSessionEnd} from './core/tempo-simple.js';
 import {TempoAmbientAudio} from './core/tempo-audio.js';
 import {createDropboxSync} from './core/tempo-dropbox.js';
 const $=id=>document.getElementById(id),KEY='tempo-pomodoro-v2',COPY='tempo-before-simple-v1';
@@ -19,6 +19,25 @@ function pauseLabel(minutes,enabled) {
 function updatePausePreviews() {
   $('instant-pause-preview').textContent=pauseLabel($('instant-focus').value,state.defaults.breakEnabled);
   $('quick-pause-preview').textContent=pauseLabel($('quick-focus').value,state.defaults.breakEnabled);
+}
+function deadlineLabel(end, now = new Date()) {
+  const date = localDateString(end),today = localDateString(now);
+  if(date === today)return formatTime(end);
+  const tomorrow = new Date(now);
+  tomorrow.setDate(tomorrow.getDate()+1);
+  const suffix = date === localDateString(tomorrow) ? 'domani' : formatDate(date);
+  return formatTime(end)+' · '+suffix;
+}
+function updateManualEndPreview(now = new Date()) {
+  const minutes=Number($('instant-minutes').value);
+  try {
+    const end=manualSessionEnd(now,minutes);
+    $('instant-end-time').textContent=deadlineLabel(end,now);
+    $('instant-end-note').textContent=minutes+' min lordi, pause comprese · inizio alle '+formatTime(now);
+  } catch {
+    $('instant-end-time').textContent='Durata non valida';
+    $('instant-end-note').textContent='Indica una durata lorda da 1 a 1439 minuti.';
+  }
 }
 function loadCycleDefaults() {
   $('instant-focus').value=$('quick-focus').value=state.defaults.workMinutes;
@@ -69,6 +88,14 @@ function renderTimer(){
   const s=active(),phase=s?getPhase(s):null;
   if(!s&&document.body.classList.contains('focus-immersive'))exitImmersive();
   $('instant').hidden=Boolean(s);$('pause').hidden=!s;$('finish').hidden=!s;
+  $('session-deadline').hidden=!s;
+  if(s){
+    const end=sessionBounds(s).end;
+    $('deadline-time').textContent=deadlineLabel(end);
+    $('deadline-detail').textContent=s.paused
+      ? 'Orario invariato durante la sospensione · pause comprese'
+      : 'Tempo lordo residuo '+mmss(Math.ceil(Math.max(0,end-Date.now())/1000))+' · pause comprese';
+  }else updateManualEndPreview();
   $('focus-open').hidden=!s||document.body.classList.contains('focus-immersive');
   $('focus-close').hidden=!document.body.classList.contains('focus-immersive');
   $('timer').style.setProperty('--area-color',colorFor(s?.area||s?.title||$('instant-area').value));
@@ -94,7 +121,7 @@ function renderTimer(){
 function record(){const now=Date.now();for(const s of state.sessions){const seconds=measuredFocus(s,lastTick,now);if(seconds){s.actualSeconds=(s.actualSeconds||0)+seconds;measuredDirty=true;}}lastTick=now;}
 function flush(){record();if(!measuredDirty)return;try{localStorage.setItem(KEY,JSON.stringify(state));measuredDirty=false;cloud?.changed();}catch(e){tell('Impossibile salvare il tempo registrato: '+e.message);}}
 setInterval(()=>{record();renderTimer();if(Date.now()-lastSave>15000){flush();lastSave=Date.now();render();}},1000);
-$('instant').onsubmit=e=>{e.preventDefault();const start=new Date();const end=new Date(+start+Number($('instant-minutes').value)*60000);const s={id:uid(),timerStartedAt:start.toISOString(),timerEndsAt:end.toISOString(),title:$('instant-area').value,area:$('instant-area').value,date:localDateString(start),start:formatTime(start),end:formatTime(end),workMinutes:focusCycle(Number($('instant-focus').value),state.defaults.breakEnabled).focusMinutes,breakEnabled:state.defaults.breakEnabled,actualSeconds:0};if(hasSessionOverlaps([...available(),s]))return tell('La durata si sovrappone a una sessione programmata. Riducila o sposta la sessione.');commit(()=>state.sessions.push(s));lastTick=Date.now();};
+$('instant').onsubmit=e=>{e.preventDefault();const start=new Date();const end=manualSessionEnd(start,Number($('instant-minutes').value));const s={id:uid(),timerStartedAt:start.toISOString(),timerEndsAt:end.toISOString(),title:$('instant-area').value,area:$('instant-area').value,date:localDateString(start),start:formatTime(start),end:formatTime(end),workMinutes:focusCycle(Number($('instant-focus').value),state.defaults.breakEnabled).focusMinutes,breakEnabled:state.defaults.breakEnabled,actualSeconds:0};if(hasSessionOverlaps([...available(),s]))return tell('La durata si sovrappone a una sessione programmata. Riducila o sposta la sessione.');commit(()=>state.sessions.push(s));lastTick=Date.now();};
 $('pause').onclick=()=>{record();const s=active();if(s)commit(()=>s.paused=!s.paused);};
 $('finish').onclick=()=>{record();const s=active();if(s)commit(()=>{s.finished=true;s.paused=false;});};
 $('window-form').onsubmit=e=>{e.preventDefault();const w={id:uid(),date:$('window-date').value,start:$('window-start').value,end:$('window-end').value};if(w.start===w.end)return tell('Indica due orari diversi.');if(config().windows.some(x=>{const a=sessionBounds(x),b=sessionBounds(w);return a.start<b.end&&a.end>b.start;}))return tell('Questa fascia si sovrappone a una disponibilità già inserita.');commit(()=>config().windows.push(w));};
@@ -136,6 +163,7 @@ for(const b of document.querySelectorAll('[data-page]'))b.onclick=()=>{for(const
 $('session-date').value=$('window-date').value=$('quick-date').value=localDateString();
 loadCycleDefaults();
 $('instant-focus').addEventListener('input',()=>{updatePausePreviews();if(!active())renderTimer();});
+$('instant-minutes').addEventListener('input',()=>{if(!active())updateManualEndPreview();});
 $('quick-focus').addEventListener('input',()=>{updatePausePreviews();proposal=null;$('proposal').hidden=true;});
 $('instant-area').addEventListener('change',renderTimer);
 $('focus-open').onclick=enterImmersive;$('focus-close').onclick=exitImmersive;

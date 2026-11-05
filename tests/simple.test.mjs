@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {normalizeArchive,parseQuick,planSessions,measuredFocus,normalizeAreaColor,focusCycle} from '../core/tempo-simple.js';
+import {normalizeArchive,parseQuick,planSessions,measuredFocus,normalizeAreaColor,focusCycle,manualSessionEnd} from '../core/tempo-simple.js';
 import {mergeSnapshots} from '../core/tempo-merge.js';
 const defaults={workMinutes:25,breakEnabled:true};
 const w=(date,start,end)=>({date,start,end});
@@ -119,4 +119,13 @@ test('invalid or duplicate focus modifiers do not create sessions',()=>{
  for(const suffix of ['~0m','~241m','~12.5m','~40m ~50m','~40m +24:00','+08:00 +09:00'])
    assert.throws(()=>parseQuick('Studio @1h '+suffix,areas));
  assert.throws(()=>planSessions([{area:'Studio',minutes:60,focusMinutes:999}],[],[],defaults,now,id,'2026-11-06'));
+});
+
+test('manual timer end uses gross minutes and exact start seconds',()=>{
+ const start=new Date('2026-11-05T23:45:33+01:00');
+ assert.equal(manualSessionEnd(start,30).toISOString(),'2026-11-05T23:15:33.000Z');
+ assert.equal(manualSessionEnd(start,90)-start,90*60000);
+ assert.equal(+start,+new Date('2026-11-05T23:45:33+01:00'));
+ for(const value of [0,-1,1440,1.5,NaN,undefined])assert.throws(()=>manualSessionEnd(start,value));
+ assert.throws(()=>manualSessionEnd('not-a-date',30));
 });
