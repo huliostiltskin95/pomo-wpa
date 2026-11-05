@@ -33,6 +33,8 @@ export function normalizeArchive(data) {
 export function planSessions(requests, windows, existing, defaults, now=new Date(), id=()=>crypto.randomUUID(), selectedDate=localDateString(now)) {
   const result=[];let remainder=0;
   const cycleFor=request=>focusCycle(request.focusMinutes ?? defaults.workMinutes,defaults.breakEnabled).focusMinutes;
+  // Reject invalid focus overrides even when no window can accommodate the request.
+  for(const request of requests)cycleFor(request);
   // Reserve explicit times first so automatic rows cannot occupy them.
   for(const request of requests.filter(r=>r.start)){
     if(request.minutes>1440)throw Error('Una sessione con orario fisso può durare al massimo 24 ore.');
