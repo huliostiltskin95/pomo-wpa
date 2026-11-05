@@ -13,6 +13,17 @@ export function focusCycle(focusMinutes, breakEnabled = true) {
     throw Error('La concentrazione per ciclo deve durare da 1 a 240 minuti.');
   return {focusMinutes, breakMinutes: breakEnabled ? pauseMinutes(focusMinutes) : 0};
 }
+/**
+ * The manual timer reserves gross minutes from the exact instant the user starts it.
+ * Automatic pauses fit inside this deadline, they never extend it.
+ */
+export function manualSessionEnd(start, grossMinutes) {
+  const startedAt = start instanceof Date ? start : new Date(start);
+  const minutes = Number(grossMinutes);
+  if (!Number.isFinite(+startedAt) || !Number.isInteger(minutes) || minutes < 1 || minutes > 1439)
+    throw Error('La durata lorda deve essere compresa tra 1 e 1439 minuti.');
+  return new Date(startedAt.getTime() + minutes * 60000);
+}
 export function normalizeArchive(data) {
   if (!data || !Array.isArray(data.sessions) || data.sessions.some(s=>!validSession(s)) || new Set(data.sessions.map(s=>s.id)).size!==data.sessions.length) throw Error('Archivio sessioni non valido.');
   if(data.sessions.some(s=>s.actualSeconds!==undefined&&(!Number.isFinite(s.actualSeconds)||s.actualSeconds<0)))throw Error('Tempo registrato non valido.');
