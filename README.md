@@ -185,3 +185,9 @@ Il campo **Focus predefinito** nella pagina Sessioni si applica alle righe senza
 Nel timer immediato e nell’inserimento rapido scegli **Pausa → Personalizzata** e indica i minuti. La pausa finale è sottratta dal tempo lordo: **45 minuti con 5 di pausa = 40 di concentrazione + 5 di pausa**, senza modificare la fine programmata. Con 0 minuti non ci sono pause; la modalità automatica mantiene i cicli esistenti.
 
 La sintassi rapida accetta `Studio @45m +09:00 !5m`; `!5m` prevale sulla scelta del modulo per quella riga. Se la richiesta è divisa fra più fasce, i 5 minuti restano un unico totale, distribuito a partire dalla fine dell’ultimo frammento. Il pulsante **Pausa** nella lista consente di modificare le sessioni prima dell’inizio: inserisci minuti oppure `auto`. Le preferenze della sessione sono conservate nel backup e nella sincronizzazione Dropbox.
+
+### Pianificazione veloce a tabella
+
+La pianificazione ora usa una riga per sessione: area, minuti lordi, collocazione nelle fasce o orario fisso, pausa automatica/personalizzata/nessuna e riepilogo immediato. In modalità automatica, **Ciclo** consente di modificare il focus della singola riga rispetto al valore comune. Le sovrapposizioni, le pause non valide e la disponibilità insufficiente sono segnalate durante la compilazione. Ogni modifica invalida la proposta precedente: scegli **Prepara programma**, controlla gli orari e poi **Conferma programma**.
+
+**Incolla più sessioni** conserva la sintassi rapida e aggiunge le righe alla tabella senza salvarle nel calendario. Un errore nel testo non importa righe parziali. Sugli schermi stretti la tabella diventa una serie di schede con gli stessi campi. Le sessioni già salvate restano invariate.

@@ -1,9 +1,11 @@
+import {createPlannerTable} from './planner-table.js';
 import {localDateString,formatDate,formatTime,escapeHtml as esc,sessionBounds,getActiveSession,getNextSession,getPhase,mmss,hasSessionOverlaps} from './core/tempo-core.js';
 import {normalizeArchive,planSessions,parseQuick,measuredFocus,customPause,sessionPauseLabel,focusCycle,normalizeAreaColor,manualSessionEnd} from './core/tempo-simple.js';
 import {TempoAmbientAudio} from './core/tempo-audio.js';
 import {createDropboxSync} from './core/tempo-dropbox.js';
 const $=id=>document.getElementById(id),KEY='tempo-pomodoro-v2',COPY='tempo-before-simple-v1';
 const uid=()=>crypto.randomUUID?.()||Date.now().toString(36)+Math.random().toString(36).slice(2);
+let planner;
 let state,cloud,proposal=null,lastTick=Date.now(),lastSave=Date.now(),activeId=null,audioArmed=false,measuredDirty=false,toastTimer;
 function tell(message){$('toast').textContent=message;$('toast').hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').hidden=true,6000);}
 try{const raw=localStorage.getItem(KEY)||localStorage.getItem('tempo-pomodoro-v1');state=normalizeArchive(raw?JSON.parse(raw):{sessions:[]});if(raw&&!localStorage.getItem(COPY))localStorage.setItem(COPY,raw);localStorage.setItem(KEY,JSON.stringify(state));}catch(e){document.querySelector('main').textContent='Impossibile aprire o salvare l’archivio. I dati originali non sono stati sostituiti. '+e.message;throw e;}
@@ -21,7 +23,7 @@ function pauseSettings(prefix,gross) {
     ? {customBreakMinutes:customPause(Number($(prefix+'-pause-minutes').value),gross)} : {};
 }
 function updatePausePreviews() {
-  for(const prefix of ['instant','quick']){
+  for(const prefix of ['instant']){
     const custom=$(prefix+'-pause-mode').value==='custom';
     $(prefix+'-pause-field').hidden=!custom;
     $(prefix+'-pause-minutes').disabled=!custom;
@@ -77,7 +79,7 @@ function enterImmersive() {
 }
 const available=()=>state.sessions.filter(s=>!s.finished);
 const active=()=>getActiveSession(available());
-function commit(change){const previous=JSON.stringify(state);try{change();localStorage.setItem(KEY,JSON.stringify(state));proposal=null;$('proposal').hidden=true;cloud?.changed();render();return true;}catch(e){state=JSON.parse(previous);tell('Salvataggio non riuscito: '+e.message);return false;}}
+function commit(change){const previous=JSON.stringify(state);try{change();localStorage.setItem(KEY,JSON.stringify(state));proposal=null;$('proposal').hidden=true;cloud?.changed();render();planner?.syncAreas();return true;}catch(e){state=JSON.parse(previous);tell('Salvataggio non riuscito: '+e.message);return false;}}
 function download(data,name){const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
 function backup(){download({app:'TEMPVS',version:6,exportedAt:new Date().toISOString(),...state},'tempvs-'+localDateString()+'.json');$('backup-status').textContent='Backup esportato alle '+formatTime(new Date());}
 function options(select,chosen){const old=chosen||select.value;select.innerHTML=config().areas.map(a=>'<option>'+esc(a.name)+'</option>').join('');if(config().areas.some(a=>a.name===old))select.value=old;}
@@ -142,9 +144,10 @@ $('pause').onclick=()=>{record();const s=active();if(s)commit(()=>s.paused=!s.pa
 $('finish').onclick=()=>{record();const s=active();if(s)commit(()=>{s.finished=true;s.paused=false;});};
 $('window-form').onsubmit=e=>{e.preventDefault();const w={id:uid(),date:$('window-date').value,start:$('window-start').value,end:$('window-end').value};if(w.start===w.end)return tell('Indica due orari diversi.');if(config().windows.some(x=>{const a=sessionBounds(x),b=sessionBounds(w);return a.start<b.end&&a.end>b.start;}))return tell('Questa fascia si sovrappone a una disponibilità già inserita.');commit(()=>config().windows.push(w));};
 $('windows').onclick=e=>{const b=e.target.closest('[data-remove-window]');if(b)commit(()=>config().windows=config().windows.filter(w=>w.id!==b.dataset.removeWindow));};
-$('quick-form').onsubmit=e=>{e.preventDefault();proposal=null;$('proposal').hidden=true;try{proposal=planSessions(parseQuick($('quick').value,config().areas),config().windows,available(),{...state.defaults,...pauseSettings('quick',10081),workMinutes:$('quick-pause-mode').value==='custom'?state.defaults.workMinutes:focusCycle(Number($('quick-focus').value),state.defaults.breakEnabled).focusMinutes},new Date(),uid,$('quick-date').value);$('proposal-list').innerHTML=proposal.sessions.map(s=>'<p>'+esc(s.title)+' · '+formatDate(s.date)+' · '+s.start+'–'+s.end+' · '+sessionPauseLabel(s)+'</p>').join('')+'<p>'+ (proposal.remainder?'Mancano '+proposal.remainder+' minuti di disponibilità. Aggiungi altre fasce: non è stato salvato nulla.':'Tutto pronto: '+proposal.sessions.length+' sessioni.')+'</p>';$('confirm-plan').disabled=proposal.remainder>0||!proposal.sessions.length;$('proposal').hidden=false;}catch(err){tell(err.message);}};
-$('confirm-plan').onclick=()=>{if(!proposal||proposal.remainder)return;const planned=proposal.sessions;if(planned.some(s=>+sessionBounds(s).start<Date.now())||hasSessionOverlaps([...available(),...planned]))return tell('Gli orari sono cambiati: prepara nuovamente il programma.');if(commit(()=>state.sessions.push(...planned))){$('quick').value='';tell('Sessioni programmate.');}};
-for(const id of ['quick','quick-date'])$(id).addEventListener('input',()=>{proposal=null;$('proposal').hidden=true;});
+function tablePlan(requests){return planSessions(requests,config().windows,available(),{...state.defaults,breakEnabled:true,workMinutes:state.defaults.workMinutes},new Date(),uid,$('quick-date').value);}
+$('quick-form').onsubmit=e=>{e.preventDefault();proposal=null;$('proposal').hidden=true;try{proposal=tablePlan(planner.requests());$('proposal-list').innerHTML=proposal.sessions.map(s=>'<p>'+esc(s.title)+' · '+formatDate(s.date)+' · '+s.start+'–'+s.end+' · '+sessionPauseLabel(s)+'</p>').join('')+'<p>'+ (proposal.remainder?'Mancano '+proposal.remainder+' minuti di disponibilità. Aggiungi altre fasce: non è stato salvato nulla.':'Tutto pronto: '+proposal.sessions.length+' sessioni.')+'</p>';$('confirm-plan').disabled=proposal.remainder>0||!proposal.sessions.length;$('proposal').hidden=false;}catch(err){tell(err.message);}};
+$('confirm-plan').onclick=()=>{if(!proposal||proposal.remainder)return;const planned=proposal.sessions;if(planned.some(s=>+sessionBounds(s).start<Date.now())||hasSessionOverlaps([...available(),...planned]))return tell('Gli orari sono cambiati: prepara nuovamente il programma.');if(commit(()=>state.sessions.push(...planned))){planner.reset();$('quick').value='';tell('Sessioni programmate.');}};
+
 $('cancel-plan').onclick=()=>{proposal=null;$('proposal').hidden=true;};
 $('session-date').onchange=render;
 $('session-list').onclick=e=>{
@@ -188,15 +191,16 @@ $('resource-area').onchange=renderResources;$('resource-content').onchange=e=>{i
 $('sound-toggle').onclick=async()=>{if(audioArmed){audioArmed=false;ambient.stop(.9);return;}if($('sound').value==='off')return tell('Scegli un suono.');audioArmed=await ambient.start($('sound').value,Number($('volume').value)/100,Boolean(active()&&!active().paused&&getPhase(active()).kind==='work'));if(!audioArmed)tell('Audio non disponibile.');};
 $('sound').onchange=async()=>{if($('sound').value==='off'){ambient.stop(.9);audioArmed=false;}else if(audioArmed){await ambient.start($('sound').value,Number($('volume').value)/100);renderTimer();}};$('volume').oninput=()=>ambient.setVolume(Number($('volume').value)/100);
 $('export').onclick=()=>{flush();backup();};$('old-backup').onclick=()=>download(JSON.parse(localStorage.getItem(COPY)),'tempvs-prima-della-semplificazione.json');
-async function applyRemote(data){const next=normalizeArchive(data);localStorage.setItem('tempo-simple-recovery',JSON.stringify(state));localStorage.setItem(KEY,JSON.stringify(next));state=next;loadCycleDefaults();lastTick=Date.now();proposal=null;$('proposal').hidden=true;render();}
+async function applyRemote(data){const next=normalizeArchive(data);localStorage.setItem('tempo-simple-recovery',JSON.stringify(state));localStorage.setItem(KEY,JSON.stringify(next));state=next;loadCycleDefaults();lastTick=Date.now();proposal=null;$('proposal').hidden=true;render();planner?.syncAreas();}
 $('import').onchange=async()=>{try{const file=$('import').files[0];if(!file)return;const next=normalizeArchive(JSON.parse(await file.text()));if(!confirm('Ripristinare questo backup sostituendo i dati attuali? Verrà scaricata una copia dei dati attuali.'))return;backup();await applyRemote(next);cloud?.changed();tell('Backup ripristinato.');}catch(e){tell('Ripristino annullato: '+e.message);}finally{$('import').value='';}};
 for(const b of document.querySelectorAll('[data-page]'))b.onclick=()=>{for(const section of document.querySelectorAll('.page'))section.hidden=section.id!==b.dataset.page;for(const tab of document.querySelectorAll('[data-page]'))tab.removeAttribute('aria-current');b.setAttribute('aria-current','page');location.hash=b.dataset.page;render();};
 $('session-date').value=$('window-date').value=$('quick-date').value=localDateString();
 loadCycleDefaults();
+planner=createPlannerTable({document,areas:()=>config().areas,defaults:()=>state.defaults,checkPlan:tablePlan,onError:tell,invalidate:()=>{proposal=null;$('proposal').hidden=true;}});
 $('instant-focus').addEventListener('input',()=>{updatePausePreviews();if(!active())renderTimer();});
 $('instant-minutes').addEventListener('input',()=>{updatePausePreviews();if(!active())updateManualEndPreview();});
-$('quick-focus').addEventListener('input',()=>{updatePausePreviews();proposal=null;$('proposal').hidden=true;});
-for(const prefix of ['instant','quick'])for(const field of ['pause-mode','pause-minutes'])
+
+for(const prefix of ['instant'])for(const field of ['pause-mode','pause-minutes'])
   $(prefix+'-'+field).addEventListener('input',()=>{updatePausePreviews();proposal=null;$('proposal').hidden=true;});
 $('instant-area').addEventListener('change',renderTimer);
 $('focus-open').onclick=enterImmersive;$('focus-close').onclick=exitImmersive;
