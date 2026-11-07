@@ -13,6 +13,19 @@ export function focusCycle(focusMinutes, breakEnabled = true) {
     throw Error('La concentrazione per ciclo deve durare da 1 a 240 minuti.');
   return {focusMinutes, breakMinutes: breakEnabled ? pauseMinutes(focusMinutes) : 0};
 }
+// A custom pause is a total budget inside the gross duration, never an extra cycle.
+export function customPause(minutes, grossMinutes) {
+  if (!Number.isInteger(minutes) || minutes < 0 || minutes >= grossMinutes)
+    throw Error('La pausa deve essere un numero intero di minuti, da 0 a meno della durata lorda.');
+  return minutes;
+}
+export function sessionPauseLabel(session) {
+  if (session.customBreakMinutes !== undefined) {
+    const gross = Math.round((sessionBounds(session).end-sessionBounds(session).start)/60000);
+    return (gross-session.customBreakMinutes)+' min focus + '+session.customBreakMinutes+' min pausa finale · '+gross+' min lordi';
+  }
+  return session.workMinutes+' min focus'+(session.breakEnabled?' / '+pauseMinutes(session.workMinutes)+' min pausa automatica':' · senza pause');
+}
 /**
  * The manual timer reserves gross minutes from the exact instant the user starts it.
  * Automatic pauses fit inside this deadline, they never extend it.
@@ -45,7 +58,22 @@ export function planSessions(requests, windows, existing, defaults, now=new Date
   const result=[];let remainder=0;
   const cycleFor=request=>focusCycle(request.focusMinutes ?? defaults.workMinutes,defaults.breakEnabled).focusMinutes;
   // Reject invalid focus overrides even when no window can accommodate the request.
-  for(const request of requests)cycleFor(request);
+  for(const request of requests){
+    cycleFor(request);
+    const pause=request.customBreakMinutes ?? defaults.customBreakMinutes;
+    if(pause!==undefined)customPause(pause,request.minutes);
+  }
+  const applyPause=(request, sessions)=>{
+    let pause=request.customBreakMinutes ?? defaults.customBreakMinutes;
+    if(pause===undefined)return;
+    // Keep a single pause budget across fragments, starting at the end of the last one.
+    for(const session of [...sessions].reverse()){
+      const gross=Math.round((sessionBounds(session).end-sessionBounds(session).start)/60000);
+      session.customBreakMinutes=Math.min(pause,gross);
+      session.breakEnabled=session.customBreakMinutes>0;
+      pause-=session.customBreakMinutes;
+    }
+  };
   // Reserve explicit times first so automatic rows cannot occupy them.
   for(const request of requests.filter(r=>r.start)){
     if(request.minutes>1440)throw Error('Una sessione con orario fisso può durare al massimo 24 ore.');
@@ -53,10 +81,12 @@ export function planSessions(requests, windows, existing, defaults, now=new Date
     const session={id:id(),title:request.area,area:request.area,date:selectedDate,start:request.start,end:formatTime(end),workMinutes:cycleFor(request),breakEnabled:defaults.breakEnabled!==false,actualSeconds:0};
     if(!validSession(session))throw Error('Data o orario non valido.');
     if(+start<+now)throw Error('L’orario '+request.start+' è già passato nel giorno scelto. Cambia giorno o orario.');
+    applyPause(request,[session]);
     result.push(session);
   }
   if(hasSessionOverlaps([...existing,...result]))throw Error('Gli orari indicati si sovrappongono a un’altra sessione.');
   for(const request of requests.filter(r=>!r.start)){
+    const first=result.length;
     let left=request.minutes;
     for(const window of [...windows].sort((a,b)=>sessionBounds(a).start-sessionBounds(b).start)){
       const bounds=sessionBounds(window);let cursor=Math.max(+bounds.start,Math.ceil(+now/60000)*60000);
@@ -67,6 +97,7 @@ export function planSessions(requests, windows, existing, defaults, now=new Date
       for(const [start,end] of gaps){const minutes=Math.min(left,Math.floor((end-start)/60000),1439);if(minutes<=0)continue;const finish=new Date(start+minutes*60000);result.push({id:id(),title:request.area,area:request.area,date:localDateString(new Date(start)),start:formatTime(new Date(start)),end:formatTime(finish),workMinutes:cycleFor(request),breakEnabled:defaults.breakEnabled!==false,actualSeconds:0});left-=minutes;if(!left)break;}
       if(!left)break;
     }
+    if(!left)applyPause(request,result.slice(first));
     remainder+=left;
   }
   if(hasSessionOverlaps([...existing,...result]))throw Error('Le sessioni si sovrappongono.');
@@ -79,15 +110,17 @@ export function parseQuick(text,areas) {
     const area=areas.find(a=>a.name.toLocaleLowerCase()===match[1].trim().toLocaleLowerCase());
     const minutes=Math.round(Number(match[2].replace(',','.'))*(match[3].toLowerCase()==='h'?60:1));
     if(!area || minutes<1 || minutes>10080)throw Error('Controlla area e durata lorda (da 1 minuto a 168 ore).');
-    let start,focusMinutes;
+    let start,focusMinutes,customBreakMinutes;
     for(const token of match[4].trim().split(/\s+/).filter(Boolean)) {
       if(/^\+([01]\d|2[0-3]):[0-5]\d$/.test(token) && !start)
         start=token.slice(1);
       else if(/^~\d{1,3}m?$/i.test(token) && focusMinutes===undefined)
         focusMinutes=focusCycle(Number(token.slice(1).replace(/m$/i,''))).focusMinutes;
-      else throw Error('Opzione non valida: '+token+'. Usa +HH:MM e/o ~40m.');
+      else if(/^!\d{1,4}m?$/i.test(token) && customBreakMinutes===undefined)
+        customBreakMinutes=customPause(Number(token.slice(1).replace(/m$/i,'')),minutes);
+      else throw Error('Opzione non valida: '+token+'. Usa +HH:MM, ~40m e/o !5m per la pausa personalizzata.');
     }
-    return {area:area.name,minutes,...(start?{start}:{}),...(focusMinutes!==undefined?{focusMinutes}:{})};
+    return {area:area.name,minutes,...(start?{start}:{}),...(focusMinutes!==undefined?{focusMinutes}:{}),...(customBreakMinutes!==undefined?{customBreakMinutes}:{})};
   });
 }
 // Only observable time counts. Long suspended/offline gaps never become completed work.

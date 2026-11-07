@@ -1,5 +1,5 @@
 import {localDateString,formatDate,formatTime,escapeHtml as esc,sessionBounds,getActiveSession,getNextSession,getPhase,mmss,hasSessionOverlaps} from './core/tempo-core.js';
-import {normalizeArchive,planSessions,parseQuick,measuredFocus,focusCycle,normalizeAreaColor,manualSessionEnd} from './core/tempo-simple.js';
+import {normalizeArchive,planSessions,parseQuick,measuredFocus,customPause,sessionPauseLabel,focusCycle,normalizeAreaColor,manualSessionEnd} from './core/tempo-simple.js';
 import {TempoAmbientAudio} from './core/tempo-audio.js';
 import {createDropboxSync} from './core/tempo-dropbox.js';
 const $=id=>document.getElementById(id),KEY='tempo-pomodoro-v2',COPY='tempo-before-simple-v1';
@@ -16,9 +16,27 @@ function pauseLabel(minutes,enabled) {
     : c.focusMinutes+' min focus, pause automatiche disattivate.';}
   catch{return 'Scegli una durata di focus da 1 a 240 minuti.';}
 }
+function pauseSettings(prefix,gross) {
+  return $(prefix+'-pause-mode').value==='custom'
+    ? {customBreakMinutes:customPause(Number($(prefix+'-pause-minutes').value),gross)} : {};
+}
 function updatePausePreviews() {
-  $('instant-pause-preview').textContent=pauseLabel($('instant-focus').value,state.defaults.breakEnabled);
-  $('quick-pause-preview').textContent=pauseLabel($('quick-focus').value,state.defaults.breakEnabled);
+  for(const prefix of ['instant','quick']){
+    const custom=$(prefix+'-pause-mode').value==='custom';
+    $(prefix+'-pause-field').hidden=!custom;
+    $(prefix+'-pause-minutes').disabled=!custom;
+    $(prefix+'-focus').disabled=custom;
+    let label=pauseLabel($(prefix+'-focus').value,state.defaults.breakEnabled);
+    if(custom){
+      try{
+        const pause=pauseSettings(prefix,prefix==='instant'?Number($('instant-minutes').value):10081).customBreakMinutes;
+        label=prefix==='instant'
+          ? (Number($('instant-minutes').value)-pause)+' min focus + '+pause+' min pausa finale = '+$('instant-minutes').value+' min lordi.'
+          : pause+' min di pausa finale per richiesta, sottratti dalla durata lorda. Nessun ciclo automatico.';
+      }catch(e){label=e.message;}
+    }
+    $(prefix+'-pause-preview').textContent=label;
+  }
 }
 function deadlineLabel(end, now = new Date()) {
   const date = localDateString(end),today = localDateString(now);
@@ -75,7 +93,7 @@ function render(){
   for(const id of ['instant-area','resource-area','edit-area'])options($(id));
   $('windows').innerHTML=[...config().windows].sort((a,b)=>sessionBounds(a).start-sessionBounds(b).start).map(w=>'<div class="item"><span>'+esc(formatDate(w.date))+'<small>'+w.start+'–'+w.end+'</small></span><button data-remove-window="'+esc(w.id)+'" aria-label="Elimina fascia">×</button></div>').join('')||'<p class="muted">Nessuna fascia: aggiungi il primo giorno.</p>';
   const list=state.sessions.filter(s=>s.date===$('session-date').value).sort((a,b)=>a.start.localeCompare(b.start));
-  $('session-list').innerHTML=list.map(s=>{const end=+sessionBounds(s).end,old=end<Date.now();const status=s.finished?'Conclusa':old?(s.actualSeconds>0?'Svolta':'Non registrata / saltata'):s.paused?'In pausa':+sessionBounds(s).start<=Date.now()?'In corso':'In programma';return '<div class="item session-item" style="--area-color:'+colorFor(s.area||s.title)+'"><span><strong>'+esc(s.title)+'</strong><small>'+s.start+'–'+s.end+' · '+status+' · '+s.workMinutes+' min focus'+(s.breakEnabled?' / '+Math.max(1,Math.round(s.workMinutes/5))+' min pausa':'')+'</small></span><div class="row">'+(!old&&!s.finished?'<button data-move="'+esc(s.id)+'">Sposta</button>':'')+'<button data-delete="'+esc(s.id)+'">Elimina</button></div></div>';}).join('')||'<p class="muted">Nessuna sessione in questo giorno.</p>';
+  $('session-list').innerHTML=list.map(s=>{const end=+sessionBounds(s).end,old=end<Date.now();const status=s.finished?'Conclusa':old?(s.actualSeconds>0?'Svolta':'Non registrata / saltata'):s.paused?'In pausa':+sessionBounds(s).start<=Date.now()?'In corso':'In programma';return '<div class="item session-item" style="--area-color:'+colorFor(s.area||s.title)+'"><span><strong>'+esc(s.title)+'</strong><small>'+s.start+'–'+s.end+' · '+status+' · '+sessionPauseLabel(s)+'</small></span><div class="row">'+(!old&&!s.finished?'<button data-edit-pause="'+esc(s.id)+'">Pausa</button><button data-move="'+esc(s.id)+'">Sposta</button>':'')+'<button data-delete="'+esc(s.id)+'">Elimina</button></div></div>';}).join('')||'<p class="muted">Nessuna sessione in questo giorno.</p>';
   const measured=new Map(state.history.filter(h=>h.measured).map(h=>[h.sessionId,h]));for(const s of state.sessions)if(s.actualSeconds>0)measured.set(s.id,{sessionId:s.id,title:s.title,date:s.date,minutes:s.actualSeconds/60,measured:true});
   const entries=[...measured.values()],total=entries.reduce((v,h)=>v+h.minutes,0),today=entries.filter(h=>h.date===localDateString()).reduce((v,h)=>v+h.minutes,0);
   $('metrics').innerHTML='<article><p>Concentrazione oggi</p><strong class="metric">'+Math.floor(today)+' min</strong></article><article><p>Totale registrato</p><strong class="metric">'+(total/60).toLocaleString('it-IT',{maximumFractionDigits:1})+' h</strong></article>';
@@ -101,13 +119,11 @@ function renderTimer(){
   $('timer').style.setProperty('--area-color',colorFor(s?.area||s?.title||$('instant-area').value));
   $('phase').textContent=s?(s.paused?'SESSIONE IN PAUSA':phase.label.toUpperCase()):'IL TUO TEMPO, CON CALMA';
   $('active-title').textContent=s?s.title:'Pronto quando vuoi';
-  $('clock').textContent=s?mmss(phase.remaining):mmss(Number($('instant-focus').value||state.defaults.workMinutes)*60);
+  $('clock').textContent=s?mmss(phase.remaining):mmss(($('instant-pause-mode').value==='custom'?Math.max(0,Number($('instant-minutes').value)-Number($('instant-pause-minutes').value)):Number($('instant-focus').value||state.defaults.workMinutes))*60);
   $('phase-progress').value=phase?.progress||0;
   $('pause').textContent=s?.paused?'Riprendi':'Pausa';
-  const cycleMinutes=s?s.workMinutes:Number($('instant-focus').value||state.defaults.workMinutes);
-  const cycle=focusCycle(Math.max(1,Math.min(240,Math.floor(cycleMinutes)||25)),s?s.breakEnabled:state.defaults.breakEnabled);
   $('cycle-note').textContent=s
-    ? cycle.focusMinutes+' min focus'+(s.breakEnabled?' · '+cycle.breakMinutes+' min pausa':' · senza pause')+' · sessione fino alle '+s.end
+    ? sessionPauseLabel(s)+' · sessione fino alle '+s.end
     : 'Configura durata lorda e focus di ogni ciclo.';
   $('timer-note').textContent=s
     ? (s.paused?'Concentrazione sospesa. La programmazione termina alle '+s.end:phase.label+' fino alle '+formatTime(phase.end)+' · fine sessione '+s.end)
@@ -121,17 +137,32 @@ function renderTimer(){
 function record(){const now=Date.now();for(const s of state.sessions){const seconds=measuredFocus(s,lastTick,now);if(seconds){s.actualSeconds=(s.actualSeconds||0)+seconds;measuredDirty=true;}}lastTick=now;}
 function flush(){record();if(!measuredDirty)return;try{localStorage.setItem(KEY,JSON.stringify(state));measuredDirty=false;cloud?.changed();}catch(e){tell('Impossibile salvare il tempo registrato: '+e.message);}}
 setInterval(()=>{record();renderTimer();if(Date.now()-lastSave>15000){flush();lastSave=Date.now();render();}},1000);
-$('instant').onsubmit=e=>{e.preventDefault();const start=new Date();const end=manualSessionEnd(start,Number($('instant-minutes').value));const s={id:uid(),timerStartedAt:start.toISOString(),timerEndsAt:end.toISOString(),title:$('instant-area').value,area:$('instant-area').value,date:localDateString(start),start:formatTime(start),end:formatTime(end),workMinutes:focusCycle(Number($('instant-focus').value),state.defaults.breakEnabled).focusMinutes,breakEnabled:state.defaults.breakEnabled,actualSeconds:0};if(hasSessionOverlaps([...available(),s]))return tell('La durata si sovrappone a una sessione programmata. Riducila o sposta la sessione.');commit(()=>state.sessions.push(s));lastTick=Date.now();};
+$('instant').onsubmit=e=>{e.preventDefault();try{const start=new Date();const end=manualSessionEnd(start,Number($('instant-minutes').value));const s={id:uid(),timerStartedAt:start.toISOString(),timerEndsAt:end.toISOString(),title:$('instant-area').value,area:$('instant-area').value,date:localDateString(start),start:formatTime(start),end:formatTime(end),workMinutes:$('instant-pause-mode').value==='custom'?state.defaults.workMinutes:focusCycle(Number($('instant-focus').value),state.defaults.breakEnabled).focusMinutes,breakEnabled:state.defaults.breakEnabled,actualSeconds:0,...pauseSettings('instant',Number($('instant-minutes').value))};if(hasSessionOverlaps([...available(),s]))return tell('La durata si sovrappone a una sessione programmata. Riducila o sposta la sessione.');commit(()=>state.sessions.push(s));lastTick=Date.now();}catch(error){tell(error.message);}};
 $('pause').onclick=()=>{record();const s=active();if(s)commit(()=>s.paused=!s.paused);};
 $('finish').onclick=()=>{record();const s=active();if(s)commit(()=>{s.finished=true;s.paused=false;});};
 $('window-form').onsubmit=e=>{e.preventDefault();const w={id:uid(),date:$('window-date').value,start:$('window-start').value,end:$('window-end').value};if(w.start===w.end)return tell('Indica due orari diversi.');if(config().windows.some(x=>{const a=sessionBounds(x),b=sessionBounds(w);return a.start<b.end&&a.end>b.start;}))return tell('Questa fascia si sovrappone a una disponibilità già inserita.');commit(()=>config().windows.push(w));};
 $('windows').onclick=e=>{const b=e.target.closest('[data-remove-window]');if(b)commit(()=>config().windows=config().windows.filter(w=>w.id!==b.dataset.removeWindow));};
-$('quick-form').onsubmit=e=>{e.preventDefault();proposal=null;$('proposal').hidden=true;try{proposal=planSessions(parseQuick($('quick').value,config().areas),config().windows,available(),{...state.defaults,workMinutes:focusCycle(Number($('quick-focus').value),state.defaults.breakEnabled).focusMinutes},new Date(),uid,$('quick-date').value);$('proposal-list').innerHTML=proposal.sessions.map(s=>'<p>'+esc(s.title)+' · '+formatDate(s.date)+' · '+s.start+'–'+s.end+' · '+s.workMinutes+' min focus'+(s.breakEnabled?' / '+Math.max(1,Math.round(s.workMinutes/5))+' min pausa':'')+'</p>').join('')+'<p>'+ (proposal.remainder?'Mancano '+proposal.remainder+' minuti di disponibilità. Aggiungi altre fasce: non è stato salvato nulla.':'Tutto pronto: '+proposal.sessions.length+' sessioni.')+'</p>';$('confirm-plan').disabled=proposal.remainder>0||!proposal.sessions.length;$('proposal').hidden=false;}catch(err){tell(err.message);}};
+$('quick-form').onsubmit=e=>{e.preventDefault();proposal=null;$('proposal').hidden=true;try{proposal=planSessions(parseQuick($('quick').value,config().areas),config().windows,available(),{...state.defaults,...pauseSettings('quick',10081),workMinutes:$('quick-pause-mode').value==='custom'?state.defaults.workMinutes:focusCycle(Number($('quick-focus').value),state.defaults.breakEnabled).focusMinutes},new Date(),uid,$('quick-date').value);$('proposal-list').innerHTML=proposal.sessions.map(s=>'<p>'+esc(s.title)+' · '+formatDate(s.date)+' · '+s.start+'–'+s.end+' · '+sessionPauseLabel(s)+'</p>').join('')+'<p>'+ (proposal.remainder?'Mancano '+proposal.remainder+' minuti di disponibilità. Aggiungi altre fasce: non è stato salvato nulla.':'Tutto pronto: '+proposal.sessions.length+' sessioni.')+'</p>';$('confirm-plan').disabled=proposal.remainder>0||!proposal.sessions.length;$('proposal').hidden=false;}catch(err){tell(err.message);}};
 $('confirm-plan').onclick=()=>{if(!proposal||proposal.remainder)return;const planned=proposal.sessions;if(planned.some(s=>+sessionBounds(s).start<Date.now())||hasSessionOverlaps([...available(),...planned]))return tell('Gli orari sono cambiati: prepara nuovamente il programma.');if(commit(()=>state.sessions.push(...planned))){$('quick').value='';tell('Sessioni programmate.');}};
 for(const id of ['quick','quick-date'])$(id).addEventListener('input',()=>{proposal=null;$('proposal').hidden=true;});
 $('cancel-plan').onclick=()=>{proposal=null;$('proposal').hidden=true;};
 $('session-date').onchange=render;
-$('session-list').onclick=e=>{const del=e.target.closest('[data-delete]'),move=e.target.closest('[data-move]');if(del){const s=state.sessions.find(s=>s.id===del.dataset.delete);if(!s||!confirm('Eliminare la sessione? Il tempo registrato resterà nello storico.'))return;record();commit(()=>{if(s.actualSeconds>0){state.history=state.history.filter(h=>h.sessionId!==s.id);state.history.push({sessionId:s.id,taskId:'',title:s.title,date:s.date,minutes:s.actualSeconds/60,measured:true});}state.sessions=state.sessions.filter(x=>x.id!==s.id);state.syncDeleted.sessions.push(s.id);});}if(move){const s=state.sessions.find(s=>s.id===move.dataset.move);const date=prompt('Nuova data (AAAA-MM-GG)',s.date);if(!date)return;const start=prompt('Nuovo inizio (HH:MM)',s.start);if(!start)return;try{const duration=+sessionBounds(s).end-sessionBounds(s).start;const d=new Date(date+'T'+start+':00'),end=new Date(+d+duration);const replacement={...s,date,start,end:formatTime(end),paused:false};delete replacement.timerStartedAt;delete replacement.timerEndsAt;normalizeArchive({sessions:[replacement]});if(+d<Date.now()||hasSessionOverlaps([...available().filter(x=>x.id!==s.id),replacement]))throw Error('Orario passato o sovrapposto.');if(s.actualSeconds>0)throw Error('La sessione ha già tempo registrato: concludila e crea una nuova sessione.');commit(()=>state.sessions=state.sessions.map(x=>x.id===s.id?replacement:x));}catch(err){tell(err.message);}}};
+$('session-list').onclick=e=>{
+  const edit=e.target.closest('[data-edit-pause]');
+  if(edit){
+    const s=state.sessions.find(s=>s.id===edit.dataset.editPause);
+    if(!s || +sessionBounds(s).start<=Date.now() || s.actualSeconds>0)return tell('Puoi modificare la pausa solo prima dell’inizio della sessione.');
+    const value=prompt('Minuti di pausa finale, inclusi nella durata lorda (0 = nessuna). Scrivi auto per ripristinare i cicli automatici.',s.customBreakMinutes===undefined?'auto':String(s.customBreakMinutes));
+    if(value===null)return;
+    try{
+      const automatic=value.trim().toLowerCase()==='auto';
+      if(!value.trim())throw Error('Indica i minuti di pausa oppure auto.');
+      const minutes=automatic?undefined:customPause(Number(value),(sessionBounds(s).end-sessionBounds(s).start)/60000);
+      commit(()=>{if(automatic){delete s.customBreakMinutes;s.breakEnabled=state.defaults.breakEnabled;}else{s.customBreakMinutes=minutes;s.breakEnabled=minutes>0;}});
+    }catch(error){tell(error.message);}
+    return;
+  }
+  const del=e.target.closest('[data-delete]'),move=e.target.closest('[data-move]');if(del){const s=state.sessions.find(s=>s.id===del.dataset.delete);if(!s||!confirm('Eliminare la sessione? Il tempo registrato resterà nello storico.'))return;record();commit(()=>{if(s.actualSeconds>0){state.history=state.history.filter(h=>h.sessionId!==s.id);state.history.push({sessionId:s.id,taskId:'',title:s.title,date:s.date,minutes:s.actualSeconds/60,measured:true});}state.sessions=state.sessions.filter(x=>x.id!==s.id);state.syncDeleted.sessions.push(s.id);});}if(move){const s=state.sessions.find(s=>s.id===move.dataset.move);const date=prompt('Nuova data (AAAA-MM-GG)',s.date);if(!date)return;const start=prompt('Nuovo inizio (HH:MM)',s.start);if(!start)return;try{const duration=+sessionBounds(s).end-sessionBounds(s).start;const d=new Date(date+'T'+start+':00'),end=new Date(+d+duration);const replacement={...s,date,start,end:formatTime(end),paused:false};delete replacement.timerStartedAt;delete replacement.timerEndsAt;normalizeArchive({sessions:[replacement]});if(+d<Date.now()||hasSessionOverlaps([...available().filter(x=>x.id!==s.id),replacement]))throw Error('Orario passato o sovrapposto.');if(s.actualSeconds>0)throw Error('La sessione ha già tempo registrato: concludila e crea una nuova sessione.');commit(()=>state.sessions=state.sessions.map(x=>x.id===s.id?replacement:x));}catch(err){tell(err.message);}}};
 function loadAreaFields(){
   const area=areaFor($('edit-area').value);
   $('description').value=area?.description||'';
@@ -163,8 +194,10 @@ for(const b of document.querySelectorAll('[data-page]'))b.onclick=()=>{for(const
 $('session-date').value=$('window-date').value=$('quick-date').value=localDateString();
 loadCycleDefaults();
 $('instant-focus').addEventListener('input',()=>{updatePausePreviews();if(!active())renderTimer();});
-$('instant-minutes').addEventListener('input',()=>{if(!active())updateManualEndPreview();});
+$('instant-minutes').addEventListener('input',()=>{updatePausePreviews();if(!active())updateManualEndPreview();});
 $('quick-focus').addEventListener('input',()=>{updatePausePreviews();proposal=null;$('proposal').hidden=true;});
+for(const prefix of ['instant','quick'])for(const field of ['pause-mode','pause-minutes'])
+  $(prefix+'-'+field).addEventListener('input',()=>{updatePausePreviews();proposal=null;$('proposal').hidden=true;});
 $('instant-area').addEventListener('change',renderTimer);
 $('focus-open').onclick=enterImmersive;$('focus-close').onclick=exitImmersive;
 document.addEventListener('fullscreenchange',()=>{if(!document.fullscreenElement&&document.body.classList.contains('focus-immersive'))exitImmersive();});

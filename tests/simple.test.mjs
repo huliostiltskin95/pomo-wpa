@@ -129,3 +129,43 @@ test('manual timer end uses gross minutes and exact start seconds',()=>{
  for(const value of [0,-1,1440,1.5,NaN,undefined])assert.throws(()=>manualSessionEnd(start,value));
  assert.throws(()=>manualSessionEnd('not-a-date',30));
 });
+
+test('custom pause uses exactly 40 focus + 5 rest within 45 gross minutes',async()=>{
+ const {getPhase,sessionBounds}=await import('../core/tempo-core.js');
+ const requests=parseQuick('Studio @45m +09:00 !5m',[{name:'Studio'}]);
+ const {sessions:[s]}=planSessions(requests,[],[],defaults,now,id,'2026-11-06');
+ assert.equal(s.end,'09:45');
+ const bounds=sessionBounds(s);let focus=0,rest=0;
+ for(let t=+bounds.start;t<+bounds.end;t+=60000)getPhase(s,new Date(t)).kind==='work'?focus++:rest++;
+ assert.equal(focus,40);assert.equal(rest,5);
+ assert.equal(measuredFocus(s,new Date('2026-11-06T09:39:55'),new Date('2026-11-06T09:40:05')),5);
+ assert.equal(normalizeArchive(JSON.parse(JSON.stringify({sessions:[s]}))).sessions[0].customBreakMinutes,5);
+ const archive=normalizeArchive({sessions:[s]});
+ assert.equal(mergeSnapshots(archive,archive,archive).merged.sessions[0].customBreakMinutes,5);
+});
+test('custom pause validates duration, supports zero and overrides disabled auto pauses',async()=>{
+ const {getPhase}=await import('../core/tempo-core.js');
+ for(const value of ['!45m','!46m','!-1m','!2.5m','!5m !3m'])assert.throws(()=>parseQuick('Studio @45m '+value,[{name:'Studio'}]));
+ assert.throws(()=>planSessions([{area:'Studio',minutes:5}],[],[],{...defaults,customBreakMinutes:5},now,id));
+ const {sessions:[s]}=planSessions([{area:'Studio',minutes:45,start:'09:00',customBreakMinutes:0}],[],[],{...defaults,customBreakMinutes:5},now,id,'2026-11-06');
+ assert.equal(getPhase(s,new Date('2026-11-06T09:44:59')).kind,'work');
+ assert.throws(()=>normalizeArchive({sessions:[{...s,customBreakMinutes:46}]}));
+ const {sessions:[rest]}=planSessions([{area:'Studio',minutes:45,start:'09:00'}],[],[],{...defaults,breakEnabled:false,customBreakMinutes:5},now,id,'2026-11-06');
+ assert.equal(getPhase(rest,new Date('2026-11-06T09:40:00')).kind,'break');
+});
+test('custom pause budget stays unique across days and midnight',async()=>{
+ const {getPhase,sessionBounds}=await import('../core/tempo-core.js');
+ const {sessions}=planSessions([{area:'Studio',minutes:45,customBreakMinutes:5}],[w('2026-11-06','23:18','00:00'),w('2026-11-07','09:00','09:03')],[],defaults,now,id);
+ assert.deepEqual(sessions.map(s=>s.customBreakMinutes),[2,3]);
+ let focus=0,rest=0;
+ for(const s of sessions){const b=sessionBounds(s);for(let t=+b.start;t<+b.end;t+=60000)getPhase(s,new Date(t)).kind==='work'?focus++:rest++;}
+ assert.equal(focus,40);assert.equal(rest,5);
+ assert.equal(normalizeArchive({sessions}).sessions.length,2);
+});
+test('immediate custom pause retains exact seconds and never extends the deadline',async()=>{
+ const {getPhase}=await import('../core/tempo-core.js');
+ const s={...session,customBreakMinutes:5,timerStartedAt:'2026-11-06T09:00:53',timerEndsAt:'2026-11-06T09:45:53'};
+ assert.equal(getPhase(s,new Date('2026-11-06T09:40:52')).kind,'work');
+ assert.equal(getPhase(s,new Date('2026-11-06T09:40:53')).kind,'break');
+ assert.equal(getPhase(s,new Date('2026-11-06T09:45:53')).remaining,0);
+});

@@ -44,7 +44,11 @@ export function validSession(session) {
   const date = new Date(year, month - 1, day);
   if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return false;
   const start = timeToMinutes(session.start), end = timeToMinutes(session.end);
-  return Number.isFinite(start) && Number.isFinite(end);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return false;
+  if (session.customBreakMinutes !== undefined &&
+      (!Number.isInteger(session.customBreakMinutes) || session.customBreakMinutes < 0 ||
+       session.customBreakMinutes > (sessionBounds(session).end-sessionBounds(session).start)/60000)) return false;
+  return true;
 }
 export function sessionDurationMinutes(session) {
   const start = timeToMinutes(session.start), end = timeToMinutes(session.end);
@@ -79,6 +83,15 @@ export function getNextSession(sessions, now = new Date()) {
 }
 export function getPhase(session, now = new Date()) {
   const { start, end } = sessionBounds(session);
+  if (session.customBreakMinutes !== undefined) {
+    const boundary = new Date(+end-session.customBreakMinutes*60000);
+    const isBreak = session.customBreakMinutes > 0 && now >= boundary;
+    const phaseStart = isBreak ? boundary : start, phaseEnd = isBreak ? end : boundary;
+    return {kind:isBreak?'break':'work',label:isBreak?'Pausa':'Concentrazione',start:phaseStart,end:phaseEnd,
+      remaining:Math.max(0,Math.ceil((phaseEnd-now)/1000)),
+      progress:Math.min(100,Math.max(0,(now-phaseStart)/Math.max(1,phaseEnd-phaseStart)*100)),
+      sessionEnd:end,totalRemaining:Math.max(0,Math.ceil((end-now)/1000))};
+  }
   const workMs = session.workMinutes * 60000;
   const elapsed = Math.max(0, now - start);
   const remainingSession = Math.max(0, end - now);

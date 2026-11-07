@@ -179,3 +179,9 @@ Studio @2h +17:30 ~50m
 ```
 
 Il campo **Focus predefinito** nella pagina Sessioni si applica alle righe senza `~`; le preferenze globali si applicano alle nuove sessioni, senza modificare quelle esistenti. Le pause sono interne alla durata lorda e vengono registrati soltanto i minuti effettivamente osservati in fase di concentrazione.
+
+### Pausa personalizzata nelle sessioni
+
+Nel timer immediato e nell’inserimento rapido scegli **Pausa → Personalizzata** e indica i minuti. La pausa finale è sottratta dal tempo lordo: **45 minuti con 5 di pausa = 40 di concentrazione + 5 di pausa**, senza modificare la fine programmata. Con 0 minuti non ci sono pause; la modalità automatica mantiene i cicli esistenti.
+
+La sintassi rapida accetta `Studio @45m +09:00 !5m`; `!5m` prevale sulla scelta del modulo per quella riga. Se la richiesta è divisa fra più fasce, i 5 minuti restano un unico totale, distribuito a partire dalla fine dell’ultimo frammento. Il pulsante **Pausa** nella lista consente di modificare le sessioni prima dell’inizio: inserisci minuti oppure `auto`. Le preferenze della sessione sono conservate nel backup e nella sincronizzazione Dropbox.
