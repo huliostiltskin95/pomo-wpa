@@ -1,3 +1,4 @@
+import {createTimerPip,timerColor} from './timer-pip.js';
 import {createPlannerTable} from './planner-table.js';
 import {localDateString,formatDate,formatTime,escapeHtml as esc,sessionBounds,getActiveSession,getNextSession,getPhase,mmss,hasSessionOverlaps} from './core/tempo-core.js';
 import {normalizeArchive,planSessions,parseQuick,measuredFocus,customPause,sessionPauseLabel,focusCycle,normalizeAreaColor,manualSessionEnd} from './core/tempo-simple.js';
@@ -104,6 +105,12 @@ function render(){
   $('old-backup').hidden=!localStorage.getItem(COPY);renderResources();renderTimer();
 }
 const ambient=new TempoAmbientAudio(playing=>{$('sound-toggle').textContent=playing?'Disattiva audio':'Attiva audio';});
+const timerPip=createTimerPip({button:$('pip-toggle'),notify:tell,
+  togglePause:()=>$('pause').click(),
+  snapshot:()=>({active:Boolean(active()),paused:Boolean(active()?.paused),
+    title:$('active-title').textContent,phase:$('phase').textContent,clock:$('clock').textContent,
+    end:active()?'Fine sessione '+$('deadline-time').textContent:'Nessuna sessione in corso',
+    progress:Number($('phase-progress').value),color:$('timer').style.getPropertyValue('--area-color')||'#276c53'})});
 function renderTimer(){
   const s=active(),phase=s?getPhase(s):null;
   if(!s&&document.body.classList.contains('focus-immersive'))exitImmersive();
@@ -118,7 +125,7 @@ function renderTimer(){
   }else updateManualEndPreview();
   $('focus-open').hidden=!s||document.body.classList.contains('focus-immersive');
   $('focus-close').hidden=!document.body.classList.contains('focus-immersive');
-  $('timer').style.setProperty('--area-color',colorFor(s?.area||s?.title||$('instant-area').value));
+  $('timer').style.setProperty('--area-color',timerColor(colorFor(s?.area||s?.title||$('instant-area').value),phase,s?.paused));
   $('phase').textContent=s?(s.paused?'SESSIONE IN PAUSA':phase.label.toUpperCase()):'IL TUO TEMPO, CON CALMA';
   $('active-title').textContent=s?s.title:'Pronto quando vuoi';
   $('clock').textContent=s?mmss(phase.remaining):mmss(($('instant-pause-mode').value==='custom'?Math.max(0,Number($('instant-minutes').value)-Number($('instant-pause-minutes').value)):Number($('instant-focus').value||state.defaults.workMinutes))*60);
@@ -134,6 +141,7 @@ function renderTimer(){
   $('next').textContent=next?'Prossima: '+next.title+' · '+formatDate(next.date)+' alle '+next.start:'Nessun’altra sessione in programma.';
   if(s?.id!==activeId){activeId=s?.id||null;if(s){options($('resource-area'),s.area||s.title);renderResources();}}
   if(ambient.playing)ambient.setAudible(Boolean(s&&!s.paused&&phase.kind==='work'));
+  timerPip.update();
   document.title=s?$('clock').textContent+' · TEMPVS':'TEMPVS · Tempo per te';
 }
 function record(){const now=Date.now();for(const s of state.sessions){const seconds=measuredFocus(s,lastTick,now);if(seconds){s.actualSeconds=(s.actualSeconds||0)+seconds;measuredDirty=true;}}lastTick=now;}
@@ -218,3 +226,4 @@ run(()=>cloud.init());
 window.addEventListener('pagehide',()=>{flush();ambient.stop(0);audioArmed=false;});document.addEventListener('visibilitychange',()=>{if(document.hidden)flush();else{lastTick=Date.now();render();}});
 if('serviceWorker' in navigator){let reloading=false;navigator.serviceWorker.addEventListener('controllerchange',()=>{if(!reloading){reloading=true;flush();location.reload();}});navigator.serviceWorker.register('./sw.js',{updateViaCache:'none'}).then(r=>r.update()).catch(()=>tell('Modalità offline non disponibile al momento.'));}
 const page=location.hash.slice(1);const tab=[...document.querySelectorAll('[data-page]')].find(b=>b.dataset.page===page);if(tab)tab.click();
+
