@@ -28,7 +28,10 @@ export class TempoAmbientAudio {
   setVolume(value) {
     this.volume = Math.max(0, Math.min(1, Number(value) || 0));
     if (this.playing && this.audible && this.master && this.context) {
-      this.master.gain.setTargetAtTime(this.volume, this.context.currentTime, .05);
+      const now = this.context.currentTime;
+      this.master.gain.cancelScheduledValues(now);
+      this.master.gain.setValueAtTime(this.master.gain.value, now);
+      this.master.gain.setTargetAtTime(this.volume, now, .05);
     }
   }
   async start(kind, volume = this.volume, audible = true) {

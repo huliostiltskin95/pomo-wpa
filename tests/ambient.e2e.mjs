@@ -25,13 +25,16 @@ try {
   });
   await page.goto('http://127.0.0.1:8123/');
   await page.getByText('Suono di sottofondo',{exact:true}).click();
+  console.log('Page loaded');
   // Armed outside a session: silent, with an explicit explanation.
   await page.locator('#sound').selectOption('white');
   await page.waitForFunction(()=>document.querySelector('#sound-status').textContent.includes('Audio pronto'));
   assert.equal(await page.evaluate(()=>audioRms()),0);
+  console.log('Idle audio armed');
   await page.locator('#sound-test').click();
   await page.waitForFunction(()=>audioRms()>.001);
   await page.waitForFunction(()=>audioRms()===0,{},{timeout:7000});
+  console.log('Preview passed');
   await page.locator('#instant button.primary').click();
   await page.waitForFunction(()=>audioRms()>.001);
   for(const kind of ['brown','rain','fire','white']){
@@ -40,6 +43,7 @@ try {
     await page.waitForTimeout(800); // Includes a fireplace crackle.
     assert.equal(await page.evaluate(()=>audioContext.state),'running');
   }
+  console.log('All sound signals passed');
   await page.locator('#pause').click();
   await page.waitForFunction(()=>audioRms()===0);
   assert.equal(await page.evaluate(()=>audioContext.state),'running');

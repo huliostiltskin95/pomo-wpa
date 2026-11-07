@@ -11,6 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
+      fail-fast: false
       matrix:
         browser: [chromium, webkit]
     steps:
@@ -20,6 +21,12 @@ jobs:
           node-version: 22
       - run: npm install --no-save playwright@1.56.1
       - run: npx playwright install --with-deps ${{ matrix.browser }}
+      - name: Start audio output for headless WebKit
+        run: |
+          sudo apt-get install -y pulseaudio
+          pulseaudio --start
+          pactl load-module module-null-sink sink_name=tempo
+          pactl set-default-sink tempo
       - name: Check audio signal and timer integration
         env:
           BROWSER: ${{ matrix.browser }}
