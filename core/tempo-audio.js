@@ -1,7 +1,7 @@
 /**
  * Tempo ambient sound engine. Local Web Audio synthesis, no network required.
  * Playback is started only by a user action; scheduling never bypasses browser
- * autoplay policies. Focus breaks mute and suspend the graph; the next focus
+ * autoplay policies. Focus breaks mute the graph without suspending it; the next focus
  * automatically resumes the same source without requiring another gesture.
  */
 export class TempoAmbientAudio {
@@ -14,7 +14,6 @@ export class TempoAmbientAudio {
     this.pendingCleanups = new Map();
     this.playing = false;
     this.audible = false;
-    this.muteTimer = null;
     this.kind = "off";
     this.volume = .25;
     this.generation = 0;
@@ -38,10 +37,19 @@ export class TempoAmbientAudio {
     if (!Context) return false;
     this.stop(0);
     this.setVolume(volume);
+    const generation = this.generation;
+    let resumeTimeout;
     try {
+      // Safari otherwise treats Web Audio as ambient and may silence it in silent mode.
+      try { if (globalThis.navigator?.audioSession) globalThis.navigator.audioSession.type = "playback"; } catch (_) {}
       if (!this.context || this.context.state === "closed") this.context = new Context();
-      await this.context.resume();
       const context = this.context;
+      // Invoke resume and start sources in the same user gesture (Safari/iOS).
+      context.onstatechange = () => { if (this.context === context) this.onChange(this.playing, this.kind); };
+      const resumed = Promise.race([
+        context.resume(),
+        new Promise((_, reject) => { resumeTimeout = setTimeout(() => reject(new Error("Audio activation timed out")), 5000); })
+      ]);
       const master = context.createGain();
       this.audible = Boolean(audible);
       master.gain.value = this.audible ? this.volume : 0;
@@ -68,6 +76,9 @@ export class TempoAmbientAudio {
         oscillator.start();
         this.nodes.push(oscillator, depth);
       }
+      await resumed;
+      if (this.generation !== generation || this.context !== context) return false;
+      if (context.state !== "running") throw new Error("Audio context is not running");
       this.playing = true;
       this.onChange(true, kind);
       if (kind === "fire") {
@@ -93,24 +104,23 @@ export class TempoAmbientAudio {
         };
         this.crackleTimer = setInterval(crackle, 650);
       }
-      if (!this.audible) void context.suspend().catch(() => {});
       return true;
     } catch (error) {
-      this.stop(0);
+      if (this.generation === generation) this.stop(0);
       return false;
+    } finally {
+      clearTimeout(resumeTimeout);
     }
   }
   /**
    * Keep user consent and sound selection armed while muting the graph.
-   * Suspend the AudioContext after fading to save CPU during long breaks.
+   * Keep the context running so scheduled focus can resume without a new gesture.
    */
   setAudible(enabled, fadeSeconds = .9) {
     if (!this.playing || !this.context || !this.master) return;
     const audible = Boolean(enabled);
-    if (this.audible === audible) return;
+    if (this.audible === audible && (!audible || this.context.state === "running")) return;
     this.audible = audible;
-    if (this.muteTimer !== null) clearTimeout(this.muteTimer);
-    this.muteTimer = null;
     const generation = this.generation;
     const context = this.context;
     const master = this.master;
@@ -122,24 +132,16 @@ export class TempoAmbientAudio {
       master.gain.cancelScheduledValues(now);
       master.gain.setValueAtTime(master.gain.value, now);
       master.gain.linearRampToValueAtTime(audible ? this.volume : 0, now + duration);
-      if (!audible) {
-        this.muteTimer = setTimeout(() => {
-          this.muteTimer = null;
-          if (this.playing && !this.audible && this.generation === generation && this.master === master) {
-            void context.suspend().catch(() => {});
-          }
-        }, duration * 1000 + 90);
-      }
     };
-    if (audible) void context.resume().then(apply).catch(() => {});
+    if (audible) void context.resume().then(apply).catch(() => {
+      if (this.generation === generation) { this.audible = false; this.onChange(this.playing, this.kind); }
+    });
     else apply();
   }
   stop(fadeSeconds = .9) {
     ++this.generation;
     this.playing = false;
     this.audible = false;
-    if (this.muteTimer !== null) clearTimeout(this.muteTimer);
-    this.muteTimer = null;
     this.kind = "off";
     if (this.crackleTimer !== null) clearInterval(this.crackleTimer);
     this.crackleTimer = null;

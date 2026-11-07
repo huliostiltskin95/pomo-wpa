@@ -104,7 +104,35 @@ function render(){
   $('history').innerHTML=[...entries,...legacy].sort((a,b)=>String(b.date).localeCompare(String(a.date))).slice(0,100).map(h=>'<div class="item"><span>'+esc(h.title||'Sessione')+'<small>'+esc(h.date||'')+(h.measured?'':' · storico precedente, non verificato')+'</small></span><span>'+Math.floor(h.minutes)+' min</span></div>').join('')||'<p class="muted">Le sessioni svolte appariranno qui.</p>';
   $('old-backup').hidden=!localStorage.getItem(COPY);renderResources();renderTimer();
 }
-const ambient=new TempoAmbientAudio(playing=>{$('sound-toggle').textContent=playing?'Disattiva audio':'Attiva audio';});
+let audioRequest=0,audioPreviewUntil=0;
+const ambient=new TempoAmbientAudio(()=>updateAudioStatus());
+function focusAudio(){const s=active();return Boolean(s&&!s.paused&&getPhase(s).kind==='work');}
+function updateAudioStatus(){
+  $('sound-toggle').textContent=audioArmed?'Disattiva audio':'Attiva audio';
+  $('sound-toggle').setAttribute('aria-pressed',String(audioArmed));
+  $('sound-status').textContent=!audioArmed?'Scegli un suono e attiva l’audio. Prova suono riproduce 3 secondi.'
+    :ambient.context?.state!=='running'?'Audio bloccato: tocca Riattiva audio.'
+    :ambient.volume===0?'Volume a zero: alza il cursore.'
+    :Date.now()<audioPreviewUntil?'Prova del suono in corso (3 secondi).'
+    :focusAudio()?'Suono in riproduzione durante la concentrazione.'
+    :active()?'Audio attivo, silenzioso durante la pausa.':'Audio pronto: partirà durante la prossima sessione.';
+  $('sound-retry').hidden=!audioArmed||ambient.context?.state==='running';
+}
+function syncAudio(){
+  if(ambient.playing)ambient.setAudible(focusAudio()||Date.now()<audioPreviewUntil);
+  updateAudioStatus();
+}
+async function startAudio(preview=false){
+  if($('sound').value==='off')return tell('Scegli un suono.');
+  const request=++audioRequest;
+  audioPreviewUntil=preview?Date.now()+3000:0;
+  const started=await ambient.start($('sound').value,Number($('volume').value)/100,preview||focusAudio());
+  if(request!==audioRequest)return;
+  audioArmed=started;
+  if(!started)tell('Audio non disponibile: riprova toccando Attiva audio.');
+  syncAudio();
+}
+function stopAudio(){++audioRequest;audioPreviewUntil=0;audioArmed=false;ambient.stop(.9);updateAudioStatus();}
 const timerPip=createTimerPip({button:$('pip-toggle'),notify:tell,
   togglePause:()=>$('pause').click(),
   snapshot:()=>({active:Boolean(active()),paused:Boolean(active()?.paused),
@@ -140,7 +168,7 @@ function renderTimer(){
   const next=getNextSession(available());
   $('next').textContent=next?'Prossima: '+next.title+' · '+formatDate(next.date)+' alle '+next.start:'Nessun’altra sessione in programma.';
   if(s?.id!==activeId){activeId=s?.id||null;if(s){options($('resource-area'),s.area||s.title);renderResources();}}
-  if(ambient.playing)ambient.setAudible(Boolean(s&&!s.paused&&phase.kind==='work'));
+  syncAudio();
   timerPip.update();
   document.title=s?$('clock').textContent+' · TEMPVS':'TEMPVS · Tempo per te';
 }
@@ -196,8 +224,11 @@ $('preferences').onsubmit=e=>{e.preventDefault();
   }
 };
 $('resource-area').onchange=renderResources;$('resource-content').onchange=e=>{if(e.target.dataset.line===undefined)return;const area=config().areas.find(a=>a.name===$('resource-area').value),lines=area.description.split('\n');lines[Number(e.target.dataset.line)]=lines[Number(e.target.dataset.line)].replace(/\[([ xX])\]/,e.target.checked?'[x]':'[ ]');commit(()=>area.description=lines.join('\n'));};
-$('sound-toggle').onclick=async()=>{if(audioArmed){audioArmed=false;ambient.stop(.9);return;}if($('sound').value==='off')return tell('Scegli un suono.');audioArmed=await ambient.start($('sound').value,Number($('volume').value)/100,Boolean(active()&&!active().paused&&getPhase(active()).kind==='work'));if(!audioArmed)tell('Audio non disponibile.');};
-$('sound').onchange=async()=>{if($('sound').value==='off'){ambient.stop(.9);audioArmed=false;}else if(audioArmed){await ambient.start($('sound').value,Number($('volume').value)/100);renderTimer();}};$('volume').oninput=()=>ambient.setVolume(Number($('volume').value)/100);
+$('sound-toggle').onclick=()=>audioArmed?stopAudio():startAudio();
+$('sound-test').onclick=()=>startAudio(true);
+$('sound-retry').onclick=()=>startAudio();
+$('sound').onchange=()=>{if($('sound').value==='off')stopAudio();else void startAudio();};
+$('volume').oninput=()=>{ambient.setVolume(Number($('volume').value)/100);updateAudioStatus();};
 $('export').onclick=()=>{flush();backup();};$('old-backup').onclick=()=>download(JSON.parse(localStorage.getItem(COPY)),'tempvs-prima-della-semplificazione.json');
 async function applyRemote(data){const next=normalizeArchive(data);localStorage.setItem('tempo-simple-recovery',JSON.stringify(state));localStorage.setItem(KEY,JSON.stringify(next));state=next;loadCycleDefaults();lastTick=Date.now();proposal=null;$('proposal').hidden=true;render();planner?.syncAreas();}
 $('import').onchange=async()=>{try{const file=$('import').files[0];if(!file)return;const next=normalizeArchive(JSON.parse(await file.text()));if(!confirm('Ripristinare questo backup sostituendo i dati attuali? Verrà scaricata una copia dei dati attuali.'))return;backup();await applyRemote(next);cloud?.changed();tell('Backup ripristinato.');}catch(e){tell('Ripristino annullato: '+e.message);}finally{$('import').value='';}};
@@ -223,7 +254,7 @@ $('cloud-connect').onclick=()=>run(()=>cloud.connect($('cloud-key').value));$('c
 $('cloud-download').onclick=()=>{if(confirm('Sostituire i dati con Dropbox? Prima scarico una copia locale.')){backup();run(()=>cloud.info().ready?cloud.forceDownload(true):cloud.firstSync('download'));}};
 $('cloud-disconnect').onclick=()=>{if(confirm('Scollegare Dropbox mantenendo i dati locali?'))cloud.disconnect();};
 run(()=>cloud.init());
-window.addEventListener('pagehide',()=>{flush();ambient.stop(0);audioArmed=false;});document.addEventListener('visibilitychange',()=>{if(document.hidden)flush();else{lastTick=Date.now();render();}});
+window.addEventListener('pagehide',()=>{flush();++audioRequest;audioPreviewUntil=0;audioArmed=false;ambient.stop(0);});document.addEventListener('visibilitychange',()=>{if(document.hidden)flush();else{lastTick=Date.now();render();}});
 if('serviceWorker' in navigator){let reloading=false;navigator.serviceWorker.addEventListener('controllerchange',()=>{if(!reloading){reloading=true;flush();location.reload();}});navigator.serviceWorker.register('./sw.js',{updateViaCache:'none'}).then(r=>r.update()).catch(()=>tell('Modalità offline non disponibile al momento.'));}
 const page=location.hash.slice(1);const tab=[...document.querySelectorAll('[data-page]')].find(b=>b.dataset.page===page);if(tab)tab.click();
 

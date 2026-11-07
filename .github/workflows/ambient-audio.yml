@@ -1,0 +1,28 @@
+name: Ambient audio
+on:
+  push:
+    branches: [main]
+    paths: ['core/tempo-audio.js', 'simple.js', 'index.html', 'tests/ambient.e2e.mjs', '.github/workflows/ambient-audio.yml']
+  pull_request:
+    paths: ['core/tempo-audio.js', 'simple.js', 'index.html', 'tests/ambient.e2e.mjs', '.github/workflows/ambient-audio.yml']
+  workflow_dispatch:
+jobs:
+  audio:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        browser: [chromium, webkit]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-save playwright@1.56.1
+      - run: npx playwright install --with-deps ${{ matrix.browser }}
+      - name: Check audio signal and timer integration
+        env:
+          BROWSER: ${{ matrix.browser }}
+        run: |
+          python3 -m http.server 8123 --bind 127.0.0.1 >/tmp/tempo-http.log 2>&1 &
+          node tests/ambient.e2e.mjs
