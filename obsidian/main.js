@@ -1,6 +1,8 @@
 import { Plugin, ItemView, Notice, Platform } from "obsidian";
 import { getActiveSession, getPhase, sessionBounds, hasSessionOverlaps, localDateString, formatTime, mmss } from "../core/tempo-core.js";
 import { normalizeArchive, manualSessionEnd, measuredFocus, parseQuick, planSessions } from "../core/tempo-simple.js";
+import { createDropboxSync } from "../core/tempo-dropbox.js";
+import { dropboxRequest, createCloudStorage, chooseTempvsConflicts, confirmTempvs } from "./cloud-adapter.js";
 
 const VIEW_TYPE = "tempvs-timer";
 const ZERO = () => normalizeArchive({ sessions: [] });
@@ -59,6 +61,45 @@ class TempvsView extends ItemView {
     root.createDiv({ cls: "tempvs-sessions" });
     root.createEl("h4", { text: "Statistiche" });
     root.createDiv({ cls: "tempvs-statistics" });
+    root.createEl("h4", { text: "Dropbox" });
+    const cloud = root.createDiv({ cls: "tempvs-cloud tempvs-form" });
+    const status = cloud.createEl("p", { cls: "tempvs-cloud-status", text: plugin.cloudMessage || "Non collegato" });
+    status.setAttribute("role","status");
+    const key = cloud.createEl("input", { attr: { "aria-label": "Dropbox App key", placeholder: "App key Dropbox" } });
+    const link = cloud.createEl("a", { text: "Apri autorizzazione Dropbox", href: "#", cls: "tempvs-cloud-link" });
+    link.hidden = true; link.setAttribute("target","_blank"); link.setAttribute("rel","noopener noreferrer");
+    button(cloud, "1. Autorizza su Dropbox", async () => {
+      const url = await plugin.cloud.connect(key.value);
+      link.href = url; link.hidden = false;
+      await plugin.persist();
+      new Notice("Autorizza TEMPVS su Dropbox e copia il codice mostrato.");
+    });
+    const code = cloud.createEl("input", { attr: { "aria-label": "Codice autorizzazione Dropbox", placeholder: "Incolla il codice Dropbox", autocomplete: "off" } });
+    button(cloud, "2. Completa collegamento", async () => {
+      await plugin.cloud.exchangeManualCode(code.value);
+      code.value = "";
+      await plugin.persist();
+      plugin.refresh(true);
+    });
+    const actions = cloud.createDiv({ cls: "tempvs-controls" });
+    button(actions, "Sincronizza", () => plugin.cloudOperation("sync"));
+    button(actions, "Unisci", () => plugin.cloudOperation("mergeNow"));
+    const initial = cloud.createDiv({ cls: "tempvs-controls" });
+    button(initial, "Prima unione", () => plugin.cloudOperation("firstSync","merge"));
+    button(initial, "Scarica prima copia", async () => {
+      if(await confirmTempvs(plugin.app,"Scaricare il backup Dropbox?","Se il plugin contiene già sessioni locali, verrà creata una copia di recupero prima di sostituirle."))
+        await plugin.cloudOperation("firstSync","download");
+    });
+    button(initial, "Carica prima copia", () => plugin.cloudOperation("firstSync","upload"));
+    const dangerous = cloud.createDiv({ cls: "tempvs-controls" });
+    button(dangerous, "Sovrascrivi Dropbox", async () => {
+      if(await confirmTempvs(plugin.app,"Sovrascrivere Dropbox?","L'archivio remoto verrà sostituito con quello locale. Usa Unisci per evitare perdite."))
+        await plugin.cloudOperation("forceUpload");
+    });
+    button(dangerous, "Scollega", async () => {
+      if(await confirmTempvs(plugin.app,"Scollegare Dropbox?","Le sessioni locali resteranno salvate in Obsidian."))
+        { plugin.cloud.disconnect(); await plugin.persist(); plugin.refresh(true); }
+    });
     this.update(true);
   }
   update(full = false) {
@@ -79,6 +120,7 @@ class TempvsView extends ItemView {
       if (sessionBounds(s).start > new Date()) button(line, "Elimina", () => plugin.removeSession(s.id));
     }
     if (!list.childElementCount) list.createEl("p", { text: "Nessuna sessione programmata." });
+    root.querySelector(".tempvs-cloud-status").textContent = plugin.cloudMessage || "Non collegato";
     const focused = plugin.state.sessions.reduce((sum,s) => sum + (s.actualSeconds || 0), 0) +
       plugin.state.history.filter(h => h.measured).reduce((sum,h) => sum + h.minutes * 60, 0);
     root.querySelector(".tempvs-statistics").textContent = "Concentrazione registrata: " + minutes(focused) + " minuti";
@@ -92,6 +134,7 @@ export default class TempvsPlugin extends Plugin {
       if (data && !data.archive && !Array.isArray(data.sessions) && Object.keys(data).length)
         throw Error("Formato precedente non riconosciuto: nessun dato verrà sovrascritto.");
       this.state = normalizeArchive(data?.archive || (Array.isArray(data?.sessions) ? data : ZERO()));
+      this.cloudData = data?.cloudData && typeof data.cloudData === "object" ? data.cloudData : {};
     } catch (error) {
       new Notice("TEMPVS: dati non validi, archivio lasciato intatto. " + error.message, 10000);
       throw error;
@@ -100,6 +143,40 @@ export default class TempvsPlugin extends Plugin {
     this.lastSave = Date.now();
     this.dirty = false;
     this.writeChain = Promise.resolve();
+    this.cloudMessage = "Dropbox non collegato";
+    this.cloudStorage = createCloudStorage(this.cloudData, () => { this.cloudDirty = true; });
+    this.transientCloudStorage = createCloudStorage(this.cloudData?.__transient || {});
+    this.cloud = createDropboxSync({
+      getState: () => this.state,
+      applyRemote: async remote => {
+        this.record();
+        const next = normalizeArchive(remote);
+        const previous = this.state;
+        this.state = next;
+        try { await this.persist(); }
+        catch(error) { this.state = previous; throw error; }
+        this.lastTick = Date.now();
+        this.refresh(true);
+      },
+      normalizeRemote: normalizeArchive,
+      onStatus: (message, detail) => {
+        this.cloudMessage = message;
+        this.cloudInfo = detail;
+        this.refresh(true);
+      },
+      resolveConflicts: conflicts => chooseTempvsConflicts(this.app, conflicts),
+      platform: {
+        storage: this.cloudStorage,
+        transientStorage: this.transientCloudStorage,
+        manualAuthorization: true,
+        request: dropboxRequest,
+        navigate: async url => {
+          this.pendingAuthUrl = url;
+          await this.persist();
+        },
+        isOnline: () => navigator.onLine !== false
+      }
+    });
     this.registerView(VIEW_TYPE, leaf => new TempvsView(leaf, this));
     this.addCommand({ id: "open-tempvs", name: "Apri timer TEMPVS", callback: () => this.openView() });
     this.addCommand({ id: "pause-tempvs", name: "Pausa o riprendi TEMPVS", callback: () => this.togglePause().catch(e => new Notice(e.message)) });
@@ -117,6 +194,10 @@ export default class TempvsPlugin extends Plugin {
     this.registerInterval(window.setInterval(() => this.tick(), 1000));
     this.registerDomEvent(document, "visibilitychange", () => { if (!document.hidden) { this.tick(); this.refresh(true); } });
     this.refresh(true);
+    this.cloud.init().catch(error => {
+      this.cloudMessage = "Dropbox: " + error.message;
+      this.refresh(true);
+    });
   }
   get config() { return this.state.defaults.simple; }
   active() {
@@ -160,7 +241,8 @@ export default class TempvsPlugin extends Plugin {
   }
   async persist() {
     const archive = JSON.parse(JSON.stringify(this.state));
-    const write = this.writeChain.catch(() => {}).then(() => this.saveData({ archive }));
+    const cloudData = this.cloudStorage?.snapshot() || {};
+    const write = this.writeChain.catch(() => {}).then(() => this.saveData({ archive, cloudData }));
     this.writeChain = write;
     await write;
     if (JSON.stringify(this.state) === JSON.stringify(archive)) this.dirty = false;
@@ -170,6 +252,8 @@ export default class TempvsPlugin extends Plugin {
     const previous = JSON.stringify(this.state);
     try {
       mutator();
+      await this.persist();
+      this.cloud?.changed();
       await this.persist();
       this.refresh(true);
     } catch (error) {
@@ -220,9 +304,23 @@ export default class TempvsPlugin extends Plugin {
       this.state.syncDeleted.sessions.push(id);
     });
   }
+  async cloudOperation(method, argument) {
+    this.record();
+    if(this.dirty) await this.persist();
+    try {
+      if(method === "firstSync") await this.cloud.firstSync(argument);
+      else await this.cloud[method]();
+      await this.persist();
+      this.refresh(true);
+    } catch(error) {
+      await this.persist();
+      this.refresh(true);
+      throw error;
+    }
+  }
   async onunload() {
     this.record();
-    if (this.dirty) await this.persist().catch(e => console.error("TEMPVS:", e));
+    if (this.dirty || this.cloudDirty) await this.persist().catch(e => console.error("TEMPVS:", e));
     await this.writeChain.catch(() => {});
   }
 }
