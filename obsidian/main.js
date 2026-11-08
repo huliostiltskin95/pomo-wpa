@@ -319,6 +319,9 @@ export default class TempvsPlugin extends Plugin {
     this.ambient=new TempoAmbientAudio(()=>this.refreshAudioControls());
     this.lastTick = Date.now();
     this.lastSave = Date.now();
+    // Establish the starting phase without issuing a notification on plugin reload.
+    this.lastNoticeCheck = Date.now();
+    this.lastNotifiedPhase = this.currentNoticePhase(new Date(this.lastNoticeCheck));
     this.dirty = false;
     this.writeChain = Promise.resolve();
     this.cloudMessage = "Dropbox non collegato";
@@ -338,6 +341,8 @@ export default class TempvsPlugin extends Plugin {
         try { await this.persist(); }
         catch(error) { this.state = previous; throw error; }
         this.lastTick = Date.now();
+        this.lastNoticeCheck = this.lastTick;
+        this.lastNotifiedPhase = this.currentNoticePhase(new Date(this.lastTick));
         for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) leaf.view?.draw?.();
         this.syncAmbient();
         this.refresh(true);
@@ -391,6 +396,28 @@ export default class TempvsPlugin extends Plugin {
     });
   }
   get config() { return this.state.defaults.simple; }
+  currentNoticePhase(now = new Date()) {
+    const active = getActiveSession(this.state.sessions.filter(s => !s.finished), now);
+    if (!active || active.paused) return null;
+    const phase = getPhase(active, now);
+    return { id: active.id, kind: phase.kind, start: +phase.start, area: active.area || active.title };
+  }
+  notifyPhaseTransition(nowMs = Date.now()) {
+    const current = this.currentNoticePhase(new Date(nowMs));
+    const previous = this.lastNotifiedPhase;
+    const gap = nowMs - this.lastNoticeCheck;
+    this.lastNotifiedPhase = current;
+    this.lastNoticeCheck = nowMs;
+    // No late or duplicate alerts after sleep, reload, syncing, or tab inactivity.
+    if (!current || !previous || current.id !== previous.id ||
+        current.kind === previous.kind || gap < 0 || gap > 8000 ||
+        nowMs - current.start < 0 || nowMs - current.start > 8000 ||
+        document.hidden) return;
+    const message = current.kind === "break"
+      ? "TEMPVS · Inizia la pausa — " + current.area
+      : "TEMPVS · Riprende la concentrazione — " + current.area;
+    new Notice(message, 6500);
+  }
   refreshAudioControls(){
     for(const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE))leaf.view?.updateSoundControls?.();
   }
@@ -462,6 +489,7 @@ export default class TempvsPlugin extends Plugin {
     this.lastTick = now;
   }
   tick() {
+    this.notifyPhaseTransition();
     this.record();
     const now = Date.now();
     if (this.dirty && now - this.lastSave >= 15000) {
@@ -540,11 +568,15 @@ export default class TempvsPlugin extends Plugin {
     const s = this.active();
     if (!s) throw Error("Nessuna sessione attiva.");
     await this.change(() => { s.paused = !s.paused; });
+    this.lastNoticeCheck = Date.now();
+    this.lastNotifiedPhase = this.currentNoticePhase(new Date(this.lastNoticeCheck));
   }
   async finish() {
     const s = this.active();
     if (!s) throw Error("Nessuna sessione attiva.");
     await this.change(() => { s.finished = true; s.paused = false; });
+    this.lastNoticeCheck = Date.now();
+    this.lastNotifiedPhase = this.currentNoticePhase(new Date(this.lastNoticeCheck));
   }
   async removeSession(id) {
     const s = this.state.sessions.find(s => s.id === id);
