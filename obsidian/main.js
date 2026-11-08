@@ -1,5 +1,5 @@
-import { Plugin, ItemView, Notice, Platform, WorkspaceLeaf } from "obsidian";
-import { getActiveSession, getNextSession, getPhase, sessionBounds, hasSessionOverlaps, localDateString, formatTime, mmss } from "../core/tempo-core.js";
+import { Plugin, ItemView, Notice, Platform } from "obsidian";
+import { getActiveSession, getPhase, sessionBounds, hasSessionOverlaps, localDateString, formatTime, mmss } from "../core/tempo-core.js";
 import { normalizeArchive, manualSessionEnd, measuredFocus, parseQuick, planSessions } from "../core/tempo-simple.js";
 
 const VIEW_TYPE = "tempvs-timer";
@@ -41,9 +41,7 @@ class TempvsView extends ItemView {
     const focus = form.createEl("input", { type: "number", attr: { min: "1", max: "240", value: String(plugin.state.defaults.workMinutes), "aria-label": "Minuti focus" } });
     focus.required = true;
     const pause = form.createEl("input", { type: "number", attr: { min: "0", max: "1438", placeholder: "Pausa personalizzata (facoltativa)", "aria-label": "Minuti pausa personalizzata" } });
-    button(form, "Avvia", () => plugin.start(area.value, Number(gross.value), Number(focus.value), pause.value === "" ? undefined : Number(pause.value))).type = "submit";
-    // A submit handler, rather than a click handler, handles enter and touch reliably.
-    form.querySelector("button").replaceWith(form.createEl("button", { text: "Avvia", attr: { type: "submit" } }));
+    form.createEl("button", { text: "Avvia", attr: { type: "submit" } });
     form.addEventListener("submit", e => {
       e.preventDefault();
       plugin.start(area.value, Number(gross.value), Number(focus.value), pause.value === "" ? undefined : Number(pause.value)).catch(err => new Notice(err.message));
@@ -160,9 +158,10 @@ export default class TempvsPlugin extends Plugin {
   }
   async persist() {
     const archive = JSON.parse(JSON.stringify(this.state));
-    this.writeChain = this.writeChain.catch(() => {}).then(() => this.saveData({ archive }));
-    await this.writeChain;
-    this.dirty = false;
+    const write = this.writeChain.catch(() => {}).then(() => this.saveData({ archive }));
+    this.writeChain = write;
+    await write;
+    if (JSON.stringify(this.state) === JSON.stringify(archive)) this.dirty = false;
   }
   async change(mutator) {
     this.record();
