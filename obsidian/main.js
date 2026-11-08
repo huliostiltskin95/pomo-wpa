@@ -144,8 +144,12 @@ export default class TempvsPlugin extends Plugin {
     this.dirty = false;
     this.writeChain = Promise.resolve();
     this.cloudMessage = "Dropbox non collegato";
-    this.cloudStorage = createCloudStorage(this.cloudData, () => { this.cloudDirty = true; });
-    this.transientCloudStorage = createCloudStorage(this.cloudData?.__transient || {});
+    this.cloudStorage = createCloudStorage(this.cloudData, () => {
+      this.cloudDirty = true;
+      clearTimeout(this.cloudSaveTimer);
+      this.cloudSaveTimer = window.setTimeout(() => this.persist().catch(e =>
+        new Notice("TEMPVS: errore nel salvataggio Dropbox: " + e.message)), 150);
+    });
     this.cloud = createDropboxSync({
       getState: () => this.state,
       applyRemote: async remote => {
@@ -167,7 +171,7 @@ export default class TempvsPlugin extends Plugin {
       resolveConflicts: conflicts => chooseTempvsConflicts(this.app, conflicts),
       platform: {
         storage: this.cloudStorage,
-        transientStorage: this.transientCloudStorage,
+        transientStorage: this.cloudStorage,
         manualAuthorization: true,
         request: dropboxRequest,
         navigate: async url => {
@@ -246,6 +250,7 @@ export default class TempvsPlugin extends Plugin {
     this.writeChain = write;
     await write;
     if (JSON.stringify(this.state) === JSON.stringify(archive)) this.dirty = false;
+    if (JSON.stringify(this.cloudStorage?.snapshot() || {}) === JSON.stringify(cloudData)) this.cloudDirty = false;
   }
   async change(mutator) {
     this.record();
@@ -320,6 +325,7 @@ export default class TempvsPlugin extends Plugin {
   }
   async onunload() {
     this.record();
+    clearTimeout(this.cloudSaveTimer);
     if (this.dirty || this.cloudDirty) await this.persist().catch(e => console.error("TEMPVS:", e));
     await this.writeChain.catch(() => {});
   }
