@@ -71,3 +71,6 @@
 .tempvs-wide{max-width:860px;margin:0 auto}
 @media(min-width:650px){.tempvs-wide .tempvs-timer{padding:28px}.tempvs-wide .tempvs-clock{font-size:5rem}}
 @media(max-width:400px){.tempvs-root{padding:8px}.tempvs-section-heading{flex-wrap:wrap}.tempvs-clock{font-size:3rem}}
+
+.tempvs-shortcuts .tempvs-icon-button{width:auto;flex:1;flex-direction:column;gap:4px;min-height:58px;font-size:var(--font-ui-smaller);color:var(--text-normal)}
+.tempvs-shortcuts .tempvs-icon-button span{font-size:12px}
