@@ -29,6 +29,7 @@ jobs:
       - run: npm install --no-package-lock
       - run: npm test
       - run: npm run build:all
+      - run: node tests/obsidian-runtime.smoke.mjs
       - name: Package Obsidian plugin
         run: |
           mkdir -p dist/obsidian
