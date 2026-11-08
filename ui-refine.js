@@ -212,13 +212,38 @@ export function initRefinedUI() {
     }
   }
 
-  // Backup is maintenance, not a concentration statistic.
+  // Maintenance belongs to Settings, not daily statistics.
   const settings=byId('settings');
   const backup=byId('backup-status')?.closest('article');
   if(settings && backup) {
-    const section=group('Backup e sincronizzazione Dropbox', 'backup-settings');
-    section.append(backup);
+    const section=group('Backup locale e sincronizzazione Dropbox', 'backup-settings');
+    section.id='backup-settings';
+    const explainer=document.createElement('p');
+    explainer.className='settings-section-note';
+    explainer.textContent='Esporta, ripristina o sincronizza i dati. Le operazioni di sostituzione richiedono una conferma.';
+    section.append(explainer,backup);
     settings.append(section);
+    const existing=backup.querySelector('details');
+    if(existing) {
+      existing.classList.add('dropbox-settings');
+      const summary=existing.querySelector('summary');
+      if(summary)summary.textContent='Connessione e strumenti Dropbox';
+    }
+  }
+  const header=document.querySelector('header');
+  const settingsButton=byId('settings-open');
+  if(header && settingsButton && !byId('cloud-indicator')) {
+    const indicator=document.createElement('button');
+    indicator.type='button';indicator.id='cloud-indicator';
+    indicator.className='cloud-indicator';
+    indicator.setAttribute('aria-label','Stato della sincronizzazione Dropbox; apri impostazioni');
+    indicator.innerHTML='<span class="cloud-indicator-dot" aria-hidden="true"></span><span id="cloud-indicator-text">Backup locale</span>';
+    settingsButton.before(indicator);
+    indicator.addEventListener('click',()=>{
+      settingsButton.click();
+      const section=byId('backup-settings');
+      if(section){section.open=true;section.scrollIntoView({block:'nearest',behavior:'auto'});}
+    });
   }
 
   // Do not imply that every browser supports PiP; leave detection to timer-pip.js.
