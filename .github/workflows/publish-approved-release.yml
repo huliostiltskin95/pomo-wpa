@@ -1,0 +1,108 @@
+name: Publish TEMPVS 0.4.0 after release gate
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/tempvs-release-intent.json
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --no-package-lock
+      - run: npm test
+      - run: npm run build:all
+      - run: node tests/obsidian-runtime.smoke.mjs
+      - name: Verify release intent and version
+        run: |
+          node --input-type=module -e '
+          import fs from "node:fs";
+          const intent=JSON.parse(fs.readFileSync(".github/tempvs-release-intent.json","utf8"));
+          const manifest=JSON.parse(fs.readFileSync("manifest.json","utf8"));
+          if(intent.version !== manifest.version || !/^0\.4\.0$/.test(intent.version)) process.exit(1);
+          console.log("Publishing verified TEMPVS version",intent.version);
+          '
+      - name: Package plugin
+        run: |
+          mkdir -p dist/obsidian
+          cp obsidian/dist/main.js dist/obsidian/main.js
+          cp obsidian/styles.css dist/obsidian/styles.css
+          cp manifest.json dist/obsidian/manifest.json
+          cp versions.json dist/obsidian/versions.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-tempvs-pwa
+          path: dist/pwa/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-tempvs-plugin
+          path: dist/obsidian/
+  browser:
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --no-save --no-package-lock playwright
+      - run: npx playwright install --with-deps chromium
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-tempvs-pwa
+          path: dist/pwa
+      - name: Browser test of exact release package
+        run: |
+          python3 -m http.server 8123 --bind 127.0.0.1 --directory dist/pwa >/tmp/tempvs-http.log 2>&1 &
+          sleep 2
+          node tests/simple.e2e.mjs
+  deploy-pwa:
+    needs: browser
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-tempvs-pwa
+          path: dist/pwa
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist/pwa
+      - id: deploy
+        uses: actions/deploy-pages@v4
+  publish-plugin:
+    needs: deploy-pwa
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-tempvs-plugin
+          path: release
+      - name: Create tag and GitHub Release with BRAT files
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          gh release create v0.4.0 \
+            release/main.js release/manifest.json release/styles.css release/versions.json \
+            --repo "$REPOSITORY" \
+            --target "$COMMIT_SHA" \
+            --title "TEMPVS 0.4.0" \
+            --notes "PWA e plugin Obsidian dal medesimo core: timer, aree, pianificazione, Dropbox e collegamenti alle note." 
