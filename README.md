@@ -1,3 +1,13 @@
+## Fase 5 — Ottimizzazione mobile, accessibilità e prestazioni (novembre 2026)
+
+- Aggiornamento del timer e della relativa vista PiP ogni secondo anche quando il documento non è visibile, finché il browser consente l'esecuzione dei timer. Resta il limite imposto dal sistema operativo alle PWA in background.
+- Aggiornamento delle liste e delle statistiche una volta per minuto quando la pagina pertinente è visibile, oltre agli aggiornamenti immediati sui cambiamenti dei dati. Persistenza del tempo effettivamente misurato circa ogni 15 secondi, invariata.
+- Ricostruzione delle opzioni delle aree e del Markdown delle risorse soltanto quando i relativi dati cambiano.
+- Navigazione tramite hash coerente anche con i comandi avanti/indietro del browser, relazioni accessibili fra navigazione e sezioni, frecce/Home/End da tastiera, collegamento «Vai al contenuto».
+- Miglioramenti touch: bersagli di almeno 44 px per i principali controlli, campi mobile a 16 px, spazi di sicurezza iOS, focus visibile, contrasti elevati e rispetto della preferenza di ridurre il movimento.
+- Nessuna modifica al formato dei dati, al core Pomodoro, al modulo `timer-pip.js` o ai flussi Dropbox.
+- Service worker `tempo-pomodoro-v54`. Controlli statici di sintassi e integrazione superati; il collaudo sul dispositivo reale, specialmente del PiP su iPadOS, resta necessario.
+
 ## Fase 3 — Modifica e riprogrammazione (novembre 2026)
 
 - Spostamento delle sessioni con pannello dedicato: data e ora validate prima della conferma; durata lorda preservata e sovrapposizioni rifiutate.
