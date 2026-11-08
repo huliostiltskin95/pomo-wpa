@@ -47,9 +47,29 @@ jobs:
           path: dist/pwa/
           if-no-files-found: error
 
+  browser-smoke:
+    needs: verify-build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --no-save --no-package-lock playwright
+      - run: npx playwright install --with-deps chromium
+      - uses: actions/download-artifact@v4
+        with:
+          name: tempvs-pwa
+          path: dist/pwa
+      - name: Browser smoke against staged PWA
+        run: |
+          python3 -m http.server 8123 --bind 127.0.0.1 --directory dist/pwa >/tmp/tempvs-http.log 2>&1 &
+          sleep 2
+          node tests/simple.e2e.mjs
+
   deploy-pwa:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: verify-build
+    needs: [verify-build, browser-smoke]
     runs-on: ubuntu-latest
     permissions:
       pages: write
