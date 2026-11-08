@@ -1,9 +1,9 @@
 {
   "id": "tempo-pomodoro",
   "name": "Tempo — Pomodoro",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "minAppVersion": "1.5.0",
-  "description": "TEMPVS: timer Pomodoro, pianificazione, statistiche e barra di stato desktop.",
+  "description": "TEMPVS per Obsidian: timer, pianificazione e sincronizzazione Dropbox.",
   "author": "Tempo",
   "isDesktopOnly": false
 }
