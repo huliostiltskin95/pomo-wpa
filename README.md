@@ -1,3 +1,12 @@
+## Segnale acustico di fine focus (novembre 2026)
+
+- Alla fine di ogni fase di concentrazione viene emesso un breve segnale a due note, anche se i rumori ambientali sono disattivati; funziona sia per pause automatiche che per pause personalizzate e all'eventuale termine della sessione.
+- La preferenza «Segnale acustico alla fine del focus» è nelle Impostazioni → Timer e pause; è attiva per impostazione predefinita e può essere provata con «Prova segnale».
+- Il segnale è generato localmente tramite Web Audio, senza file esterni. Il contesto audio viene predisposto con un'interazione dell'utente per favorire la compatibilità con le politiche autoplay.
+- Nessun segnale arretrato se il browser viene riattivato diversi secondi dopo un passaggio di fase: questo evita avvisi fuori tempo.
+- La preferenza viene salvata con i dati dell'app, quindi è inclusa in backup e sincronizzazione. Il PiP resta invariato.
+- Cache offline `tempo-pomodoro-v56`. Safari/iPadOS può sospendere l'audio in background: il segnale non è garantito con app chiusa o sospesa.
+
 ## Fase 4 — Statistiche, impostazioni e Dropbox (novembre 2026)
 
 - Statistiche dedicate alla concentrazione realmente registrata: oggi, settimana corrente (da lunedì) e totale, con distribuzione settimanale per area e storico. I record storici non verificati restano visibili nello storico ma non contribuiscono ai totali.
