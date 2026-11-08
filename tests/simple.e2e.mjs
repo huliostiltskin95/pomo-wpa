@@ -8,8 +8,8 @@ try {
   await page.waitForFunction(() => typeof document.querySelector('[data-page="sessions"]')?.onclick === 'function', null, {timeout: 15000});
   await page.getByRole('button',{name:'Pianifica',exact:true}).click();
   await page.getByRole('button',{name:/Nuova sessione/}).click();
+  await page.locator('.planner-open-quick').click();
   await page.locator('#quick-date').fill('2099-11-06');
-  await page.locator('summary').filter({hasText:'Incolla più sessioni'}).click();
   await page.locator('#quick').fill('Studio @45m +08:30');
   await page.locator('#planner-import').click();
   await page.locator('#prepare-plan').click();
