@@ -4,6 +4,8 @@ import { normalizeArchive, manualSessionEnd, measuredFocus, parseQuick, planSess
 import { createDropboxSync } from "../core/tempo-dropbox.js";
 import { dropboxRequest, createCloudStorage, chooseTempvsConflicts, confirmTempvs } from "./cloud-adapter.js";
 import { noteLinks, appendNoteLink } from "./notes-integration.js";
+import { TempoAmbientAudio } from "../core/tempo-audio.js";
+import { getAmbientFocusMode } from "../core/tempo-core.js";
 
 const VIEW_TYPE = "tempvs-timer";
 const ZERO = () => normalizeArchive({ sessions: [] });
@@ -160,9 +162,21 @@ class TempvsView extends ItemView {
     const sounds=panels.createDiv({cls:"tempvs-panel tempvs-sound-panel"});
     sounds.hidden=true;
     sounds.createEl("h4",{text:"Suoni di sottofondo"});
-    sounds.createEl("p",{cls:"tempvs-help",text:"Le preferenze audio vengono applicate durante la sessione di concentrazione."});
-    // The Obsidian plugin does not yet expose the PWA audio engine.
-    sounds.createEl("p",{cls:"tempvs-muted",text:"I suoni ambientali non sono disponibili in questa versione del plugin Obsidian."});
+    sounds.createEl("p",{cls:"tempvs-help",text:"Il suono parte con un tocco durante il focus, si silenzia nelle pause e termina con una dissolvenza."});
+    const soundChoice=sounds.createEl("select",{cls:"tempvs-sound-choice",attr:{"aria-label":"Rumore ambientale"}});
+    for(const [value,label] of [["white","Rumore bianco"],["brown","Rumore marrone"],["rain","Pioggia"],["fire","Caminetto"]])soundChoice.createEl("option",{value,text:label});
+    soundChoice.value=plugin.audioKind;
+    soundChoice.addEventListener("change",()=>void plugin.selectAmbient(soundChoice.value).catch(e=>new Notice(e.message)));
+    const soundVolume=sounds.createDiv({cls:"tempvs-sound-volume"});
+    soundVolume.createEl("label",{text:"Volume",attr:{for:"tempvs-volume"}});
+    const slider=soundVolume.createEl("input",{cls:"tempvs-volume-slider",attr:{type:"range",id:"tempvs-volume",min:"0",max:"100",step:"1","aria-label":"Volume audio"}});
+    slider.value=String(plugin.audioVolume);
+    slider.addEventListener("input",()=>plugin.adjustAmbientVolume(Number(slider.value)));
+    slider.addEventListener("change",()=>void plugin.persist().catch(e=>new Notice(e.message)));
+    const soundToggle=sounds.createEl("button",{cls:"tempvs-sound-toggle mod-cta",text:"Avvia suono"});
+    // Preserve iOS user activation: never defer this handler to a microtask.
+    soundToggle.addEventListener("click",()=>void plugin.toggleAmbient().catch(e=>new Notice(e.message)));
+    sounds.createDiv({cls:"tempvs-sound-status",attr:{role:"status","aria-live":"polite"}});
     const notes=panels.createDiv({cls:"tempvs-panel tempvs-notes-panel"});
     notes.hidden=true;
     notes.createEl("h4",{text:"Risorse Obsidian"});
@@ -197,6 +211,18 @@ class TempvsView extends ItemView {
       if(el)setPanel(el,this.panel===name);
     }
   }
+  updateSoundControls(){
+    const root=this.containerEl.children[1], plugin=this.plugin;
+    if(!root?.hasClass("tempvs-root"))return;
+    const active=plugin.active();
+    const eligible=Boolean(active && !active.paused && getPhase(active).kind==="work");
+    const toggle=root.querySelector(".tempvs-sound-toggle");
+    if(toggle){toggle.disabled=!plugin.ambient.playing&&!eligible;toggle.textContent=plugin.ambient.playing?"Ferma suono":"Avvia suono";}
+    const status=root.querySelector(".tempvs-sound-status");
+    if(status)status.textContent=plugin.ambient.playing
+      ? (plugin.ambient.audible?"Suono attivo":"In attesa della concentrazione")
+      : (eligible?"Pronto":"Disponibile durante la concentrazione");
+  }
   renderNotes(){
     const root=this.containerEl.children[1];
     const area=root.querySelector(".tempvs-note-area")?.value;
@@ -221,6 +247,7 @@ class TempvsView extends ItemView {
     const finish=root.querySelector(".tempvs-finish-button");
     if(pause){pause.disabled=!active;pause.textContent=active?.paused?"Riprendi":"Pausa";}
     if(finish)finish.disabled=!active;
+    this.updateSoundControls();
     const cloud=root.querySelector(".tempvs-cloud-indicator");
     if(cloud){
       const status=plugin.cloudMessage||"Dropbox non collegato";
@@ -281,10 +308,15 @@ export default class TempvsPlugin extends Plugin {
       this.cloudData = data?.cloudData && typeof data.cloudData === "object" ? data.cloudData : {};
       this.compact = typeof data?.ui?.compact === "boolean" ? data.ui.compact : Platform.isMobile;
       this.layout = ["auto","side","wide"].includes(data?.ui?.layout) ? data.ui.layout : "auto";
+      this.audioKind = ["white","brown","rain","fire"].includes(data?.audio?.kind) ? data.audio.kind : "brown";
+      const savedVolume=Number(data?.audio?.volume);
+      this.audioVolume=data?.audio?.volume!==undefined&&Number.isFinite(savedVolume)
+        ? Math.max(0,Math.min(100,Math.round(savedVolume))) : 25;
     } catch (error) {
       new Notice("TEMPVS: dati non validi, archivio lasciato intatto. " + error.message, 10000);
       throw error;
     }
+    this.ambient=new TempoAmbientAudio(()=>this.refreshAudioControls());
     this.lastTick = Date.now();
     this.lastSave = Date.now();
     this.dirty = false;
@@ -307,6 +339,7 @@ export default class TempvsPlugin extends Plugin {
         catch(error) { this.state = previous; throw error; }
         this.lastTick = Date.now();
         for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) leaf.view?.draw?.();
+        this.syncAmbient();
         this.refresh(true);
       },
       normalizeRemote: normalizeArchive,
@@ -350,7 +383,7 @@ export default class TempvsPlugin extends Plugin {
       this.status.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); this.openView(); } });
     }
     this.registerInterval(window.setInterval(() => this.tick(), 1000));
-    this.registerDomEvent(document, "visibilitychange", () => { if (!document.hidden) { this.tick(); this.refresh(true); } });
+    this.registerDomEvent(document, "visibilitychange", () => { if (!document.hidden) { this.tick(); this.syncAmbient(); this.refresh(true); } });
     this.refresh(true);
     this.cloud.init().catch(error => {
       this.cloudMessage = "Dropbox: " + error.message;
@@ -358,6 +391,42 @@ export default class TempvsPlugin extends Plugin {
     });
   }
   get config() { return this.state.defaults.simple; }
+  refreshAudioControls(){
+    for(const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE))leaf.view?.updateSoundControls?.();
+  }
+  syncAmbient(now=new Date()){
+    if(!this.ambient?.playing)return;
+    const pending=this.state.sessions.filter(s=>!s.finished);
+    const mode=getAmbientFocusMode(pending,now);
+    if(mode==="finished"){this.ambient.stop(.9);return;}
+    const active=getActiveSession(pending,now);
+    this.ambient.setAudible(mode==="focus"&&!active?.paused);
+  }
+  async toggleAmbient(){
+    if(this.ambient.playing){this.ambient.stop(.9);return;}
+    const active=this.active();
+    if(!active||active.paused||getPhase(active).kind!=="work"){
+      new Notice("Avvia il suono durante una sessione di concentrazione non in pausa.");
+      return;
+    }
+    const started=this.ambient.start(this.audioKind,this.audioVolume/100,true);
+    if(!(await started))new Notice("Impossibile avviare l'audio: verifica i permessi su Obsidian e iPadOS.");
+    else this.syncAmbient();
+  }
+  async selectAmbient(kind){
+    if(!["white","brown","rain","fire"].includes(kind))return;
+    this.audioKind=kind;
+    const restarted=this.ambient.playing?this.ambient.start(kind,this.audioVolume/100,
+      getAmbientFocusMode(this.state.sessions.filter(s=>!s.finished))==="focus"&&!this.active()?.paused):null;
+    if(restarted&&!(await restarted))new Notice("Impossibile cambiare il rumore ambientale.");
+    this.syncAmbient();
+    await this.persist();
+  }
+  adjustAmbientVolume(value){
+    if(!Number.isFinite(value))return;
+    this.audioVolume=Math.max(0,Math.min(100,Math.round(value)));
+    this.ambient.setVolume(this.audioVolume/100);
+  }
   active() {
     const session = getActiveSession(this.state.sessions.filter(s => !s.finished));
     return session || null;
@@ -374,6 +443,7 @@ export default class TempvsPlugin extends Plugin {
   }
   openSettings() { this.app.setting?.open(); this.app.setting?.openTabById(this.manifest.id); }
   refresh(full = false) {
+    this.syncAmbient();
     const session = this.active();
     const phase = session ? getPhase(session) : null;
     if (this.status) {
@@ -405,7 +475,8 @@ export default class TempvsPlugin extends Plugin {
   async persist() {
     const archive = JSON.parse(JSON.stringify(this.state));
     const cloudData = this.cloudStorage?.snapshot() || {};
-    const write = this.writeChain.catch(() => {}).then(() => this.saveData({ archive, cloudData, ui:{compact:this.compact,layout:this.layout} }));
+    const audio={kind:this.audioKind,volume:this.audioVolume};
+    const write = this.writeChain.catch(() => {}).then(() => this.saveData({ archive, cloudData, ui:{compact:this.compact,layout:this.layout},audio }));
     this.writeChain = write;
     await write;
     if (JSON.stringify(this.state) === JSON.stringify(archive)) this.dirty = false;
@@ -498,6 +569,7 @@ export default class TempvsPlugin extends Plugin {
     }
   }
   async onunload() {
+    this.ambient?.destroy();
     this.record();
     clearTimeout(this.cloudSaveTimer);
     if (this.dirty || this.cloudDirty) await this.persist().catch(e => console.error("TEMPVS:", e));
