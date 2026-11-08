@@ -391,7 +391,7 @@ function cloudStatus(message,info){
   $('cloud-upload').hidden=info.ready;
   const indicator=$('cloud-indicator'),label=$('cloud-indicator-text');
   if(!indicator||!label)return;
-  const status=info.busy?'busy':!info.connected?'disconnected':info.phase==='error'?'error':!info.ready?'setup':info.dirty?'pending':'synced';
+  const status=info.busy?'busy':!info.connected?'disconnected':(info.phase==='error'||/\b(?:errore|error|failed|http [45]\d\d|conflitto non risolto)\b/i.test(message))?'error':!info.ready?'setup':info.dirty?'pending':'synced';
   const names={busy:'Sincronizzazione…',disconnected:'Dropbox non collegato',error:'Errore Dropbox',setup:'Dropbox da configurare',pending:'Modifiche da sincronizzare',synced:'Sincronizzato'};
   indicator.dataset.status=status;
   label.textContent=names[status];
