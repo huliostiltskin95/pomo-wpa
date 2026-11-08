@@ -234,59 +234,124 @@ export function updatePlannerDay(date, sessions, windows){
 function createDialog(title, body) {
   const dialog=document.createElement('dialog');
   dialog.className='edit-dialog';
-  dialog.innerHTML='<form method="dialog"><h2></h2><div class="edit-dialog-body"></div><div class="edit-dialog-actions"><button type="button" data-cancel>Annulla</button><button type="submit" class="primary" value="save">Conferma</button></div></form>';
-  dialog.querySelector('h2').textContent=title;
-  dialog.querySelector('.edit-dialog-body').append(body);
-  document.body.append(dialog);
-  return dialog;
+  const form=document.createElement('form');
+  form.noValidate=true;
+  const heading=document.createElement('h2');heading.textContent=title;
+  const message=document.createElement('p');message.className='edit-dialog-context';
+  const content=document.createElement('div');content.className='edit-dialog-body';content.append(body);
+  const error=document.createElement('p');error.className='edit-dialog-error';error.setAttribute('role','alert');error.hidden=true;
+  const actions=document.createElement('div');actions.className='edit-dialog-actions';
+  const cancel=document.createElement('button');cancel.type='button';cancel.textContent='Annulla';
+  const submit=document.createElement('button');submit.type='submit';submit.className='primary';submit.textContent='Conferma';
+  actions.append(cancel,submit);form.append(heading,message,content,error,actions);dialog.append(form);document.body.append(dialog);
+  return {dialog,form,message,error,cancel,submit};
+}
+function field(name, label, type, value) {
+  const wrapper=document.createElement('label');wrapper.textContent=label;
+  const input=document.createElement('input');input.name=name;input.type=type;input.value=value;
+  input.required=true;
+  if(type==='number'){input.min='0';input.step='1';input.inputMode='numeric';}
+  wrapper.append(input);return {wrapper,input};
+}
+function showError(target,message) {target.textContent=message;target.hidden=false;}
+function dateParts(value) {
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(value))return null;
+  const [y,m,d]=value.split('-').map(Number);
+  const test=new Date(y,m-1,d,12);
+  return test.getFullYear()===y&&test.getMonth()===m-1&&test.getDate()===d ? [y,m,d] : null;
+}
+function clockParts(value) {
+  if(!/^([01]\d|2[0-3]):[0-5]\d$/.test(value))return null;
+  return value.split(':').map(Number);
 }
 export function editSessionDetails(session, action) {
+  if(!['move','pause'].includes(action))return Promise.resolve(null);
   return new Promise(resolve=>{
     const body=document.createElement('div');
-    const fields=action==='move'
-      ? [{id:'date',label:'Giorno',type:'date',value:session.date},{id:'start',label:'Orario di inizio',type:'time',value:session.start}]
-      : [{id:'pause',label:'Minuti di pausa finale',type:'number',value:String(session.customBreakMinutes??5)}];
-    if(action==='pause'){
-      const auto=document.createElement('label');
-      auto.className='check';
-      auto.innerHTML='<input type="checkbox" id="edit-auto-pause"> Usa pause automatiche';
-      body.append(auto);
+    const duration=Math.round((new Date(session.date+'T'+session.end)-new Date(session.date+'T'+session.start))/60000);
+    const gross=duration>0?duration:duration+1440;
+    const modal=createDialog(action==='move'?'Sposta sessione':'Modifica pause',body);
+    modal.message.textContent=session.title+' · '+session.start+'–'+session.end+' · durata lorda '+gross+' min';
+    let date,start,pause,auto;
+    if(action==='move'){
+      date=field('date','Nuovo giorno','date',session.date);
+      start=field('start','Nuovo orario di inizio','time',session.start);
+      body.append(date.wrapper,start.wrapper);
+      const note=document.createElement('p');note.className='edit-dialog-note';note.textContent='La durata lorda resta invariata; gli orari occupati non possono sovrapporsi.';
+      body.append(note);
+    }else{
+      const autoLabel=document.createElement('label');autoLabel.className='check';
+      auto=document.createElement('input');auto.type='checkbox';auto.checked=session.customBreakMinutes===undefined;
+      const autoText=document.createElement('span');autoText.textContent='Usa i cicli automatici';
+      autoLabel.append(auto,autoText);body.append(autoLabel);
+      pause=field('pause','Pausa finale (minuti)','number',String(session.customBreakMinutes??5));
+      pause.input.max=String(Math.max(0,gross-1));
+      pause.input.disabled=auto.checked;
+      body.append(pause.wrapper);
+      const note=document.createElement('p');note.className='edit-dialog-note';
+      note.textContent='La pausa è inclusa nei '+gross+' minuti lordi; non prolunga la sessione.';
+      body.append(note);
+      auto.addEventListener('change',()=>{pause.input.disabled=auto.checked;modal.error.hidden=true;});
     }
-    for(const f of fields){
-      const label=document.createElement('label');
-      label.textContent=f.label;
-      const input=document.createElement('input');
-      input.id='edit-'+f.id; input.type=f.type; input.value=f.value; input.required=true;
-      if(f.type==='number'){input.min='0';input.step='1';}
-      label.append(input);body.append(label);
-    }
-    const dialog=createDialog(action==='move'?'Sposta sessione':'Modifica pause',body);
-    const auto=dialog.querySelector('#edit-auto-pause'),pause=dialog.querySelector('#edit-pause');
-    if(auto&&pause)auto.addEventListener('change',()=>{pause.disabled=auto.checked;});
-    const close=()=>{const value=dialog.returnValue;
-      const data=value==='save'?action==='move'
-        ?{date:dialog.querySelector('#edit-date').value,start:dialog.querySelector('#edit-start').value}
-        :{pause:auto?.checked?'auto':pause.value}:null;
-      dialog.remove();resolve(data);
-    };
-    dialog.querySelector('[data-cancel]').onclick=()=>dialog.close('cancel');
-    dialog.addEventListener('close',close,{once:true});
-    dialog.showModal();
+    let outcome=null;
+    modal.cancel.onclick=()=>modal.dialog.close();
+    modal.form.addEventListener('submit',event=>{
+      event.preventDefault();
+      modal.error.hidden=true;
+      if(action==='move'){
+        const parts=dateParts(date.input.value),clock=clockParts(start.input.value);
+        if(!parts||!clock)return showError(modal.error,'Indica una data reale e un orario valido.');
+        const when=new Date(parts[0],parts[1]-1,parts[2],clock[0],clock[1]);
+        if(when.getFullYear()!==parts[0]||when.getMonth()!==parts[1]-1||when.getDate()!==parts[2]||when.getHours()!==clock[0]||when.getMinutes()!==clock[1])
+          return showError(modal.error,'Questo orario non esiste nella data selezionata.');
+        if(+when<Date.now())return showError(modal.error,'Non puoi spostare una sessione nel passato.');
+        outcome={date:date.input.value,start:start.input.value};
+      }else{
+        if(auto.checked)outcome={pause:'auto'};
+        else {
+          const value=pause.input.value.trim(),number=Number(value);
+          if(!value||!Number.isInteger(number)||number<0||number>=gross)
+            return showError(modal.error,'La pausa deve essere un numero intero tra 0 e '+(gross-1)+' minuti.');
+          outcome={pause:String(number)};
+        }
+      }
+      modal.dialog.close();
+    });
+    modal.dialog.addEventListener('close',()=>{modal.dialog.remove();resolve(outcome);},{once:true});
+    modal.dialog.showModal();
   });
 }
 export function chooseSyncConflict(conflict) {
   return new Promise(resolve=>{
-    const content=document.createElement('div');
-    const description=document.createElement('p');description.textContent=conflict.label;content.append(description);
-    const local=document.createElement('p');local.textContent='Locale: '+conflict.localPreview;content.append(local);
-    const remote=document.createElement('p');remote.textContent='Dropbox: '+conflict.remotePreview;content.append(remote);
-    const options=document.createElement('select');
-    options.setAttribute('aria-label','Versione da conservare');
-    conflict.options.forEach((o,i)=>{const op=document.createElement('option');op.value=String(i);op.textContent=o.label;options.append(op);});
-    content.append(options);
-    const dialog=createDialog('Risolvi conflitto Dropbox',content);
-    dialog.querySelector('[data-cancel]').onclick=()=>dialog.close('cancel');
-    dialog.addEventListener('close',()=>{const result=dialog.returnValue==='save'?conflict.options[Number(options.value)]?.value:null;dialog.remove();resolve(result??null);},{once:true});
-    dialog.showModal();
+    const content=document.createElement('div');content.className='sync-conflict-detail';
+    for(const [label,value] of [['Dati locali',conflict.localPreview],['Dati Dropbox',conflict.remotePreview]]){
+      const part=document.createElement('section');
+      const title=document.createElement('strong');title.textContent=label;
+      const description=document.createElement('p');description.textContent=value;
+      part.append(title,description);content.append(part);
+    }
+    const choices=document.createElement('fieldset');
+    const legend=document.createElement('legend');legend.textContent='Scegli quale versione conservare';
+    choices.append(legend);
+    const groupName='sync-choice';
+    conflict.options.forEach((option,index)=>{
+      const label=document.createElement('label');label.className='sync-choice';
+      const radio=document.createElement('input');radio.type='radio';radio.name=groupName;radio.value=String(index);
+      const span=document.createElement('span');span.textContent=option.label;label.append(radio,span);choices.append(label);
+    });
+    content.append(choices);
+    const modal=createDialog('Conflitto di sincronizzazione',content);
+    modal.message.textContent=conflict.label+' — nessuna versione verrà scelta automaticamente.';
+    let result=null;
+    modal.cancel.onclick=()=>modal.dialog.close();
+    modal.form.addEventListener('submit',event=>{
+      event.preventDefault();
+      const selected=choices.querySelector('input:checked');
+      if(!selected)return showError(modal.error,'Seleziona una delle versioni per continuare.');
+      result=conflict.options[Number(selected.value)]?.value??null;
+      modal.dialog.close();
+    });
+    modal.dialog.addEventListener('close',()=>{modal.dialog.remove();resolve(result);},{once:true});
+    modal.dialog.showModal();
   });
 }
