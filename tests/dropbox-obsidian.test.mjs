@@ -43,12 +43,12 @@ test("PKCE manual flow omits redirect and survives persisted pending authorizati
 });
 test("initial download retains the same remote snapshot schema and recovery",async()=>{
   const saved=storage({"tempo-dropbox-auth-v1":JSON.stringify({appKey:"validkey123",refreshToken:"refresh-123",accessToken:"access-123",expiresAt:Date.now()+900000})});
-  const local={sessions:[],tasks:[],history:[],defaults:{simple:{areas:[{name:"Studio",description:""}]}}};
+  let local={sessions:[],tasks:[],history:[],defaults:{simple:{areas:[{name:"Studio",description:""}]}}};
   const remote={app:"Tempo Pomodoro",version:5,sessions:[],tasks:[],history:[],defaults:{simple:{areas:[{name:"Studio",description:"Esempio"}]}},syncDeleted:{tasks:[],sessions:[]}};
   let applied;
   const sync=createDropboxSync({
     getState:()=>local,
-    applyRemote:async data=>{applied=data;},
+    applyRemote:async data=>{applied=data;local=data;},
     normalizeRemote:data=>data,
     onStatus:()=>{},
     platform:{
