@@ -29,6 +29,57 @@ export function initRefinedUI() {
   const next=byId('next');
   next?.classList.add('next-session-card');
 
+  // Phase 1: structurally distinct start and live-timer surfaces.
+  // Existing controls are moved, not cloned: the audio engine and PiP handlers
+  // still read the same elements and the same real session.
+  const card=byId('focus-panel');
+  if(card) {
+    const hero=document.createElement('section');
+    hero.className='tempo-hero';
+    hero.setAttribute('aria-label','Sessione di concentrazione');
+    for(const id of ['phase','active-title','clock','phase-progress','session-deadline','cycle-note','timer-note']) {
+      const element=byId(id);
+      if(element)hero.append(element);
+    }
+    const actions=card.querySelector(':scope > .row.center');
+    if(actions){actions.classList.add('tempo-live-actions');hero.append(actions);}
+    card.prepend(hero);
+    timerForm.classList.add('tempo-launch');
+    const minutes=byId('instant-minutes');
+    const presets=document.createElement('div');
+    presets.className='tempo-presets';
+    presets.setAttribute('role','group');
+    presets.setAttribute('aria-label','Durate lorde rapide');
+    for(const duration of [30,60,90]){
+      const button=document.createElement('button');
+      button.type='button';
+      button.textContent=duration+' min';
+      button.dataset.minutes=String(duration);
+      button.addEventListener('click',()=>{
+        minutes.value=String(duration);
+        minutes.dispatchEvent(new Event('input',{bubbles:true}));
+      });
+      presets.append(button);
+    }
+    const reflect=()=>{
+      for(const b of presets.querySelectorAll('button')){
+        const current=b.dataset.minutes===minutes.value;
+        b.classList.toggle('selected',current);
+        b.setAttribute('aria-pressed',String(current));
+      }
+    };
+    minutes?.addEventListener('input',reflect);
+    minutes?.closest('label')?.after(presets);
+    reflect();
+    const launchHeading=document.createElement('div');
+    launchHeading.className='tempo-launch-heading';
+    launchHeading.innerHTML='<span class="tempo-kicker">AVVIO RAPIDO</span><h2>Dedica tempo a ciò che conta</h2><p>Seleziona un’area e una durata lorda. Il ciclo Pomodoro resta configurabile.</p>';
+    timerForm.prepend(launchHeading);
+    const audio=card.querySelector(':scope > details');
+    if(audio)audio.classList.add('tempo-audio');
+  }
+
+
   // Make the session list the landing view, with planning controls available on demand.
   const sessions=byId('sessions');
   const planning= sessions?.querySelector('.planning-layout');
