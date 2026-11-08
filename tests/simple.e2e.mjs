@@ -22,8 +22,6 @@ try {
   await page.getByRole('button',{name:'Timer',exact:true}).click();
   await page.locator('#instant-minutes').fill('45');
   await page.locator('details.advanced-controls > summary').click();
-  await page.locator('details.advanced-controls > summary').click();
-  await page.locator('#instant-focus').fill('25');
   assert.match(await page.locator('#instant-end-time').innerText(),/\d{2}:\d{2}/);
   await page.getByRole('button',{name:'Inizia ora',exact:true}).click();
   assert.equal(await page.locator('#session-deadline').isVisible(),true);
