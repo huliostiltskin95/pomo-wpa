@@ -84,7 +84,12 @@ const active=()=>getActiveSession(available());
 function commit(change){const previous=JSON.stringify(state);try{change();localStorage.setItem(KEY,JSON.stringify(state));proposal=null;$('proposal').hidden=true;cloud?.changed();render();planner?.syncAreas();return true;}catch(e){state=JSON.parse(previous);tell('Salvataggio non riuscito: '+e.message);return false;}}
 function download(data,name){const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
 function backup(){download({app:'TEMPVS',version:6,exportedAt:new Date().toISOString(),...state},'tempvs-'+localDateString()+'.json');$('backup-status').textContent='Backup esportato alle '+formatTime(new Date());}
-function options(select,chosen){const old=chosen||select.value;select.innerHTML=config().areas.map(a=>'<option>'+esc(a.name)+'</option>').join('');if(config().areas.some(a=>a.name===old))select.value=old;}
+function options(select,chosen){
+  const names=config().areas.map(a=>a.name),previous=chosen||select.value;
+  const unchanged=select.options.length===names.length && names.every((name,i)=>select.options[i].value===name);
+  if(!unchanged)select.replaceChildren(...names.map(name=>new Option(name,name)));
+  if(names.includes(previous)&&select.value!==previous)select.value=previous;
+}
 function inline(text){
   // Tokenize code and links before emphasis, so formatting never modifies href attributes.
   const tokens=[];let out=esc(text).replace(/`([^`]+)`/g,(_,s)=>{tokens.push('<code>'+s+'</code>');return '\u0000'+(tokens.length-1)+'\u0000';});
@@ -92,7 +97,15 @@ function inline(text){
   return out.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>').replace(/\*(.+?)\*/g,'<em>$1</em>').replace(/~~(.+?)~~/g,'<del>$1</del>').replace(/\u0000(\d+)\u0000/g,(_,i)=>tokens[i]);
 }
 function markdown(text){let code=false;return String(text).split('\n').map((line,i)=>{if(line.startsWith('```')){code=!code;return code?'<pre><code>':'</code></pre>';}if(code)return esc(line)+'\n';const check=line.match(/^\s*[-*] \[([ xX])\] (.*)$/);if(check)return '<label class="check"><input type="checkbox" data-line="'+i+'" '+(check[1].toLowerCase()==='x'?'checked':'')+'><span>'+inline(check[2])+'</span></label>';const heading=line.match(/^(#{1,6}) (.*)$/);if(heading)return '<h'+heading[1].length+'>'+inline(heading[2])+'</h'+heading[1].length+'>';if(line.startsWith('> '))return '<blockquote>'+inline(line.slice(2))+'</blockquote>';return '<div>'+inline(line.replace(/^[-*] /,'• '))+(line?'':'<br>')+'</div>';}).join('')+(code?'</code></pre>':'');}
-function renderResources(){const area=config().areas.find(a=>a.name===$('resource-area').value);$('resource-content').innerHTML=markdown(area?.description||'Nessuna indicazione. Aggiungi risorse e promemoria dalle impostazioni.');}
+let renderedResourceKey=null;
+function renderResources(){
+  const area=config().areas.find(a=>a.name===$('resource-area').value);
+  const content=area?.description||'Nessuna indicazione. Aggiungi risorse e promemoria dalle impostazioni.';
+  const key=JSON.stringify([area?.name,content]);
+  if(renderedResourceKey===key)return;
+  $('resource-content').innerHTML=markdown(content);
+  renderedResourceKey=key;
+}
 function render(){
   for(const id of ['instant-area','resource-area','edit-area'])options($(id));
   $('windows').innerHTML=[...config().windows].sort((a,b)=>sessionBounds(a).start-sessionBounds(b).start).map(w=>'<div class="item"><span>'+esc(formatDate(w.date))+'<small>'+w.start+'–'+w.end+'</small></span><button data-remove-window="'+esc(w.id)+'" aria-label="Elimina fascia">×</button></div>').join('')||'<p class="muted">Nessuna fascia: aggiungi il primo giorno.</p>';
@@ -148,6 +161,7 @@ const timerPip=createTimerPip({button:$('pip-toggle'),notify:tell,
     title:$('active-title').textContent,phase:$('phase').textContent,clock:$('clock').textContent,
     end:active()?'Fine sessione '+$('deadline-time').textContent:'Nessuna sessione in corso',
     progress:Number($('phase-progress').value),color:$('timer').style.getPropertyValue('--area-color')||'#276c53'})});
+let lastManualPreviewMinute=-1;
 function renderTimer(){
   const s=active(),phase=s?getPhase(s):null;
   $('timer').classList.toggle('timer-live',Boolean(s));
@@ -160,7 +174,13 @@ function renderTimer(){
     $('deadline-detail').textContent=s.paused
       ? 'Orario invariato durante la sospensione · pause comprese'
       : 'Tempo lordo residuo '+mmss(Math.ceil(Math.max(0,end-Date.now())/1000))+' · pause comprese';
-  }else updateManualEndPreview();
+  }else{
+    const currentMinute=Math.floor(Date.now()/60000);
+    if(lastManualPreviewMinute!==currentMinute){
+      lastManualPreviewMinute=currentMinute;
+      updateManualEndPreview();
+    }
+  }
   $('focus-open').hidden=!s||document.body.classList.contains('focus-immersive');
   $('focus-close').hidden=!document.body.classList.contains('focus-immersive');
   $('timer').style.setProperty('--area-color',timerColor(colorFor(s?.area||s?.title||$('instant-area').value),phase,s?.paused));
@@ -184,7 +204,22 @@ function renderTimer(){
 }
 function record(){const now=Date.now();for(const s of state.sessions){const seconds=measuredFocus(s,lastTick,now);if(seconds){s.actualSeconds=(s.actualSeconds||0)+seconds;measuredDirty=true;}}lastTick=now;}
 function flush(){record();if(!measuredDirty)return;try{localStorage.setItem(KEY,JSON.stringify(state));measuredDirty=false;cloud?.changed();}catch(e){tell('Impossibile salvare il tempo registrato: '+e.message);}}
-setInterval(()=>{record();renderTimer();if(Date.now()-lastSave>15000){flush();lastSave=Date.now();if(!document.hidden && (!$('stats').hidden || !$('sessions').hidden))render();}},1000);
+let lastViewMinute=-1;
+setInterval(()=>{
+  record();
+  if(!document.hidden)renderTimer();
+  const now=Date.now();
+  if(now-lastSave>=15000){
+    flush();lastSave=now;
+  }
+  // The live clock and PiP are updated every second; lists/statistics only each minute
+  // when their page is visible, or immediately following a data mutation.
+  const minute=Math.floor(now/60000);
+  if(!document.hidden && minute!==lastViewMinute){
+    lastViewMinute=minute;
+    if(!$('stats').hidden || !$('sessions').hidden)render();
+  }
+},1000);
 $('instant').onsubmit=e=>{e.preventDefault();try{const start=new Date();const end=manualSessionEnd(start,Number($('instant-minutes').value));const s={id:uid(),timerStartedAt:start.toISOString(),timerEndsAt:end.toISOString(),title:$('instant-area').value,area:$('instant-area').value,date:localDateString(start),start:formatTime(start),end:formatTime(end),workMinutes:$('instant-pause-mode').value==='custom'?state.defaults.workMinutes:focusCycle(Number($('instant-focus').value),state.defaults.breakEnabled).focusMinutes,breakEnabled:state.defaults.breakEnabled,actualSeconds:0,...pauseSettings('instant',Number($('instant-minutes').value))};if(hasSessionOverlaps([...available(),s]))return tell('La durata si sovrappone a una sessione programmata. Riducila o sposta la sessione.');commit(()=>state.sessions.push(s));lastTick=Date.now();}catch(error){tell(error.message);}};
 $('pause').onclick=()=>{record();const s=active();if(s)commit(()=>s.paused=!s.paused);};
 $('finish').onclick=()=>{record();const s=active();if(s)commit(()=>{s.finished=true;s.paused=false;});};
@@ -288,12 +323,23 @@ $('volume').oninput=()=>{ambient.setVolume(Number($('volume').value)/100);update
 $('export').onclick=()=>{flush();backup();};$('old-backup').onclick=()=>download(JSON.parse(localStorage.getItem(COPY)),'tempvs-prima-della-semplificazione.json');
 async function applyRemote(data){const next=normalizeArchive(data);localStorage.setItem('tempo-simple-recovery',JSON.stringify(state));localStorage.setItem(KEY,JSON.stringify(next));state=next;loadCycleDefaults();lastTick=Date.now();proposal=null;$('proposal').hidden=true;render();planner?.syncAreas();}
 $('import').onchange=async()=>{try{const file=$('import').files[0];if(!file)return;const next=normalizeArchive(JSON.parse(await file.text()));if(!confirm('Ripristinare questo backup sostituendo i dati attuali? Verrà scaricata una copia dei dati attuali.'))return;backup();await applyRemote(next);cloud?.changed();tell('Backup ripristinato.');}catch(e){tell('Ripristino annullato: '+e.message);}finally{$('import').value='';}};
-for(const b of document.querySelectorAll('[data-page]'))b.onclick=()=>{for(const section of document.querySelectorAll('.page'))section.hidden=section.id!==b.dataset.page;for(const tab of document.querySelectorAll('[data-page]'))tab.removeAttribute('aria-current');b.setAttribute('aria-current','page');location.hash=b.dataset.page;render();};
+function openPage(page,{updateHash=true}={}){
+  const target=$(''+page);
+  if(!target || !target.classList.contains('page'))return;
+  for(const section of document.querySelectorAll('.page'))section.hidden=section!==target;
+  for(const tab of document.querySelectorAll('[data-page]')){
+    if(tab.dataset.page===page)tab.setAttribute('aria-current','page');
+    else tab.removeAttribute('aria-current');
+  }
+  if(updateHash && location.hash!=='#'+page)location.hash=page;
+  render();
+}
+for(const b of document.querySelectorAll('[data-page]'))b.onclick=()=>openPage(b.dataset.page);
 $('session-date').value=$('window-date').value=$('quick-date').value=localDateString();
 loadCycleDefaults();
 planner=createPlannerTable({document,areas:()=>config().areas,defaults:()=>state.defaults,checkPlan:tablePlan,onError:tell,invalidate:()=>{proposal=null;$('proposal').hidden=true;}});
 $('instant-focus').addEventListener('input',()=>{updatePausePreviews();if(!active())renderTimer();});
-$('instant-minutes').addEventListener('input',()=>{updatePausePreviews();if(!active())updateManualEndPreview();});
+$('instant-minutes').addEventListener('input',()=>{updatePausePreviews();if(!active()){updateManualEndPreview();lastManualPreviewMinute=Math.floor(Date.now()/60000);}});
 
 for(const prefix of ['instant'])for(const field of ['pause-mode','pause-minutes'])
   $(prefix+'-'+field).addEventListener('input',()=>{updatePausePreviews();proposal=null;$('proposal').hidden=true;});
@@ -314,5 +360,10 @@ $('cloud-disconnect').onclick=()=>{if(confirm('Scollegare Dropbox mantenendo i d
 run(()=>cloud.init());
 window.addEventListener('pagehide',()=>{flush();++audioRequest;audioPreviewUntil=0;audioArmed=false;ambient.stop(0);});document.addEventListener('visibilitychange',()=>{if(document.hidden)flush();else{lastTick=Date.now();render();}});
 if('serviceWorker' in navigator){let reloading=false;navigator.serviceWorker.addEventListener('controllerchange',()=>{if(!reloading){reloading=true;flush();location.reload();}});navigator.serviceWorker.register('./sw.js',{updateViaCache:'none'}).then(r=>r.update()).catch(()=>tell('Modalità offline non disponibile al momento.'));}
-const page=location.hash.slice(1);const tab=[...document.querySelectorAll('[data-page]')].find(b=>b.dataset.page===page);if(tab)tab.click();
+const page=location.hash.slice(1);
+if(['timer','sessions','stats'].includes(page))openPage(page,{updateHash:false});
+window.addEventListener('hashchange',()=>{
+  const page=location.hash.slice(1);
+  if(['timer','sessions','stats'].includes(page))openPage(page,{updateHash:false});
+});
 
