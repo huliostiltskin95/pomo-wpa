@@ -1,3 +1,4 @@
+import {initRefinedUI,editSessionDetails,chooseSyncConflict} from './ui-refine.js';
 import {createTimerPip,timerColor} from './timer-pip.js';
 import {createPlannerTable} from './planner-table.js';
 import {localDateString,formatDate,formatTime,escapeHtml as esc,sessionBounds,getActiveSession,getNextSession,getPhase,mmss,hasSessionOverlaps} from './core/tempo-core.js';
@@ -174,7 +175,7 @@ function renderTimer(){
 }
 function record(){const now=Date.now();for(const s of state.sessions){const seconds=measuredFocus(s,lastTick,now);if(seconds){s.actualSeconds=(s.actualSeconds||0)+seconds;measuredDirty=true;}}lastTick=now;}
 function flush(){record();if(!measuredDirty)return;try{localStorage.setItem(KEY,JSON.stringify(state));measuredDirty=false;cloud?.changed();}catch(e){tell('Impossibile salvare il tempo registrato: '+e.message);}}
-setInterval(()=>{record();renderTimer();if(Date.now()-lastSave>15000){flush();lastSave=Date.now();render();}},1000);
+setInterval(()=>{record();renderTimer();if(Date.now()-lastSave>15000){flush();lastSave=Date.now();if(!document.hidden && !$('stats').hidden)render();}},1000);
 $('instant').onsubmit=e=>{e.preventDefault();try{const start=new Date();const end=manualSessionEnd(start,Number($('instant-minutes').value));const s={id:uid(),timerStartedAt:start.toISOString(),timerEndsAt:end.toISOString(),title:$('instant-area').value,area:$('instant-area').value,date:localDateString(start),start:formatTime(start),end:formatTime(end),workMinutes:$('instant-pause-mode').value==='custom'?state.defaults.workMinutes:focusCycle(Number($('instant-focus').value),state.defaults.breakEnabled).focusMinutes,breakEnabled:state.defaults.breakEnabled,actualSeconds:0,...pauseSettings('instant',Number($('instant-minutes').value))};if(hasSessionOverlaps([...available(),s]))return tell('La durata si sovrappone a una sessione programmata. Riducila o sposta la sessione.');commit(()=>state.sessions.push(s));lastTick=Date.now();}catch(error){tell(error.message);}};
 $('pause').onclick=()=>{record();const s=active();if(s)commit(()=>s.paused=!s.paused);};
 $('finish').onclick=()=>{record();const s=active();if(s)commit(()=>{s.finished=true;s.paused=false;});};
@@ -186,13 +187,14 @@ $('confirm-plan').onclick=()=>{if(!proposal||proposal.remainder)return;const pla
 
 $('cancel-plan').onclick=()=>{proposal=null;$('proposal').hidden=true;};
 $('session-date').onchange=render;
-$('session-list').onclick=e=>{
+$('session-list').onclick=async e=>{
   const edit=e.target.closest('[data-edit-pause]');
   if(edit){
     const s=state.sessions.find(s=>s.id===edit.dataset.editPause);
     if(!s || +sessionBounds(s).start<=Date.now() || s.actualSeconds>0)return tell('Puoi modificare la pausa solo prima dell’inizio della sessione.');
-    const value=prompt('Minuti di pausa finale, inclusi nella durata lorda (0 = nessuna). Scrivi auto per ripristinare i cicli automatici.',s.customBreakMinutes===undefined?'auto':String(s.customBreakMinutes));
-    if(value===null)return;
+    const edited=await editSessionDetails(s,'pause');
+    if(!edited)return;
+    const value=edited.pause;
     try{
       const automatic=value.trim().toLowerCase()==='auto';
       if(!value.trim())throw Error('Indica i minuti di pausa oppure auto.');
@@ -201,7 +203,7 @@ $('session-list').onclick=e=>{
     }catch(error){tell(error.message);}
     return;
   }
-  const del=e.target.closest('[data-delete]'),move=e.target.closest('[data-move]');if(del){const s=state.sessions.find(s=>s.id===del.dataset.delete);if(!s||!confirm('Eliminare la sessione? Il tempo registrato resterà nello storico.'))return;record();commit(()=>{if(s.actualSeconds>0){state.history=state.history.filter(h=>h.sessionId!==s.id);state.history.push({sessionId:s.id,taskId:'',title:s.title,date:s.date,minutes:s.actualSeconds/60,measured:true});}state.sessions=state.sessions.filter(x=>x.id!==s.id);state.syncDeleted.sessions.push(s.id);});}if(move){const s=state.sessions.find(s=>s.id===move.dataset.move);const date=prompt('Nuova data (AAAA-MM-GG)',s.date);if(!date)return;const start=prompt('Nuovo inizio (HH:MM)',s.start);if(!start)return;try{const duration=+sessionBounds(s).end-sessionBounds(s).start;const d=new Date(date+'T'+start+':00'),end=new Date(+d+duration);const replacement={...s,date,start,end:formatTime(end),paused:false};delete replacement.timerStartedAt;delete replacement.timerEndsAt;normalizeArchive({sessions:[replacement]});if(+d<Date.now()||hasSessionOverlaps([...available().filter(x=>x.id!==s.id),replacement]))throw Error('Orario passato o sovrapposto.');if(s.actualSeconds>0)throw Error('La sessione ha già tempo registrato: concludila e crea una nuova sessione.');commit(()=>state.sessions=state.sessions.map(x=>x.id===s.id?replacement:x));}catch(err){tell(err.message);}}};
+  const del=e.target.closest('[data-delete]'),move=e.target.closest('[data-move]');if(del){const s=state.sessions.find(s=>s.id===del.dataset.delete);if(!s||!confirm('Eliminare la sessione? Il tempo registrato resterà nello storico.'))return;record();commit(()=>{if(s.actualSeconds>0){state.history=state.history.filter(h=>h.sessionId!==s.id);state.history.push({sessionId:s.id,taskId:'',title:s.title,date:s.date,minutes:s.actualSeconds/60,measured:true});}state.sessions=state.sessions.filter(x=>x.id!==s.id);state.syncDeleted.sessions.push(s.id);});}if(move){const s=state.sessions.find(s=>s.id===move.dataset.move);const edited=await editSessionDetails(s,'move');if(!edited)return;const {date,start}=edited;try{const duration=+sessionBounds(s).end-sessionBounds(s).start;const d=new Date(date+'T'+start+':00'),end=new Date(+d+duration);const replacement={...s,date,start,end:formatTime(end),paused:false};delete replacement.timerStartedAt;delete replacement.timerEndsAt;normalizeArchive({sessions:[replacement]});if(+d<Date.now()||hasSessionOverlaps([...available().filter(x=>x.id!==s.id),replacement]))throw Error('Orario passato o sovrapposto.');if(s.actualSeconds>0)throw Error('La sessione ha già tempo registrato: concludila e crea una nuova sessione.');commit(()=>state.sessions=state.sessions.map(x=>x.id===s.id?replacement:x));}catch(err){tell(err.message);}}};
 function loadAreaFields(){
   const area=areaFor($('edit-area').value);
   $('description').value=area?.description||'';
@@ -246,8 +248,9 @@ $('focus-open').onclick=enterImmersive;$('focus-close').onclick=exitImmersive;
 document.addEventListener('fullscreenchange',()=>{if(!document.fullscreenElement&&document.body.classList.contains('focus-immersive'))exitImmersive();});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&document.body.classList.contains('focus-immersive'))exitImmersive();});
 render();
+initRefinedUI();
 function cloudStatus(message,info){$('cloud-status').textContent=message;$('cloud-progress').hidden=!info.busy;$('cloud-setup').hidden=info.connected;$('cloud-actions').hidden=!info.connected;$('cloud-upload').hidden=info.ready;}
-async function resolveConflicts(conflicts){const choices={};for(const c of conflicts){const labels=c.options.map((o,i)=>(i+1)+'. '+o.label).join('\n');const value=prompt(c.label+'\nLocale: '+c.localPreview+'\nDropbox: '+c.remotePreview+'\n'+labels+'\nNumero della scelta (Annulla per interrompere)');if(value===null)return null;const option=c.options[Number(value)-1];if(!option){tell('Scelta non valida: unione annullata.');return null;}choices[c.key]=option.value;}return choices;}
+async function resolveConflicts(conflicts){const choices={};for(const c of conflicts){const chosen=await chooseSyncConflict(c);if(chosen===null)return null;choices[c.key]=chosen;}return choices;}
 cloud=createDropboxSync({getState:()=>state,applyRemote,normalizeRemote:normalizeArchive,onStatus:cloudStatus,resolveConflicts});
 const run=fn=>Promise.resolve().then(fn).catch(e=>tell(e.message));
 $('cloud-connect').onclick=()=>run(()=>cloud.connect($('cloud-key').value));$('cloud-sync').onclick=()=>run(()=>cloud.sync());$('cloud-merge').onclick=()=>run(()=>cloud.mergeNow());$('cloud-upload').onclick=()=>run(()=>cloud.firstSync('upload'));
