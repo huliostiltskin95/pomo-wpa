@@ -116,7 +116,7 @@ export function initRefinedUI() {
     summary.setAttribute('aria-label','Riepilogo della giornata');
     dayNav.after(summary);
     const setDay=value=>{
-      if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(value))return;
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(value))return;
       dayDate.value=value;
       const fixed=byId('quick-date'),windowDate=byId('window-date');
       if(fixed){fixed.value=value;fixed.dispatchEvent(new Event('input',{bubbles:true}));}
@@ -195,7 +195,7 @@ function localDay(date){
 }
 export function updatePlannerDay(date, sessions, windows){
   const summary=byId('planner-day-summary'),label=byId('planner-day-label');
-  if(!summary || !label || !/^\\d{4}-\\d{2}-\\d{2}$/.test(date||''))return;
+  if(!summary || !label || !/^\d{4}-\d{2}-\d{2}$/.test(date||''))return;
   const [year,month,day]=date.split('-').map(Number);
   const begin=new Date(year,month-1,day),finish=new Date(year,month-1,day+1);
   if(!Number.isFinite(+begin))return;
