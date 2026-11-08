@@ -1,4 +1,4 @@
-import {initRefinedUI,editSessionDetails,chooseSyncConflict} from './ui-refine.js';
+import {initRefinedUI,editSessionDetails,chooseSyncConflict,updatePlannerDay} from './ui-refine.js';
 import {createTimerPip,timerColor} from './timer-pip.js';
 import {createPlannerTable} from './planner-table.js';
 import {localDateString,formatDate,formatTime,escapeHtml as esc,sessionBounds,getActiveSession,getNextSession,getPhase,mmss,hasSessionOverlaps} from './core/tempo-core.js';
@@ -96,7 +96,15 @@ function renderResources(){const area=config().areas.find(a=>a.name===$('resourc
 function render(){
   for(const id of ['instant-area','resource-area','edit-area'])options($(id));
   $('windows').innerHTML=[...config().windows].sort((a,b)=>sessionBounds(a).start-sessionBounds(b).start).map(w=>'<div class="item"><span>'+esc(formatDate(w.date))+'<small>'+w.start+'–'+w.end+'</small></span><button data-remove-window="'+esc(w.id)+'" aria-label="Elimina fascia">×</button></div>').join('')||'<p class="muted">Nessuna fascia: aggiungi il primo giorno.</p>';
-  const list=state.sessions.filter(s=>s.date===$('session-date').value).sort((a,b)=>a.start.localeCompare(b.start));
+  const chosen=$('session-date').value;
+  const startOfDay=new Date(chosen+'T00:00:00');
+  const nextDay=new Date(startOfDay);
+  nextDay.setDate(nextDay.getDate()+1);
+  const list=state.sessions.filter(s=>{
+    const bounds=sessionBounds(s);
+    return Number.isFinite(+startOfDay) && +bounds.start<+nextDay && +bounds.end>+startOfDay;
+  }).sort((a,b)=>sessionBounds(a).start-sessionBounds(b).start);
+  updatePlannerDay(chosen,state.sessions,config().windows);
   $('session-list').innerHTML=list.map(s=>{const end=+sessionBounds(s).end,old=end<Date.now();const status=s.finished?'Conclusa':old?(s.actualSeconds>0?'Svolta':'Non registrata / saltata'):s.paused?'In pausa':+sessionBounds(s).start<=Date.now()?'In corso':'In programma';return '<div class="item session-item" style="--area-color:'+colorFor(s.area||s.title)+'"><span><strong>'+esc(s.title)+'</strong><small>'+s.start+'–'+s.end+' · '+status+' · '+sessionPauseLabel(s)+'</small></span><div class="row">'+(!old&&!s.finished?'<button data-edit-pause="'+esc(s.id)+'">Pausa</button><button data-move="'+esc(s.id)+'">Sposta</button>':'')+'<button data-delete="'+esc(s.id)+'">Elimina</button></div></div>';}).join('')||'<p class="muted">Nessuna sessione in questo giorno.</p>';
   const measured=new Map(state.history.filter(h=>h.measured).map(h=>[h.sessionId,h]));for(const s of state.sessions)if(s.actualSeconds>0)measured.set(s.id,{sessionId:s.id,title:s.title,date:s.date,minutes:s.actualSeconds/60,measured:true});
   const entries=[...measured.values()],total=entries.reduce((v,h)=>v+h.minutes,0),today=entries.filter(h=>h.date===localDateString()).reduce((v,h)=>v+h.minutes,0);
