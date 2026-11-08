@@ -184,7 +184,7 @@ function renderTimer(){
 }
 function record(){const now=Date.now();for(const s of state.sessions){const seconds=measuredFocus(s,lastTick,now);if(seconds){s.actualSeconds=(s.actualSeconds||0)+seconds;measuredDirty=true;}}lastTick=now;}
 function flush(){record();if(!measuredDirty)return;try{localStorage.setItem(KEY,JSON.stringify(state));measuredDirty=false;cloud?.changed();}catch(e){tell('Impossibile salvare il tempo registrato: '+e.message);}}
-setInterval(()=>{record();renderTimer();if(Date.now()-lastSave>15000){flush();lastSave=Date.now();if(!document.hidden && !$('stats').hidden)render();}},1000);
+setInterval(()=>{record();renderTimer();if(Date.now()-lastSave>15000){flush();lastSave=Date.now();if(!document.hidden && (!$('stats').hidden || !$('sessions').hidden))render();}},1000);
 $('instant').onsubmit=e=>{e.preventDefault();try{const start=new Date();const end=manualSessionEnd(start,Number($('instant-minutes').value));const s={id:uid(),timerStartedAt:start.toISOString(),timerEndsAt:end.toISOString(),title:$('instant-area').value,area:$('instant-area').value,date:localDateString(start),start:formatTime(start),end:formatTime(end),workMinutes:$('instant-pause-mode').value==='custom'?state.defaults.workMinutes:focusCycle(Number($('instant-focus').value),state.defaults.breakEnabled).focusMinutes,breakEnabled:state.defaults.breakEnabled,actualSeconds:0,...pauseSettings('instant',Number($('instant-minutes').value))};if(hasSessionOverlaps([...available(),s]))return tell('La durata si sovrappone a una sessione programmata. Riducila o sposta la sessione.');commit(()=>state.sessions.push(s));lastTick=Date.now();}catch(error){tell(error.message);}};
 $('pause').onclick=()=>{record();const s=active();if(s)commit(()=>s.paused=!s.paused);};
 $('finish').onclick=()=>{record();const s=active();if(s)commit(()=>{s.finished=true;s.paused=false;});};
@@ -258,6 +258,7 @@ document.addEventListener('fullscreenchange',()=>{if(!document.fullscreenElement
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&document.body.classList.contains('focus-immersive'))exitImmersive();});
 render();
 initRefinedUI();
+render(); // Fill the day toolbar created by the progressive UI enhancement.
 function cloudStatus(message,info){$('cloud-status').textContent=message;$('cloud-progress').hidden=!info.busy;$('cloud-setup').hidden=info.connected;$('cloud-actions').hidden=!info.connected;$('cloud-upload').hidden=info.ready;}
 async function resolveConflicts(conflicts){const choices={};for(const c of conflicts){const chosen=await chooseSyncConflict(c);if(chosen===null)return null;choices[c.key]=chosen;}return choices;}
 cloud=createDropboxSync({getState:()=>state,applyRemote,normalizeRemote:normalizeArchive,onStatus:cloudStatus,resolveConflicts});
