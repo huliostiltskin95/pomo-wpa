@@ -104,6 +104,47 @@ export function initRefinedUI() {
       rows?.lastElementChild?.querySelector('select')?.focus();
     });
 
+    // A day-first toolbar keeps the existing date input as the single source of truth.
+    const dayDate=byId('session-date');
+    const dayNav=document.createElement('div');
+    dayNav.className='planner-day-nav';
+    dayNav.innerHTML='<button type="button" data-day="-1" aria-label="Giorno precedente">‹</button><button type="button" data-today>Oggi</button><button type="button" data-day="1" aria-label="Giorno successivo">›</button><strong id="planner-day-label"></strong>';
+    heading.after(dayNav);
+    const summary=document.createElement('section');
+    summary.id='planner-day-summary';
+    summary.className='planner-day-summary';
+    summary.setAttribute('aria-label','Riepilogo della giornata');
+    dayNav.after(summary);
+    const setDay=value=>{
+      if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(value))return;
+      dayDate.value=value;
+      const fixed=byId('quick-date'),windowDate=byId('window-date');
+      if(fixed){fixed.value=value;fixed.dispatchEvent(new Event('input',{bubbles:true}));}
+      if(windowDate)windowDate.value=value;
+      dayDate.dispatchEvent(new Event('change',{bubbles:true}));
+    };
+    dayNav.addEventListener('click',event=>{
+      const button=event.target.closest('button');
+      if(!button)return;
+      if(button.hasAttribute('data-today'))return setDay(localDay(new Date()));
+      const amount=Number(button.dataset.day);
+      if(!Number.isInteger(amount))return;
+      const parts=dayDate.value.split('-').map(Number);
+      if(parts.length!==3)return;
+      const date=new Date(parts[0],parts[1]-1,parts[2]+amount,12);
+      setDay(localDay(date));
+    });
+    const openQuick=document.createElement('button');
+    openQuick.type='button';
+    openQuick.className='planner-open-quick';
+    openQuick.textContent='Inserimento rapido';
+    heading.append(openQuick);
+    openQuick.addEventListener('click',()=>{
+      tools.open=true;
+      const paste=planning.querySelector('.planner-paste');
+      if(paste){paste.open=true;paste.scrollIntoView({behavior:'auto',block:'nearest'});byId('quick')?.focus();}
+    });
+
     const windowsArticle=planning.querySelector('article:not(.planner-article)');
     if(windowsArticle) {
       const windowsGroup=group('Modifica fasce disponibili', 'windows-tools');
@@ -122,7 +163,12 @@ export function initRefinedUI() {
         if(el) tableGroup.append(el);
       }
       if(paste) {
-        form.after(paste);
+        // Fast multiline entry precedes the detailed table, but still imports through
+        // the existing parser, validation and explicit confirmation workflow.
+        form.before(paste);
+        paste.classList.add('planner-quick-entry');
+        const title=paste.querySelector('summary');
+        if(title)title.textContent='Inserimento rapido · una sessione per riga';
         paste.addEventListener('toggle',()=>{if(paste.open)tools.open=true;});
       }
       byId('planner-import')?.addEventListener('click',()=>{tableGroup.open=true;});
@@ -143,6 +189,48 @@ export function initRefinedUI() {
   const pip=byId('pip-toggle');
   if(pip) pip.classList.add('pip-preserved');
 }
+function localDay(date){
+  const pad=n=>String(n).padStart(2,'0');
+  return date.getFullYear()+'-'+pad(date.getMonth()+1)+'-'+pad(date.getDate());
+}
+export function updatePlannerDay(date, sessions, windows){
+  const summary=byId('planner-day-summary'),label=byId('planner-day-label');
+  if(!summary || !label || !/^\\d{4}-\\d{2}-\\d{2}$/.test(date||''))return;
+  const [year,month,day]=date.split('-').map(Number);
+  const begin=new Date(year,month-1,day),finish=new Date(year,month-1,day+1);
+  if(!Number.isFinite(+begin))return;
+  const formatMinutes=minutes=>{
+    const hours=Math.floor(minutes/60),left=minutes%60;
+    return hours?(hours+' h'+(left?' '+left+' min':'')):minutes+' min';
+  };
+  const overlap=s=>{
+    const [sy,sm,sd]=(s.date||'').split('-').map(Number);
+    const parts=(s.start||'').split(':').map(Number);
+    if(!sy || parts.length!==2)return 0;
+    const start=new Date(sy,sm-1,sd,parts[0],parts[1]);
+    const ends=(s.end||'').split(':').map(Number);
+    const end=new Date(sy,sm-1,sd,ends[0],ends[1]);
+    if(end<=start)end.setDate(end.getDate()+1);
+    return Math.max(0,Math.round((Math.min(+finish,+end)-Math.max(+begin,+start))/60000));
+  };
+  const gross=sessions.reduce((sum,s)=>sum+overlap(s),0);
+  const slots=windows.reduce((sum,w)=>sum+overlap(w),0);
+  const count=sessions.filter(s=>overlap(s)>0).length;
+  const longDate=begin.toLocaleDateString('it-IT',{weekday:'long',day:'numeric',month:'long'});
+  label.textContent=longDate.charAt(0).toUpperCase()+longDate.slice(1);
+  summary.replaceChildren();
+  for(const [name,value] of [
+    ['Sessioni',String(count)],
+    ['Tempo lordo',formatMinutes(gross)],
+    ['Fasce del giorno',slots?formatMinutes(slots):'Non definite']
+  ]){
+    const item=document.createElement('div');item.className='planner-summary-metric';
+    const title=document.createElement('span');title.textContent=name;
+    const number=document.createElement('strong');number.textContent=value;
+    item.append(title,number);summary.append(item);
+  }
+}
+
 function createDialog(title, body) {
   const dialog=document.createElement('dialog');
   dialog.className='edit-dialog';
