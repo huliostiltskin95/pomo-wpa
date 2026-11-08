@@ -42,3 +42,6 @@ Un semplice push su `main` **non crea una release**. Il workflow controlla codic
 - Installazione con BRAT su desktop, iPad e Android.
 - Verifica sessioni, statistiche, pausa, risveglio da sospensione e sincronizzazione Dropbox con conflitti.
 - Controllo che l'indirizzo GitHub Pages esistente rimanga invariato e che il nuovo deploy non interferisca con un eventuale workflow preesistente.
+
+## Test browser di rilascio
+Il job `browser-smoke` prova la PWA preparata in `dist/pwa`, non la cartella sorgente. Apre la navigazione attuale, il pannello di inserimento rapido e il timer; un errore blocca sia GitHub Pages sia il pacchetto BRAT. Il test viene eseguito anche nei controlli pre-release.
