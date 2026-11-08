@@ -6,12 +6,14 @@ import {normalizeArchive,planSessions,parseQuick,measuredFocus,customPause,sessi
 import {TempoAmbientAudio} from './core/tempo-audio.js';
 import {FocusEndChime} from './core/tempo-chime.js';
 import {createDropboxSync} from './core/tempo-dropbox.js';
+import {createArchiveStore} from './core/tempo-archive-store.js';
 const $=id=>document.getElementById(id),KEY='tempo-pomodoro-v2',COPY='tempo-before-simple-v1';
+const archiveStore=createArchiveStore({storage:localStorage,key:KEY,copyKey:COPY,normalize:normalizeArchive});
 const uid=()=>crypto.randomUUID?.()||Date.now().toString(36)+Math.random().toString(36).slice(2);
 let planner;
 let state,cloud,proposal=null,lastTick=Date.now(),lastSave=Date.now(),activeId=null,audioArmed=false,measuredDirty=false,toastTimer;
 function tell(message){$('toast').textContent=message;$('toast').hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').hidden=true,6000);}
-try{const raw=localStorage.getItem(KEY)||localStorage.getItem('tempo-pomodoro-v1');state=normalizeArchive(raw?JSON.parse(raw):{sessions:[]});if(raw&&!localStorage.getItem(COPY))localStorage.setItem(COPY,raw);localStorage.setItem(KEY,JSON.stringify(state));}catch(e){document.querySelector('main').textContent='Impossibile aprire o salvare l’archivio. I dati originali non sono stati sostituiti. '+e.message;throw e;}
+try{state=archiveStore.load();}catch(e){document.querySelector('main').textContent='Impossibile aprire o salvare l’archivio. I dati originali non sono stati sostituiti. '+e.message;throw e;}
 const config=()=>state.defaults.simple;
 const areaFor=name=>config().areas.find(a=>a.name===name);
 const colorFor=name=>normalizeAreaColor(areaFor(name)?.color,name);
@@ -82,7 +84,7 @@ function enterImmersive() {
 }
 const available=()=>state.sessions.filter(s=>!s.finished);
 const active=()=>getActiveSession(available());
-function commit(change){const previous=JSON.stringify(state);try{change();localStorage.setItem(KEY,JSON.stringify(state));proposal=null;$('proposal').hidden=true;cloud?.changed();render();planner?.syncAreas();return true;}catch(e){state=JSON.parse(previous);tell('Salvataggio non riuscito: '+e.message);return false;}}
+function commit(change){const previous=JSON.stringify(state);try{change();archiveStore.save(state);proposal=null;$('proposal').hidden=true;cloud?.changed();render();planner?.syncAreas();return true;}catch(e){state=JSON.parse(previous);tell('Salvataggio non riuscito: '+e.message);return false;}}
 function download(data,name){const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
 function backup(){download({app:'TEMPVS',version:6,exportedAt:new Date().toISOString(),...state},'tempvs-'+localDateString()+'.json');$('backup-status').textContent='Backup esportato alle '+formatTime(new Date());}
 function options(select,chosen){
@@ -157,7 +159,7 @@ function render(){
   }).join(''):'<p class="muted">Nessuna concentrazione registrata questa settimana.</p>';
   const legacy=state.history.filter(h=>!h.measured);
   $('history').innerHTML=[...entries,...legacy].sort((a,b)=>String(b.date).localeCompare(String(a.date))).slice(0,100).map(h=>'<div class="item"><span>'+esc(h.title||'Sessione')+'<small>'+esc(h.date||'')+(h.measured?'':' · storico precedente, non verificato')+'</small></span><span>'+Math.floor(h.minutes)+' min</span></div>').join('')||'<p class="muted">Le sessioni svolte appariranno qui.</p>';
-  $('old-backup').hidden=!localStorage.getItem(COPY);renderResources();renderTimer();
+  $('old-backup').hidden=!archiveStore.getLegacyCopy();renderResources();renderTimer();
 }
 let audioRequest=0,audioPreviewUntil=0;
 const ambient=new TempoAmbientAudio(()=>updateAudioStatus());
@@ -256,7 +258,7 @@ function renderTimer(){
   document.title=s?$('clock').textContent+' · TEMPVS':'TEMPVS · Tempo per te';
 }
 function record(){const now=Date.now();for(const s of state.sessions){const seconds=measuredFocus(s,lastTick,now);if(seconds){s.actualSeconds=(s.actualSeconds||0)+seconds;measuredDirty=true;}}lastTick=now;}
-function flush(){record();if(!measuredDirty)return;try{localStorage.setItem(KEY,JSON.stringify(state));measuredDirty=false;cloud?.changed();}catch(e){tell('Impossibile salvare il tempo registrato: '+e.message);}}
+function flush(){record();if(!measuredDirty)return;try{archiveStore.save(state);measuredDirty=false;cloud?.changed();}catch(e){tell('Impossibile salvare il tempo registrato: '+e.message);}}
 let lastViewMinute=-1;
 setInterval(()=>{
   record();
@@ -379,8 +381,8 @@ $('sound-test').onclick=()=>startAudio(true);
 $('sound-retry').onclick=()=>startAudio();
 $('sound').onchange=()=>{if($('sound').value==='off')stopAudio();else void startAudio();};
 $('volume').oninput=()=>{ambient.setVolume(Number($('volume').value)/100);updateAudioStatus();};
-$('export').onclick=()=>{flush();backup();};$('old-backup').onclick=()=>download(JSON.parse(localStorage.getItem(COPY)),'tempvs-prima-della-semplificazione.json');
-async function applyRemote(data){const next=normalizeArchive(data);localStorage.setItem('tempo-simple-recovery',JSON.stringify(state));localStorage.setItem(KEY,JSON.stringify(next));state=next;loadCycleDefaults();lastTick=Date.now();proposal=null;$('proposal').hidden=true;render();planner?.syncAreas();}
+$('export').onclick=()=>{flush();backup();};$('old-backup').onclick=()=>download(JSON.parse(archiveStore.getLegacyCopy()),'tempvs-prima-della-semplificazione.json');
+async function applyRemote(data){const next=normalizeArchive(data);localStorage.setItem('tempo-simple-recovery',JSON.stringify(state));archiveStore.save(next);state=next;loadCycleDefaults();lastTick=Date.now();proposal=null;$('proposal').hidden=true;render();planner?.syncAreas();}
 $('import').onchange=async()=>{try{const file=$('import').files[0];if(!file)return;const next=normalizeArchive(JSON.parse(await file.text()));if(!confirm('Ripristinare questo backup sostituendo i dati attuali? Verrà scaricata una copia dei dati attuali.'))return;backup();await applyRemote(next);cloud?.changed();tell('Backup ripristinato.');}catch(e){tell('Ripristino annullato: '+e.message);}finally{$('import').value='';}};
 function openPage(page,{updateHash=true}={}){
   const target=$(''+page);

@@ -7,14 +7,29 @@ const RECOVERY_KEY="tempo-dropbox-recovery-v1";
 const FILE="/tempo-backup.json";
 const API="https://api.dropboxapi.com";
 const CONTENT="https://content.dropboxapi.com";
-const read=(k,fallback={})=>{try{return JSON.parse(localStorage.getItem(k))||fallback;}catch{return fallback;}};
-const write=(k,v)=>localStorage.setItem(k,JSON.stringify(v));
-const redirectUri=()=>location.origin+location.pathname;
 const bytesToBase64=url=>btoa(String.fromCharCode(...new Uint8Array(url))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/g,"");
 const randomCode=()=>bytesToBase64(crypto.getRandomValues(new Uint8Array(48)));
 async function shaChallenge(code){return bytesToBase64(await crypto.subtle.digest("SHA-256",new TextEncoder().encode(code)));}
 async function fail(response){if(response.ok)return response;let body="";try{body=await response.text();}catch{}const error=new Error("Dropbox HTTP "+response.status+" "+body.slice(0,250));error.status=response.status;throw error;}
-export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus,resolveConflicts}){
+/** Platform adapters allow PWA and Obsidian to use the same Dropbox protocol.
+ * Defaults preserve the existing browser behavior; Obsidian can inject its own
+ * persistent storage and OAuth navigation/callback implementation.
+ * storage and transientStorage implement getItem/setItem/removeItem.
+ */ 
+export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus,resolveConflicts,platform={}}){
+  const storage=platform.storage ?? globalThis.localStorage;
+  // request() may use Obsidian requestUrl on mobile, where WebView fetch
+  // can reject the Dropbox API through browser CORS rules.
+  const request=platform.request ?? fetch;
+  const isOnline=platform.isOnline ?? (()=>typeof navigator==="undefined" || navigator.onLine!==false);
+  const transientStorage=platform.transientStorage ?? globalThis.sessionStorage;
+  if(!storage || !transientStorage)throw new Error("Archivio locale Dropbox non disponibile.");
+  const read=(k,fallback={})=>{try{return JSON.parse(storage.getItem(k))??fallback;}catch{return fallback;}};
+  const write=(k,v)=>storage.setItem(k,JSON.stringify(v));
+  const redirectUri=()=>platform.redirectUri ? platform.redirectUri() : location.origin+location.pathname;
+  const currentUrl=()=>platform.currentUrl ? platform.currentUrl() : location.href;
+  const navigate=url=>platform.navigate ? platform.navigate(url) : location.assign(url);
+  const clearCallback=()=>platform.clearCallback ? platform.clearCallback() : history.replaceState({},document.title,redirectUri()+location.hash);
   let auth=read(AUTH_KEY),meta=read(META_KEY,{rev:null,dirty:false,ready:false});
   let inFlight=null,delay=null,overridePending=false;
   const syncState=data=>({
@@ -47,42 +62,60 @@ export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus
     if(!/^[a-z0-9]{8,}$/i.test(appKey))throw new Error("Inserisci una App key Dropbox valida.");
     if(!crypto?.subtle)throw new Error("Questo browser non supporta OAuth PKCE.");
     const verifier=randomCode(),nonce=randomCode();
-    sessionStorage.setItem("tempo-dropbox-pkce",JSON.stringify({verifier,nonce,appKey}));
+    transientStorage.setItem("tempo-dropbox-pkce",JSON.stringify({verifier,nonce,appKey}));
     const u=new URL("https://www.dropbox.com/oauth2/authorize");
-    const params={client_id:appKey,response_type:"code",token_access_type:"offline",redirect_uri:redirectUri(),code_challenge_method:"S256",code_challenge:await shaChallenge(verifier),state:nonce};
+    const params={client_id:appKey,response_type:"code",token_access_type:"offline",code_challenge_method:"S256",code_challenge:await shaChallenge(verifier),state:nonce};
+    if(!platform.manualAuthorization)params.redirect_uri=redirectUri();
     Object.entries(params).forEach(([k,v])=>u.searchParams.set(k,v));
-    location.assign(u.toString());
+    await navigate(u.toString());
+    return u.toString();
+  }
+  async function exchangeManualCode(code){
+    if(!platform.manualAuthorization)throw Error("Autenticazione manuale non configurata.");
+    const stored=JSON.parse(transientStorage.getItem("tempo-dropbox-pkce")||"null");
+    if(!stored?.verifier||!stored?.appKey)throw Error("Avvia prima il collegamento Dropbox.");
+    code=String(code||"").trim();
+    if(!code)throw Error("Incolla il codice autorizzazione di Dropbox.");
+    const form=new URLSearchParams({code,grant_type:"authorization_code",client_id:stored.appKey,code_verifier:stored.verifier});
+    const res=await fail(await request(API+"/oauth2/token",{method:"POST",body:form}));
+    const data=await res.json();
+    if(!data.refresh_token)throw Error("Dropbox non ha restituito un refresh token.");
+    auth={appKey:stored.appKey,refreshToken:data.refresh_token,accessToken:data.access_token,expiresAt:Date.now()+data.expires_in*1000-60000};
+    transientStorage.removeItem("tempo-dropbox-pkce");
+    storeAuth();meta={rev:null,dirty:meta.dirty,ready:false};storage.removeItem(BASE_KEY);storeMeta();
+    status("Dropbox collegato. Scegli la prima sincronizzazione.");
   }
   async function callback(){
-    const url=new URL(location.href),code=url.searchParams.get("code"),error=url.searchParams.get("error");
+    if(platform.manualAuthorization)return false;
+    const url=new URL(currentUrl()),code=url.searchParams.get("code"),error=url.searchParams.get("error");
     if(!code&&!error)return false;
-    const stored=JSON.parse(sessionStorage.getItem("tempo-dropbox-pkce")||"null");
+    const stored=JSON.parse(transientStorage.getItem("tempo-dropbox-pkce")||"null");
     if(!stored)throw new Error("Autorizzazione Dropbox scaduta. Riprova.");
     if(url.searchParams.get("state")!==stored.nonce)throw new Error("Controllo di sicurezza Dropbox non riuscito.");
-    history.replaceState({},document.title,redirectUri()+location.hash);
-    sessionStorage.removeItem("tempo-dropbox-pkce");
+    clearCallback();
+    transientStorage.removeItem("tempo-dropbox-pkce");
     if(error)throw new Error("Autorizzazione Dropbox annullata.");
     const form=new URLSearchParams({code,grant_type:"authorization_code",client_id:stored.appKey,code_verifier:stored.verifier,redirect_uri:redirectUri()});
-    const res=await fail(await fetch(API+"/oauth2/token",{method:"POST",body:form}));
+    const res=await fail(await request(API+"/oauth2/token",{method:"POST",body:form}));
     const data=await res.json();
     if(!data.refresh_token)throw new Error("Dropbox non ha restituito un refresh token.");
     auth={appKey:stored.appKey,refreshToken:data.refresh_token,accessToken:data.access_token,expiresAt:Date.now()+data.expires_in*1000-60000};
-    storeAuth();meta={rev:null,dirty:meta.dirty,ready:false};localStorage.removeItem(BASE_KEY);storeMeta();status("Dropbox collegato. Scegli la prima sincronizzazione.");
+    storeAuth();meta={rev:null,dirty:meta.dirty,ready:false};storage.removeItem(BASE_KEY);storeMeta();status("Dropbox collegato. Scegli la prima sincronizzazione.");
     return true;
   }
   async function token(){
     if(!auth.refreshToken)throw new Error("Collega prima Dropbox.");
     if(auth.accessToken&&Date.now()<auth.expiresAt)return auth.accessToken;
-    const res=await fail(await fetch(API+"/oauth2/token",{method:"POST",body:new URLSearchParams({grant_type:"refresh_token",refresh_token:auth.refreshToken,client_id:auth.appKey})}));
+    const res=await fail(await request(API+"/oauth2/token",{method:"POST",body:new URLSearchParams({grant_type:"refresh_token",refresh_token:auth.refreshToken,client_id:auth.appKey})}));
     const data=await res.json();auth.accessToken=data.access_token;auth.expiresAt=Date.now()+data.expires_in*1000-60000;storeAuth();return auth.accessToken;
   }
   async function metadata(){
-    const response=await fetch(API+"/2/files/get_metadata",{method:"POST",headers:{"Authorization":"Bearer "+await token(),"Content-Type":"application/json"},body:JSON.stringify({path:FILE})});
+    const response=await request(API+"/2/files/get_metadata",{method:"POST",headers:{"Authorization":"Bearer "+await token(),"Content-Type":"application/json"},body:JSON.stringify({path:FILE})});
     if(response.status===409){const err=await response.json().catch(()=>({}));if(JSON.stringify(err).includes("not_found"))return null;}
     await fail(response);return response.json();
   }
   async function download(){
-    const response=await fail(await fetch(CONTENT+"/2/files/download",{method:"POST",headers:{"Authorization":"Bearer "+await token(),"Dropbox-API-Arg":JSON.stringify({path:FILE})}}));
+    const response=await fail(await request(CONTENT+"/2/files/download",{method:"POST",headers:{"Authorization":"Bearer "+await token(),"Dropbox-API-Arg":JSON.stringify({path:FILE})}}));
     const file=await response.json();
     if(!file||!Array.isArray(file.sessions)||!Array.isArray(file.tasks)||!Array.isArray(file.history))throw new Error("Il backup Dropbox non è valido.");
     const info=JSON.parse(response.headers.get("Dropbox-API-Result")||"{}");
@@ -91,7 +124,7 @@ export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus
   }
   async function upload(expectedRev,data=current()){
     const mode=expectedRev?{".tag":"update",update:expectedRev}:"add";
-    const response=await fetch(CONTENT+"/2/files/upload",{method:"POST",headers:{
+    const response=await request(CONTENT+"/2/files/upload",{method:"POST",headers:{
       "Authorization":"Bearer "+await token(),
       "Dropbox-API-Arg":JSON.stringify({path:FILE,mode,autorename:false,strict_conflict:true,mute:true}),
       "Content-Type":"application/octet-stream"
@@ -173,7 +206,7 @@ export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus
   async function firstSync(direction){
     if(!auth.refreshToken)throw new Error("Collega prima Dropbox.");
     if(meta.ready)throw new Error("Sincronizzazione già inizializzata.");
-    if(!navigator.onLine)throw new Error("Connessione assente.");
+    if(!isOnline())throw new Error("Connessione assente.");
     if(direction==="merge")return mergeNow();
     status("Verifica del backup Dropbox in corso…","checking");
     const remote=await metadata();
@@ -204,7 +237,7 @@ export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus
     if(inFlight)return inFlight;
     inFlight=(async()=>{
       if(!auth.refreshToken||!meta.ready)return;
-      if(!navigator.onLine){status("Offline: modifiche conservate in locale","pending");return;}
+      if(!isOnline()){status("Offline: modifiche conservate in locale","pending");return;}
       const base=baseline();
       if(base && stateJSON(current())!==stateJSON(base) && !meta.dirty){
         meta.dirty=true;storeMeta();
@@ -254,7 +287,7 @@ export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus
     clearTimeout(delay);
     try{
       if(inFlight)await inFlight.catch(()=>{});
-      if(!navigator.onLine)throw new Error("Connessione assente: unione rinviata.");
+      if(!isOnline())throw new Error("Connessione assente: unione rinviata.");
       status("Lettura della versione più recente su Dropbox…","checking");
       const remote=await metadata();
       if(!remote){
@@ -281,7 +314,7 @@ export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus
     overridePending=true;clearTimeout(delay);
     try{
       if(inFlight)await inFlight.catch(()=>{});
-      if(!navigator.onLine)throw new Error("Connessione assente.");
+      if(!isOnline())throw new Error("Connessione assente.");
       status("Controllo della revisione Dropbox…","checking");
       const remote=await metadata(),local=current();
       status("Sovrascrittura esplicita del backup Dropbox…","uploading");
@@ -312,9 +345,9 @@ export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus
   function disconnect(){
     clearTimeout(delay);
     auth={};meta={rev:null,dirty:false,ready:false};
-    localStorage.removeItem(AUTH_KEY);
-    localStorage.removeItem(META_KEY);
-    localStorage.removeItem(BASE_KEY);
+    storage.removeItem(AUTH_KEY);
+    storage.removeItem(META_KEY);
+    storage.removeItem(BASE_KEY);
     status("Dropbox scollegato. Dati locali conservati.");
   }
   function info(){return {connected:Boolean(auth.refreshToken),ready:meta.ready,dirty:meta.dirty};}
@@ -323,6 +356,6 @@ export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus
     status(auth.refreshToken?(meta.ready?"Dropbox connesso":"Dropbox collegato: inizializzazione necessaria"):"Dropbox non collegato");
     if(meta.ready)await sync().catch(()=>{});
   }
-  return {init,connect,firstSync,sync,changed,mergeNow,forceUpload,forceDownload,disconnect,info,recovery};
+  return {init,connect,exchangeManualCode,firstSync,sync,changed,mergeNow,forceUpload,forceDownload,disconnect,info,recovery};
 
 }
