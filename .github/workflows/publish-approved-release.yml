@@ -1,5 +1,6 @@
 name: Publish TEMPVS 0.4.0 after release gate
 on:
+  pull_request:
   push:
     branches: [main]
     paths:
@@ -64,6 +65,7 @@ jobs:
           sleep 2
           node tests/simple.e2e.mjs
   deploy-pwa:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: browser
     runs-on: ubuntu-latest
     permissions:
@@ -85,6 +87,7 @@ jobs:
       - id: deploy
         uses: actions/deploy-pages@v4
   publish-plugin:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: deploy-pwa
     runs-on: ubuntu-latest
     permissions:
