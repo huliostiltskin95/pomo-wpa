@@ -35,12 +35,12 @@ class TempvsView extends ItemView {
     root.createEl("h4", { text: "Avvia sessione" });
     const form = root.createEl("form", { cls: "tempvs-form" });
     const area = form.createEl("select", { attr: { "aria-label": "Area" } });
-    for (const a of plugin.config.areas) area.createEl("option", { text: a.name, value: a.name });
-    const gross = form.createEl("input", { type: "number", attr: { min: "1", max: "1439", value: "30", "aria-label": "Minuti lordi" } });
+    for (const a of plugin.config.areas) area.createEl("option", { text: a.name, attr: { value: a.name } });
+    const gross = form.createEl("input", { attr: { type: "number", min: "1", max: "1439", value: "30", "aria-label": "Minuti lordi" } });
     gross.required = true;
     const focus = form.createEl("input", { type: "number", attr: { min: "1", max: "240", value: String(plugin.state.defaults.workMinutes), "aria-label": "Minuti focus" } });
     focus.required = true;
-    const pause = form.createEl("input", { type: "number", attr: { min: "0", max: "1438", placeholder: "Pausa personalizzata (facoltativa)", "aria-label": "Minuti pausa personalizzata" } });
+    const pause = form.createEl("input", { attr: { type: "number", min: "0", max: "1438", placeholder: "Pausa personalizzata (facoltativa)", "aria-label": "Minuti pausa personalizzata" } });
     form.createEl("button", { text: "Avvia", attr: { type: "submit" } });
     form.addEventListener("submit", e => {
       e.preventDefault();
@@ -48,7 +48,7 @@ class TempvsView extends ItemView {
     });
     root.createEl("h4", { text: "Pianificazione rapida" });
     const plan = root.createEl("form", { cls: "tempvs-form" });
-    const dateInput = plan.createEl("input", { type: "date", attr: { "aria-label": "Data", value: localDateString() } });
+    const dateInput = plan.createEl("input", { attr: { type: "date", "aria-label": "Data", value: localDateString() } });
     const lines = plan.createEl("textarea", { attr: { "aria-label": "Sessioni", placeholder: "Studio @1,5h +16:00\nLavoro @45m +18:00 !5m", rows: "3" } });
     plan.createEl("button", { text: "Programma", attr: { type: "submit" } });
     plan.addEventListener("submit", e => {
@@ -89,7 +89,9 @@ export default class TempvsPlugin extends Plugin {
   async onload() {
     try {
       const data = await this.loadData();
-      this.state = normalizeArchive(data?.archive || ZERO());
+      if (data && !data.archive && !Array.isArray(data.sessions) && Object.keys(data).length)
+        throw Error("Formato precedente non riconosciuto: nessun dato verrà sovrascritto.");
+      this.state = normalizeArchive(data?.archive || (Array.isArray(data?.sessions) ? data : ZERO()));
     } catch (error) {
       new Notice("TEMPVS: dati non validi, archivio lasciato intatto. " + error.message, 10000);
       throw error;
@@ -195,7 +197,7 @@ export default class TempvsPlugin extends Plugin {
     if (!requests.length) throw Error("Inserisci almeno una sessione.");
     if (requests.some(r => !r.start)) throw Error("Per ora specifica +HH:MM per ogni sessione. Le fasce automatiche saranno aggiunte successivamente.");
     const result = planSessions(requests, [], this.state.sessions.filter(s => !s.finished),
-      this.state.defaults, new Date(), uuid, date);
+      { ...this.state.defaults, breakEnabled: true }, new Date(), uuid, date);
     if (result.remainder || !result.sessions?.length) throw Error("Programmazione incompleta.");
     await this.change(() => this.state.sessions.push(...result.sessions));
     new Notice("TEMPVS: " + result.sessions.length + " sessioni programmate.");
