@@ -3,6 +3,7 @@ import { getActiveSession, getPhase, sessionBounds, hasSessionOverlaps, localDat
 import { normalizeArchive, manualSessionEnd, measuredFocus, parseQuick, planSessions } from "../core/tempo-simple.js";
 import { createDropboxSync } from "../core/tempo-dropbox.js";
 import { dropboxRequest, createCloudStorage, chooseTempvsConflicts, confirmTempvs } from "./cloud-adapter.js";
+import { noteLinks, appendNoteLink } from "./notes-integration.js";
 
 const VIEW_TYPE = "tempvs-timer";
 const ZERO = () => normalizeArchive({ sessions: [] });
@@ -26,7 +27,10 @@ class TempvsView extends ItemView {
     const root = this.containerEl.children[1];
     root.empty();
     root.addClass("tempvs-root");
-    root.createEl("h3", { text: "TEMPVS" });
+    const heading = root.createDiv({cls:"tempvs-header"});
+    heading.createEl("h3", { text: "TEMPVS" });
+    const toggle=heading.createEl("button",{text:plugin.compact?"Espandi":"Compatta",attr:{"aria-label":"Mostra o nascondi dettagli TEMPVS","aria-expanded":String(!plugin.compact)}});
+    toggle.onclick=()=>plugin.setCompact(!plugin.compact);
     const timer = root.createDiv({ cls: "tempvs-timer" });
     timer.createDiv({ cls: "tempvs-phase" });
     timer.createDiv({ cls: "tempvs-clock" });
@@ -34,8 +38,10 @@ class TempvsView extends ItemView {
     const controls = root.createDiv({ cls: "tempvs-controls" });
     button(controls, "Pausa / Riprendi", () => plugin.togglePause());
     button(controls, "Concludi", () => plugin.finish());
-    root.createEl("h4", { text: "Avvia sessione" });
-    const form = root.createEl("form", { cls: "tempvs-form" });
+    const more = root.createDiv({cls:"tempvs-expanded"});
+    more.hidden=plugin.compact;
+    more.createEl("h4", { text: "Avvia sessione" });
+    const form = more.createEl("form", { cls: "tempvs-form" });
     const area = form.createEl("select", { attr: { "aria-label": "Area" } });
     for (const a of plugin.config.areas) area.createEl("option", { text: a.name, attr: { value: a.name } });
     const gross = form.createEl("input", { attr: { type: "number", min: "1", max: "1439", value: "30", "aria-label": "Minuti lordi" } });
@@ -48,8 +54,8 @@ class TempvsView extends ItemView {
       e.preventDefault();
       plugin.start(area.value, Number(gross.value), Number(focus.value), pause.value === "" ? undefined : Number(pause.value)).catch(err => new Notice(err.message));
     });
-    root.createEl("h4", { text: "Pianificazione rapida" });
-    const plan = root.createEl("form", { cls: "tempvs-form" });
+    more.createEl("h4", { text: "Pianificazione rapida" });
+    const plan = more.createEl("form", { cls: "tempvs-form" });
     const dateInput = plan.createEl("input", { attr: { type: "date", "aria-label": "Data", value: localDateString() } });
     const lines = plan.createEl("textarea", { attr: { "aria-label": "Sessioni", placeholder: "Studio @1,5h +16:00\nLavoro @45m +18:00 !5m", rows: "3" } });
     plan.createEl("button", { text: "Programma", attr: { type: "submit" } });
@@ -57,12 +63,23 @@ class TempvsView extends ItemView {
       e.preventDefault();
       plugin.schedule(lines.value, dateInput.value).then(() => { lines.value = ""; }).catch(err => new Notice(err.message));
     });
-    root.createEl("h4", { text: "Sessioni" });
-    root.createDiv({ cls: "tempvs-sessions" });
-    root.createEl("h4", { text: "Statistiche" });
-    root.createDiv({ cls: "tempvs-statistics" });
-    root.createEl("h4", { text: "Dropbox" });
-    const cloud = root.createDiv({ cls: "tempvs-cloud tempvs-form" });
+    more.createEl("h4", { text: "Sessioni" });
+    more.createDiv({ cls: "tempvs-sessions" });
+    more.createEl("h4", { text: "Statistiche" });
+    more.createDiv({ cls: "tempvs-statistics" });
+    more.createEl("h4", {text:"Risorse Obsidian"});
+    const noteArea=more.createEl("select",{cls:"tempvs-note-area",attr:{"aria-label":"Area delle note"}});
+    const initialArea=plugin.active()?.area || plugin.config.areas[0]?.name;
+    for(const a of plugin.config.areas)noteArea.createEl("option",{text:a.name,attr:{value:a.name}});
+    if(initialArea)noteArea.value=initialArea;
+    noteArea.onchange=()=>this.renderNotes();
+    button(more,"Collega nota attiva all'area",async()=>{
+      await plugin.attachActiveNote(noteArea.value);
+      this.renderNotes();
+    });
+    more.createDiv({cls:"tempvs-note-links"});
+    more.createEl("h4", { text: "Dropbox" });
+    const cloud = more.createDiv({ cls: "tempvs-cloud tempvs-form" });
     const status = cloud.createEl("p", { cls: "tempvs-cloud-status", text: plugin.cloudMessage || "Non collegato" });
     status.setAttribute("role","status");
     const key = cloud.createEl("input", { attr: { "aria-label": "Dropbox App key", placeholder: "App key Dropbox" } });
@@ -102,6 +119,19 @@ class TempvsView extends ItemView {
     });
     this.update(true);
   }
+  renderNotes(){
+    const root=this.containerEl.children[1];
+    const area=root.querySelector(".tempvs-note-area")?.value;
+    const list=root.querySelector(".tempvs-note-links");
+    if(!list)return;
+    list.empty();
+    const description=this.plugin.config.areas.find(a=>a.name===area)?.description || "";
+    const links=noteLinks(description);
+    if(!links.length){list.createEl("p",{text:"Nessuna nota collegata."});return;}
+    for(const link of links){
+      button(list,link.label,()=>this.plugin.app.workspace.openLinkText(link.path,"",false));
+    }
+  }
   update(full = false) {
     const root = this.containerEl.children[1];
     if (!root?.hasClass("tempvs-root")) return;
@@ -112,6 +142,7 @@ class TempvsView extends ItemView {
     root.querySelector(".tempvs-clock").textContent = phase ? mmss(phase.remaining) : "--:--";
     root.querySelector(".tempvs-area").textContent = session ? session.area || session.title : "";
     if (!full) return;
+    this.renderNotes();
     const list = root.querySelector(".tempvs-sessions");
     list.empty();
     for (const s of plugin.state.sessions.filter(s => !s.finished).sort((a,b) => sessionBounds(a).start - sessionBounds(b).start).slice(0, 15)) {
@@ -135,6 +166,7 @@ export default class TempvsPlugin extends Plugin {
         throw Error("Formato precedente non riconosciuto: nessun dato verrà sovrascritto.");
       this.state = normalizeArchive(data?.archive || (Array.isArray(data?.sessions) ? data : ZERO()));
       this.cloudData = data?.cloudData && typeof data.cloudData === "object" ? data.cloudData : {};
+      this.compact = typeof data?.ui?.compact === "boolean" ? data.ui.compact : Platform.isMobile;
     } catch (error) {
       new Notice("TEMPVS: dati non validi, archivio lasciato intatto. " + error.message, 10000);
       throw error;
@@ -186,6 +218,12 @@ export default class TempvsPlugin extends Plugin {
     this.addCommand({ id: "open-tempvs", name: "Apri timer TEMPVS", callback: () => this.openView() });
     this.addCommand({ id: "pause-tempvs", name: "Pausa o riprendi TEMPVS", callback: () => this.togglePause().catch(e => new Notice(e.message)) });
     this.addCommand({ id: "finish-tempvs", name: "Concludi sessione TEMPVS", callback: () => this.finish().catch(e => new Notice(e.message)) });
+    this.addCommand({id:"link-current-note",name:"Collega nota attiva all'area della sessione",callback:async()=>{
+      const area=this.active()?.area;
+      if(!area){await this.openView();new Notice("Apri i dettagli TEMPVS e scegli l'area della nota.");return;}
+      await this.attachActiveNote(area).catch(e=>new Notice(e.message));
+    }});
+    this.addCommand({id:"toggle-compact-view",name:"Espandi o compatta il pannello TEMPVS",callback:()=>this.setCompact(!this.compact)});
     this.addRibbonIcon("timer", "Apri TEMPVS", () => this.openView());
     // Status bar is not exposed by the Obsidian API on mobile.
     if (!Platform.isMobile) {
@@ -249,7 +287,7 @@ export default class TempvsPlugin extends Plugin {
   async persist() {
     const archive = JSON.parse(JSON.stringify(this.state));
     const cloudData = this.cloudStorage?.snapshot() || {};
-    const write = this.writeChain.catch(() => {}).then(() => this.saveData({ archive, cloudData }));
+    const write = this.writeChain.catch(() => {}).then(() => this.saveData({ archive, cloudData, ui:{compact:this.compact} }));
     this.writeChain = write;
     await write;
     if (JSON.stringify(this.state) === JSON.stringify(archive)) this.dirty = false;
@@ -269,6 +307,21 @@ export default class TempvsPlugin extends Plugin {
       this.refresh(true);
       throw error;
     }
+  }
+  async setCompact(value){
+    this.compact=Boolean(value);
+    await this.persist();
+    for(const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE))leaf.view?.draw?.();
+  }
+  async attachActiveNote(areaName){
+    const file=this.app.workspace.getActiveFile();
+    if(!file || file.extension!=="md")throw Error("Apri prima una nota Markdown in Obsidian.");
+    const area=this.config.areas.find(a=>a.name===areaName);
+    if(!area)throw Error("Area TEMPVS non valida.");
+    const updated=appendNoteLink(area.description,file.path);
+    if(updated===area.description){new Notice("Nota già collegata all'area.");return;}
+    await this.change(()=>{area.description=updated;});
+    new Notice("Nota collegata all'area "+areaName+".");
   }
   async start(area, gross, focus, pause) {
     if (!this.config.areas.some(a => a.name === area)) throw Error("Area non valida.");
