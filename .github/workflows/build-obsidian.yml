@@ -1,0 +1,30 @@
+name: Build Obsidian plugin
+on:
+  push:
+    branches:
+      - feature/obsidian-plugin-phase2
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build-plugin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --no-package-lock
+      - run: npm test
+      - run: npm run build:obsidian
+      - name: Prepare plugin package
+        run: |
+          mkdir -p obsidian/dist/package
+          cp obsidian/dist/main.js obsidian/dist/package/main.js
+          cp obsidian/styles.css obsidian/dist/package/styles.css
+          cp manifest.json obsidian/dist/package/manifest.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tempvs-obsidian-preview
+          path: obsidian/dist/package/
