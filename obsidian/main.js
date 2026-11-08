@@ -160,6 +160,7 @@ export default class TempvsPlugin extends Plugin {
         try { await this.persist(); }
         catch(error) { this.state = previous; throw error; }
         this.lastTick = Date.now();
+        for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) leaf.view?.draw?.();
         this.refresh(true);
       },
       normalizeRemote: normalizeArchive,
