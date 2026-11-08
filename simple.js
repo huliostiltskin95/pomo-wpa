@@ -142,6 +142,7 @@ const timerPip=createTimerPip({button:$('pip-toggle'),notify:tell,
     progress:Number($('phase-progress').value),color:$('timer').style.getPropertyValue('--area-color')||'#276c53'})});
 function renderTimer(){
   const s=active(),phase=s?getPhase(s):null;
+  $('timer').classList.toggle('timer-live',Boolean(s));
   if(!s&&document.body.classList.contains('focus-immersive'))exitImmersive();
   $('instant').hidden=Boolean(s);$('pause').hidden=!s;$('finish').hidden=!s;
   $('session-deadline').hidden=!s;
