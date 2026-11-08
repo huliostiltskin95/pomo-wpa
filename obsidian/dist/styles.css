@@ -1,0 +1,76 @@
+.tempo-view { padding: 12px; }
+.tempo-view-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.tempo-view-heading h2 { margin: 0; }
+.tempo-timer { margin: 16px 0 24px; padding: 18px; border: 1px solid var(--background-modifier-border); border-radius: 12px; background: var(--background-secondary); }
+.tempo-eyebrow { color: var(--text-muted); font-size: .72em; font-weight: 700; letter-spacing: .08em; }
+.tempo-clock { margin: 8px 0; font-size: clamp(2.4rem, 12vw, 4rem); font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.tempo-session-title { font-size: 1.1em; font-weight: 600; }
+.tempo-muted, .tempo-session-time span, .tempo-session-details span { color: var(--text-muted); font-size: .85em; }
+.tempo-progress { height: 6px; margin-top: 16px; overflow: hidden; border-radius: 999px; background: var(--background-modifier-border); }
+.tempo-progress-fill { height: 100%; border-radius: inherit; background: var(--interactive-accent); transition: width .3s linear; }
+.tempo-session-row { display: grid; grid-template-columns: minmax(88px, auto) 1fr; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--background-modifier-border); }
+.tempo-session-time, .tempo-session-details { display: flex; flex-direction: column; gap: 3px; }
+
+.tempo-session-row { grid-template-columns: minmax(88px, auto) 1fr auto; }
+.tempo-remove-session { align-self: center; border: 0; border-radius: 6px; padding: 2px 9px; color: var(--text-muted); background: transparent; cursor: pointer; }
+.tempo-remove-session:hover { color: var(--text-error); background: var(--background-modifier-hover); }
+
+.tempo-sound-controls { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:12px 0 20px; }
+.tempo-sound-controls h3, .tempo-sound-controls p { flex-basis:100%; margin:4px 0; }
+.tempo-sound-controls input[type="range"] { width:100px; }
+
+/* TEMPVS shared-core panel (phase 2) */
+.tempvs-root{padding:12px;overflow:auto;height:100%;font-size:var(--font-ui-small)}.tempvs-root h3{margin:0 0 12px}.tempvs-root h4{margin:18px 0 8px}.tempvs-timer{padding:16px;border:1px solid var(--background-modifier-border);border-radius:var(--radius-m);text-align:center}.tempvs-clock{font-size:clamp(2rem,5vw,3.2rem);font-variant-numeric:tabular-nums;font-weight:600;line-height:1.4}.tempvs-phase,.tempvs-area{color:var(--text-muted)}.tempvs-controls{display:flex;gap:8px;margin:12px 0;flex-wrap:wrap}.tempvs-form{display:flex;flex-direction:column;gap:8px}.tempvs-form :is(input,textarea,select,button){max-width:100%;width:100%;font:inherit}.tempvs-session{display:flex;justify-content:space-between;align-items:center;gap:8px;border-bottom:1px solid var(--background-modifier-border);padding:8px 0}.tempvs-session span{overflow-wrap:anywhere}.tempvs-status{cursor:pointer;font-variant-numeric:tabular-nums}.tempvs-root button{min-height:36px}@media (max-width:500px){.tempvs-root{padding:8px}.tempvs-controls button{flex:1}}
+
+/* Phase 5: low-overhead compact view and note references. */
+.tempvs-header{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.tempvs-header h3{margin:0}
+.tempvs-header button{min-height:32px}
+.tempvs-expanded[hidden]{display:none!important}
+.tempvs-note-area{width:100%;margin:4px 0 8px}
+.tempvs-note-links{display:flex;flex-direction:column;gap:6px}
+.tempvs-note-links button{text-align:left;overflow-wrap:anywhere;white-space:normal}
+.tempvs-note-links p{color:var(--text-muted);font-size:var(--font-ui-smaller)}
+
+
+/* TEMPVS iPad-first minimalist UI (Obsidian only). */
+.tempvs-root{padding:12px 14px 28px;max-width:100%;overflow-y:auto;overscroll-behavior:contain}
+.tempvs-root button,.tempvs-root select,.tempvs-root input,.tempvs-root textarea{font-size:max(16px,var(--font-ui-small))}
+.tempvs-root button{min-height:44px;touch-action:manipulation}
+.tempvs-root .tempvs-header{margin-bottom:14px}
+.tempvs-heading-actions,.tempvs-date-nav,.tempvs-shortcuts{display:flex;align-items:center;gap:7px}
+.tempvs-icon-button{display:inline-flex;align-items:center;justify-content:center;width:44px;min-width:44px;min-height:44px;padding:8px}
+.tempvs-cloud-error{color:var(--text-error)}
+.tempvs-timer{background:var(--background-secondary);border-radius:var(--radius-l);padding:22px 12px;margin:0;text-align:center}
+.tempvs-clock{font-size:clamp(2.75rem,12vw,4.8rem);font-weight:700;line-height:1.3}
+.tempvs-primary-controls{justify-content:center;margin:10px 0 20px}
+.tempvs-primary-controls button{flex:1;min-width:0}
+.tempvs-section-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:8px 0}
+.tempvs-section-heading h4{margin:0}
+.tempvs-date-nav{gap:2px}
+.tempvs-date-nav .tempvs-icon-button{width:36px;min-width:36px;min-height:36px}
+.tempvs-day-label{min-width:55px;min-height:36px!important;padding:0 6px}
+.tempvs-session{display:flex;align-items:center;gap:10px;padding:12px 4px;min-height:52px}
+.tempvs-session-info{display:grid;grid-template-columns:auto 1fr;align-items:center;gap:14px;min-width:0;flex:1}
+.tempvs-session-info strong{font-variant-numeric:tabular-nums;white-space:nowrap}
+.tempvs-session-info span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tempvs-muted,.tempvs-help{color:var(--text-muted);font-size:var(--font-ui-smaller)}
+.tempvs-add-button{width:100%;margin:14px 0 8px}
+.tempvs-shortcuts{justify-content:space-evenly;margin:8px 0 14px}
+.tempvs-panels{min-width:0}
+.tempvs-panel{border-top:1px solid var(--background-modifier-border);margin-top:14px;padding-top:14px}
+.tempvs-panel[hidden],.tempvs-method-start[hidden],.tempvs-method-plan[hidden]{display:none!important}
+.tempvs-panel h4{margin:0 0 12px}
+.tempvs-form{display:grid;gap:10px}
+.tempvs-form input,.tempvs-form select,.tempvs-form textarea,.tempvs-method{width:100%;max-width:100%;min-height:44px}
+.tempvs-form details{padding:8px 0}
+.tempvs-form details input{margin-top:8px}
+.tempvs-method{margin-bottom:14px}
+.tempvs-note-links{margin-top:8px}
+.tempvs-note-links button{width:100%;white-space:normal;overflow-wrap:anywhere;text-align:left}
+.tempvs-wide{max-width:860px;margin:0 auto}
+@media(min-width:650px){.tempvs-wide .tempvs-timer{padding:28px}.tempvs-wide .tempvs-clock{font-size:5rem}}
+@media(max-width:400px){.tempvs-root{padding:8px}.tempvs-section-heading{flex-wrap:wrap}.tempvs-clock{font-size:3rem}}
+
+.tempvs-shortcuts .tempvs-icon-button{width:auto;flex:1;flex-direction:column;gap:4px;min-height:58px;font-size:var(--font-ui-smaller);color:var(--text-normal)}
+.tempvs-shortcuts .tempvs-icon-button span{font-size:12px}
