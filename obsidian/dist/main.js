@@ -82,6 +82,9 @@ function sortSessions(sessions) {
 function getActiveSession(sessions, now = /* @__PURE__ */ new Date()) {
   return sortSessions(sessions.filter((session) => getSessionStatus(session, now) === "active"))[0] || null;
 }
+function getNextSession(sessions, now = /* @__PURE__ */ new Date()) {
+  return sortSessions(sessions.filter((session) => getSessionStatus(session, now) === "upcoming"))[0] || null;
+}
 function getPhase(session, now = /* @__PURE__ */ new Date()) {
   const { start, end } = sessionBounds(session);
   if (session.customBreakMinutes !== void 0) {
@@ -149,6 +152,15 @@ function hasSessionOverlaps(sessions) {
     furthestEnd = Math.max(furthestEnd, end.getTime());
   }
   return false;
+}
+function getAmbientFocusMode(sessions, now = /* @__PURE__ */ new Date()) {
+  const active = getActiveSession(sessions, now);
+  if (active) {
+    const phase = getPhase(active, now);
+    if (phase.kind === "work") return "focus";
+    if (phase.end.getTime() < sessionBounds(active).end.getTime()) return "waiting";
+  }
+  return getNextSession(sessions, now) ? "waiting" : "finished";
 }
 
 // core/tempo-simple.js
@@ -1065,6 +1077,206 @@ function appendNoteLink(description = "", path) {
   return String(description).trimEnd() + (String(description).trim() ? "\n" : "") + "- [[" + path + "]]";
 }
 
+// core/tempo-audio.js
+var TempoAmbientAudio = class _TempoAmbientAudio {
+  constructor(onChange = () => {
+  }) {
+    this.onChange = onChange;
+    this.context = null;
+    this.master = null;
+    this.nodes = [];
+    this.crackleTimer = null;
+    this.pendingCleanups = /* @__PURE__ */ new Map();
+    this.playing = false;
+    this.audible = false;
+    this.kind = "off";
+    this.volume = 0.25;
+    this.generation = 0;
+  }
+  static createNoise(context, seconds = 4) {
+    const length = Math.floor(context.sampleRate * seconds);
+    const buffer = context.createBuffer(1, length, context.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < length; i++) data[i] = Math.random() * 2 - 1;
+    return buffer;
+  }
+  setVolume(value) {
+    this.volume = Math.max(0, Math.min(1, Number(value) || 0));
+    if (this.playing && this.audible && this.master && this.context) {
+      const now = this.context.currentTime;
+      this.master.gain.cancelScheduledValues(now);
+      this.master.gain.setValueAtTime(this.master.gain.value, now);
+      this.master.gain.setTargetAtTime(this.volume, now, 0.05);
+    }
+  }
+  async start(kind, volume = this.volume, audible = true) {
+    if (!["white", "brown", "rain", "fire"].includes(kind)) return false;
+    const Context = globalThis.AudioContext || globalThis.webkitAudioContext;
+    if (!Context) return false;
+    this.stop(0);
+    this.setVolume(volume);
+    const generation = this.generation;
+    let resumeTimeout;
+    try {
+      try {
+        if (globalThis.navigator?.audioSession) globalThis.navigator.audioSession.type = "playback";
+      } catch (_) {
+      }
+      if (!this.context || this.context.state === "closed") this.context = new Context();
+      const context = this.context;
+      context.onstatechange = () => {
+        if (this.context === context) this.onChange(this.playing, this.kind);
+      };
+      const resumed = Promise.race([
+        context.resume(),
+        new Promise((_, reject) => {
+          resumeTimeout = setTimeout(() => reject(new Error("Audio activation timed out")), 5e3);
+        })
+      ]);
+      const master = context.createGain();
+      this.audible = Boolean(audible);
+      master.gain.value = this.audible ? this.volume : 0;
+      master.connect(context.destination);
+      this.master = master;
+      this.kind = kind;
+      const source = context.createBufferSource();
+      source.buffer = _TempoAmbientAudio.createNoise(context);
+      source.loop = true;
+      const filter = context.createBiquadFilter();
+      filter.type = "lowpass";
+      filter.frequency.value = kind === "white" ? 16e3 : kind === "brown" ? 220 : kind === "rain" ? 4200 : 950;
+      source.connect(filter);
+      filter.connect(master);
+      source.start();
+      this.nodes.push(source, filter, master);
+      if (kind === "rain") {
+        const oscillator = context.createOscillator();
+        const depth = context.createGain();
+        oscillator.frequency.value = 0.13;
+        depth.gain.value = 1100;
+        oscillator.connect(depth);
+        depth.connect(filter.frequency);
+        oscillator.start();
+        this.nodes.push(oscillator, depth);
+      }
+      await resumed;
+      if (this.generation !== generation || this.context !== context) return false;
+      if (context.state !== "running") throw new Error("Audio context is not running");
+      this.playing = true;
+      this.onChange(true, kind);
+      if (kind === "fire") {
+        const generation2 = this.generation;
+        const crackle = () => {
+          if (!this.playing || !this.audible || this.generation !== generation2) return;
+          const click = context.createBufferSource();
+          const gain = context.createGain();
+          const hp = context.createBiquadFilter();
+          click.buffer = _TempoAmbientAudio.createNoise(context, 0.08);
+          hp.type = "highpass";
+          hp.frequency.value = 1800;
+          const now = context.currentTime;
+          gain.gain.setValueAtTime(1e-4, now);
+          gain.gain.linearRampToValueAtTime(0.1, now + 8e-3);
+          gain.gain.exponentialRampToValueAtTime(1e-4, now + 0.07);
+          click.connect(hp);
+          hp.connect(gain);
+          gain.connect(master);
+          click.start();
+          click.stop(now + 0.08);
+          click.onended = () => {
+            click.disconnect();
+            hp.disconnect();
+            gain.disconnect();
+          };
+        };
+        this.crackleTimer = setInterval(crackle, 650);
+      }
+      return true;
+    } catch (error) {
+      if (this.generation === generation) this.stop(0);
+      return false;
+    } finally {
+      clearTimeout(resumeTimeout);
+    }
+  }
+  /**
+   * Keep user consent and sound selection armed while muting the graph.
+   * Keep the context running so scheduled focus can resume without a new gesture.
+   */
+  setAudible(enabled, fadeSeconds = 0.9) {
+    if (!this.playing || !this.context || !this.master) return;
+    const audible = Boolean(enabled);
+    if (this.audible === audible && (!audible || this.context.state === "running")) return;
+    this.audible = audible;
+    const generation = this.generation;
+    const context = this.context;
+    const master = this.master;
+    const apply = () => {
+      if (!this.playing || this.generation !== generation || this.master !== master) return;
+      if (this.audible !== audible) return;
+      const now = context.currentTime;
+      const duration = Math.max(0, audible ? 0.35 : fadeSeconds);
+      master.gain.cancelScheduledValues(now);
+      master.gain.setValueAtTime(master.gain.value, now);
+      master.gain.linearRampToValueAtTime(audible ? this.volume : 0, now + duration);
+    };
+    if (audible) void context.resume().then(apply).catch(() => {
+      if (this.generation === generation) {
+        this.audible = false;
+        this.onChange(this.playing, this.kind);
+      }
+    });
+    else apply();
+  }
+  stop(fadeSeconds = 0.9) {
+    ++this.generation;
+    this.playing = false;
+    this.audible = false;
+    this.kind = "off";
+    if (this.crackleTimer !== null) clearInterval(this.crackleTimer);
+    this.crackleTimer = null;
+    const nodes = this.nodes;
+    const master = this.master;
+    this.nodes = [];
+    this.master = null;
+    const cleanup = () => {
+      for (const node of nodes) {
+        try {
+          node.stop?.();
+        } catch (_) {
+        }
+        try {
+          node.disconnect?.();
+        } catch (_) {
+        }
+      }
+    };
+    if (nodes.length && master && this.context && this.context.state === "running" && fadeSeconds > 0) {
+      const now = this.context.currentTime;
+      master.gain.cancelScheduledValues(now);
+      master.gain.setValueAtTime(master.gain.value, now);
+      master.gain.linearRampToValueAtTime(0, now + fadeSeconds);
+      const timer = setTimeout(() => {
+        cleanup();
+        this.pendingCleanups.delete(timer);
+      }, fadeSeconds * 1e3 + 80);
+      this.pendingCleanups.set(timer, cleanup);
+    } else cleanup();
+    this.onChange(false, "off");
+  }
+  destroy() {
+    this.stop(0);
+    for (const [timer, cleanup] of this.pendingCleanups) {
+      clearTimeout(timer);
+      cleanup();
+    }
+    this.pendingCleanups.clear();
+    if (this.context) this.context.close().catch(() => {
+    });
+    this.context = null;
+  }
+};
+
 // obsidian/main.js
 var VIEW_TYPE = "tempvs-timer";
 var ZERO = () => normalizeArchive({ sessions: [] });
@@ -1254,8 +1466,20 @@ var TempvsView = class extends import_obsidian2.ItemView {
     const sounds = panels.createDiv({ cls: "tempvs-panel tempvs-sound-panel" });
     sounds.hidden = true;
     sounds.createEl("h4", { text: "Suoni di sottofondo" });
-    sounds.createEl("p", { cls: "tempvs-help", text: "Le preferenze audio vengono applicate durante la sessione di concentrazione." });
-    sounds.createEl("p", { cls: "tempvs-muted", text: "I suoni ambientali non sono disponibili in questa versione del plugin Obsidian." });
+    sounds.createEl("p", { cls: "tempvs-help", text: "Il suono parte con un tocco durante il focus, si silenzia nelle pause e termina con una dissolvenza." });
+    const soundChoice = sounds.createEl("select", { cls: "tempvs-sound-choice", attr: { "aria-label": "Rumore ambientale" } });
+    for (const [value, label] of [["white", "Rumore bianco"], ["brown", "Rumore marrone"], ["rain", "Pioggia"], ["fire", "Caminetto"]]) soundChoice.createEl("option", { value, text: label });
+    soundChoice.value = plugin.audioKind;
+    soundChoice.addEventListener("change", () => void plugin.selectAmbient(soundChoice.value).catch((e) => new import_obsidian2.Notice(e.message)));
+    const soundVolume = sounds.createDiv({ cls: "tempvs-sound-volume" });
+    soundVolume.createEl("label", { text: "Volume", attr: { for: "tempvs-volume" } });
+    const slider = soundVolume.createEl("input", { cls: "tempvs-volume-slider", attr: { type: "range", id: "tempvs-volume", min: "0", max: "100", step: "1", "aria-label": "Volume audio" } });
+    slider.value = String(plugin.audioVolume);
+    slider.addEventListener("input", () => plugin.adjustAmbientVolume(Number(slider.value)));
+    slider.addEventListener("change", () => void plugin.persist().catch((e) => new import_obsidian2.Notice(e.message)));
+    const soundToggle = sounds.createEl("button", { cls: "tempvs-sound-toggle mod-cta", text: "Avvia suono" });
+    soundToggle.addEventListener("click", () => void plugin.toggleAmbient().catch((e) => new import_obsidian2.Notice(e.message)));
+    sounds.createDiv({ cls: "tempvs-sound-status", attr: { role: "status", "aria-live": "polite" } });
     const notes = panels.createDiv({ cls: "tempvs-panel tempvs-notes-panel" });
     notes.hidden = true;
     notes.createEl("h4", { text: "Risorse Obsidian" });
@@ -1293,6 +1517,19 @@ var TempvsView = class extends import_obsidian2.ItemView {
       if (el) setPanel(el, this.panel === name);
     }
   }
+  updateSoundControls() {
+    const root = this.containerEl.children[1], plugin = this.plugin;
+    if (!root?.hasClass("tempvs-root")) return;
+    const active = plugin.active();
+    const eligible = Boolean(active && !active.paused && getPhase(active).kind === "work");
+    const toggle = root.querySelector(".tempvs-sound-toggle");
+    if (toggle) {
+      toggle.disabled = !plugin.ambient.playing && !eligible;
+      toggle.textContent = plugin.ambient.playing ? "Ferma suono" : "Avvia suono";
+    }
+    const status = root.querySelector(".tempvs-sound-status");
+    if (status) status.textContent = plugin.ambient.playing ? plugin.ambient.audible ? "Suono attivo" : "In attesa della concentrazione" : eligible ? "Pronto" : "Disponibile durante la concentrazione";
+  }
   renderNotes() {
     const root = this.containerEl.children[1];
     const area = root.querySelector(".tempvs-note-area")?.value;
@@ -1323,6 +1560,7 @@ var TempvsView = class extends import_obsidian2.ItemView {
       pause.textContent = active?.paused ? "Riprendi" : "Pausa";
     }
     if (finish) finish.disabled = !active;
+    this.updateSoundControls();
     const cloud = root.querySelector(".tempvs-cloud-indicator");
     if (cloud) {
       const status = plugin.cloudMessage || "Dropbox non collegato";
@@ -1391,10 +1629,14 @@ var TempvsPlugin = class extends import_obsidian2.Plugin {
       this.cloudData = data?.cloudData && typeof data.cloudData === "object" ? data.cloudData : {};
       this.compact = typeof data?.ui?.compact === "boolean" ? data.ui.compact : import_obsidian2.Platform.isMobile;
       this.layout = ["auto", "side", "wide"].includes(data?.ui?.layout) ? data.ui.layout : "auto";
+      this.audioKind = ["white", "brown", "rain", "fire"].includes(data?.audio?.kind) ? data.audio.kind : "brown";
+      const savedVolume = Number(data?.audio?.volume);
+      this.audioVolume = data?.audio?.volume !== void 0 && Number.isFinite(savedVolume) ? Math.max(0, Math.min(100, Math.round(savedVolume))) : 25;
     } catch (error) {
       new import_obsidian2.Notice("TEMPVS: dati non validi, archivio lasciato intatto. " + error.message, 1e4);
       throw error;
     }
+    this.ambient = new TempoAmbientAudio(() => this.refreshAudioControls());
     this.lastTick = Date.now();
     this.lastSave = Date.now();
     this.dirty = false;
@@ -1420,6 +1662,7 @@ var TempvsPlugin = class extends import_obsidian2.Plugin {
         }
         this.lastTick = Date.now();
         for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) leaf.view?.draw?.();
+        this.syncAmbient();
         this.refresh(true);
       },
       normalizeRemote: normalizeArchive,
@@ -1474,6 +1717,7 @@ var TempvsPlugin = class extends import_obsidian2.Plugin {
     this.registerDomEvent(document, "visibilitychange", () => {
       if (!document.hidden) {
         this.tick();
+        this.syncAmbient();
         this.refresh(true);
       }
     });
@@ -1485,6 +1729,51 @@ var TempvsPlugin = class extends import_obsidian2.Plugin {
   }
   get config() {
     return this.state.defaults.simple;
+  }
+  refreshAudioControls() {
+    for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) leaf.view?.updateSoundControls?.();
+  }
+  syncAmbient(now = /* @__PURE__ */ new Date()) {
+    if (!this.ambient?.playing) return;
+    const pending = this.state.sessions.filter((s) => !s.finished);
+    const mode = getAmbientFocusMode(pending, now);
+    if (mode === "finished") {
+      this.ambient.stop(0.9);
+      return;
+    }
+    const active = getActiveSession(pending, now);
+    this.ambient.setAudible(mode === "focus" && !active?.paused);
+  }
+  async toggleAmbient() {
+    if (this.ambient.playing) {
+      this.ambient.stop(0.9);
+      return;
+    }
+    const active = this.active();
+    if (!active || active.paused || getPhase(active).kind !== "work") {
+      new import_obsidian2.Notice("Avvia il suono durante una sessione di concentrazione non in pausa.");
+      return;
+    }
+    const started = this.ambient.start(this.audioKind, this.audioVolume / 100, true);
+    if (!await started) new import_obsidian2.Notice("Impossibile avviare l'audio: verifica i permessi su Obsidian e iPadOS.");
+    else this.syncAmbient();
+  }
+  async selectAmbient(kind) {
+    if (!["white", "brown", "rain", "fire"].includes(kind)) return;
+    this.audioKind = kind;
+    const restarted = this.ambient.playing ? this.ambient.start(
+      kind,
+      this.audioVolume / 100,
+      getAmbientFocusMode(this.state.sessions.filter((s) => !s.finished)) === "focus" && !this.active()?.paused
+    ) : null;
+    if (restarted && !await restarted) new import_obsidian2.Notice("Impossibile cambiare il rumore ambientale.");
+    this.syncAmbient();
+    await this.persist();
+  }
+  adjustAmbientVolume(value) {
+    if (!Number.isFinite(value)) return;
+    this.audioVolume = Math.max(0, Math.min(100, Math.round(value)));
+    this.ambient.setVolume(this.audioVolume / 100);
   }
   active() {
     const session = getActiveSession(this.state.sessions.filter((s) => !s.finished));
@@ -1508,6 +1797,7 @@ var TempvsPlugin = class extends import_obsidian2.Plugin {
     this.app.setting?.openTabById(this.manifest.id);
   }
   refresh(full = false) {
+    this.syncAmbient();
     const session = this.active();
     const phase = session ? getPhase(session) : null;
     if (this.status) {
@@ -1545,8 +1835,9 @@ var TempvsPlugin = class extends import_obsidian2.Plugin {
   async persist() {
     const archive = JSON.parse(JSON.stringify(this.state));
     const cloudData = this.cloudStorage?.snapshot() || {};
+    const audio = { kind: this.audioKind, volume: this.audioVolume };
     const write = this.writeChain.catch(() => {
-    }).then(() => this.saveData({ archive, cloudData, ui: { compact: this.compact, layout: this.layout } }));
+    }).then(() => this.saveData({ archive, cloudData, ui: { compact: this.compact, layout: this.layout }, audio }));
     this.writeChain = write;
     await write;
     if (JSON.stringify(this.state) === JSON.stringify(archive)) this.dirty = false;
@@ -1666,6 +1957,7 @@ var TempvsPlugin = class extends import_obsidian2.Plugin {
     }
   }
   async onunload() {
+    this.ambient?.destroy();
     this.record();
     clearTimeout(this.cloudSaveTimer);
     if (this.dirty || this.cloudDirty) await this.persist().catch((e) => console.error("TEMPVS:", e));
