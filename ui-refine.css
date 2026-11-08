@@ -231,3 +231,62 @@ body.focus-immersive #timer .tempo-live-actions{margin:18px 0}
  .edit-dialog-actions button{flex:1}
  .edit-dialog h2{font-size:20px}
 }
+
+/* Phase 5 — touch, keyboard, reduced-motion and low-overhead responsive polish. */
+.skip-to-main{
+  position:fixed;left:12px;top:0;transform:translateY(-150%);z-index:200;
+  padding:12px 18px;border-radius:0 0 10px 10px;background:#123e2c;
+  color:#fff;font-weight:650;text-decoration:none
+}
+.skip-to-main:focus{transform:translateY(0)}
+main:focus{outline:none}
+:where(button,input,select,textarea,summary,a):focus-visible{
+  outline:3px solid #166a4b;outline-offset:3px
+}
+#sessions .planner-day-nav button,#sessions .planner-open-quick,
+#sessions .new-session-trigger,#session-list .item button,
+.planning-tools summary,.edit-dialog-actions button,.sync-choice{
+  min-height:44px
+}
+#timer .tempo-presets button{min-height:44px}
+nav [data-page][aria-current=page]{
+  background:#e2eee7;color:#18563c;
+  box-shadow:inset 0 -2px 0 #276c53
+}
+button,summary,.sync-choice{touch-action:manipulation}
+input,select,textarea{max-width:100%}
+#session-list .item{min-width:0;overflow-wrap:anywhere}
+.planner-day-nav,.planning-tools,#session-list,.timer-card{min-width:0}
+.planner-table{max-width:100%}
+.planner-table td{overflow-wrap:anywhere}
+@media(hover:none){
+  button:hover{background:initial}
+  button.primary:hover{background:var(--accent)}
+  nav button[aria-current=page]:hover{background:#e2eee7}
+}
+@media(max-width:760px){
+  :root{font-size:16px}
+  body{overscroll-behavior-y:contain}
+  header{padding-top:max(12px,env(safe-area-inset-top,0px))}
+  main{padding-bottom:calc(118px + env(safe-area-inset-bottom,0px))}
+  nav{padding-bottom:calc(8px + env(safe-area-inset-bottom,0px))}
+  nav button{font-size:13px;min-width:0;min-height:48px}
+  .planner-table tr{margin:10px 0;gap:10px;padding:12px}
+  .planner-table td{min-width:0}
+  .planner-table input,.planner-table select{font-size:16px;min-height:44px}
+  #session-list .item button{min-height:44px}
+  .edit-dialog{max-height:calc(100dvh - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px) - 24px)}
+}
+@media(min-width:761px) and (max-width:1024px){
+  main{padding-inline:18px}
+  #sessions .planner-table{font-size:12px}
+  .planner-table th,.planner-table td{padding-inline:3px}
+}
+@media(prefers-contrast:more){
+  .timer-card,.planner-summary-metric,#session-list .item,
+  .planning-tools,.edit-dialog{border-color:#456354}
+  .muted,.hint,.planner-summary-metric span{color:#405a4b}
+}
+@media(prefers-reduced-motion:reduce){
+  *,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;transition-duration:.01ms!important}
+}
