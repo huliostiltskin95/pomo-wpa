@@ -238,7 +238,9 @@ export default class TempvsPlugin extends Plugin {
     this.record();
     const now = Date.now();
     if (this.dirty && now - this.lastSave >= 15000) {
-      this.persist().catch(e => new Notice("TEMPVS: salvataggio fallito: " + e.message));
+      this.persist().then(() => {
+        this.cloud?.changed();
+      }).catch(e => new Notice("TEMPVS: salvataggio fallito: " + e.message));
       this.lastSave = now;
     }
     this.refresh(Math.floor(now / 60000) !== Math.floor((now-1000)/60000));
