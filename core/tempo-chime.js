@@ -1,6 +1,6 @@
 // Short, locally synthesised focus-end cue. No external files or network.
 export class FocusEndChime {
-  constructor() { this.context = null; this.lastPlayed = 0; }
+  constructor() { this.context = null; this.lastPlayed = -Infinity; }
   arm() {
     const Context = globalThis.AudioContext || globalThis.webkitAudioContext;
     if (!Context) return false;
