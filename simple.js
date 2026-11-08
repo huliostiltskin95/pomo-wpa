@@ -207,7 +207,8 @@ function flush(){record();if(!measuredDirty)return;try{localStorage.setItem(KEY,
 let lastViewMinute=-1;
 setInterval(()=>{
   record();
-  if(!document.hidden)renderTimer();
+  // Keep the real timer and its PiP snapshot current whenever the browser permits timers.
+  renderTimer();
   const now=Date.now();
   if(now-lastSave>=15000){
     flush();lastSave=now;
