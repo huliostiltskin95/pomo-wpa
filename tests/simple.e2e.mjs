@@ -12,6 +12,8 @@ try {
   await page.locator('#quick-date').fill('2099-11-06');
   await page.locator('#quick').fill('Studio @45m +08:30');
   await page.locator('#planner-import').click();
+  // Import adds rows; remove the initial default row that targets an empty availability window.
+  await page.locator('#planner-rows tr').first().locator('[data-remove]').click();
   await page.locator('#prepare-plan').click();
   assert.match(await page.locator('#proposal-list').innerText(),/Studio/);
   await page.locator('#confirm-plan').click();
