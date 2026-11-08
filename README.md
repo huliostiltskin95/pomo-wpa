@@ -1,5 +1,14 @@
 # TEMPVS
 
+## Fase 2 — Pianificazione giornaliera (novembre 2026)
+
+- La pagina Pianifica apre l'elenco del giorno, con pulsanti giorno precedente/successivo, Oggi e selettore data.
+- Il riepilogo giornaliero mostra numero delle sessioni, tempo lordo occupato e durata delle fasce disponibili; le sessioni oltre mezzanotte contribuiscono a entrambi i giorni solo per la porzione di tempo effettivamente occupata.
+- Inserimento rapido testuale immediatamente accessibile dal pulsante dedicato. Sintassi invariata (`Studio @1h +13:45`, `Lavoro @45m !5m`); importazione nella tabella, anteprima e conferma esplicita rimangono obbligatorie.
+- La tabella completa e la gestione delle fasce sono sezioni secondarie espandibili. Le date della pianificazione rapida si sincronizzano quando si naviga tra i giorni.
+- Nessuna modifica allo schema dei dati, al timer, alla logica delle pause o al modulo PiP.
+- Cache offline `tempo-pomodoro-v52`. Verificati i collegamenti e la sintassi JavaScript; resta da effettuare un collaudo browser sui dispositivi di destinazione.
+
 ## Interfaccia compatta — novembre 2026
 
 - La Home privilegia l'avvio rapido: il ciclo di concentrazione e le pause personalizzate sono in un pannello espandibile, ma restano disponibili senza modificare il modello dei dati.
