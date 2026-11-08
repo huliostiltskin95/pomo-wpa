@@ -1,3 +1,12 @@
+## Fase 4 — Statistiche, impostazioni e Dropbox (novembre 2026)
+
+- Statistiche dedicate alla concentrazione realmente registrata: oggi, settimana corrente (da lunedì) e totale, con distribuzione settimanale per area e storico. I record storici non verificati restano visibili nello storico ma non contribuiscono ai totali.
+- Impostazioni suddivise in tre pannelli espandibili: Timer e pause, Aree e risorse Markdown, Backup locale e sincronizzazione Dropbox.
+- Stato sintetico di Dropbox nell'intestazione: account non collegato, configurazione iniziale, modifiche in attesa, sincronizzazione in corso, sincronizzato o errore. Toccando l'indicatore si aprono le impostazioni di backup.
+- Tutte le operazioni preesistenti sono conservate: esportazione JSON, importazione con copia preventiva, copia precedente alla semplificazione, connessione Dropbox, sincronizzazione, unione, caricamento iniziale, ripristino e disconnessione.
+- Modulo Dropbox, schema dei dati, core Pomodoro, timer PiP e logica delle sessioni invariati.
+- Cache offline `tempo-pomodoro-v55`. Verifiche statiche di sintassi e integrazioni completate; il collaudo in Safari/iPadOS e su Galaxy Note 3 resta da eseguire.
+
 ## Fase 5 — Ottimizzazione mobile, accessibilità e prestazioni (novembre 2026)
 
 - Aggiornamento del timer e della relativa vista PiP ogni secondo anche quando il documento non è visibile, finché il browser consente l'esecuzione dei timer. Resta il limite imposto dal sistema operativo alle PWA in background.
