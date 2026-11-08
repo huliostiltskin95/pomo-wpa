@@ -48,8 +48,9 @@ export function initRefinedUI() {
       tools.open=true;
       const tableGroup=byId('planner-table-group');
       if(tableGroup) tableGroup.open=true;
-      byId('planner-add')?.click();
-      byId('planner-rows')?.lastElementChild?.querySelector('select')?.focus();
+      const rows=byId('planner-rows');
+      if(!rows?.children.length) byId('planner-add')?.click();
+      rows?.lastElementChild?.querySelector('select')?.focus();
     });
 
     const windowsArticle=planning.querySelector('article:not(.planner-article)');
