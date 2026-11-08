@@ -119,9 +119,41 @@ function render(){
   }).sort((a,b)=>sessionBounds(a).start-sessionBounds(b).start);
   updatePlannerDay(chosen,state.sessions,config().windows);
   $('session-list').innerHTML=list.map(s=>{const end=+sessionBounds(s).end,old=end<Date.now();const status=s.finished?'Conclusa':old?(s.actualSeconds>0?'Svolta':'Non registrata / saltata'):s.paused?'In pausa':+sessionBounds(s).start<=Date.now()?'In corso':'In programma';return '<div class="item session-item" style="--area-color:'+colorFor(s.area||s.title)+'"><span><strong>'+esc(s.title)+'</strong><small>'+s.start+'–'+s.end+' · '+status+' · '+sessionPauseLabel(s)+'</small></span><div class="row">'+(!old&&!s.finished?'<button data-edit-pause="'+esc(s.id)+'">Pausa</button><button data-move="'+esc(s.id)+'">Sposta</button>':'')+'<button data-delete="'+esc(s.id)+'">Elimina</button></div></div>';}).join('')||'<p class="muted">Nessuna sessione in questo giorno.</p>';
-  const measured=new Map(state.history.filter(h=>h.measured).map(h=>[h.sessionId,h]));for(const s of state.sessions)if(s.actualSeconds>0)measured.set(s.id,{sessionId:s.id,title:s.title,date:s.date,minutes:s.actualSeconds/60,measured:true});
-  const entries=[...measured.values()],total=entries.reduce((v,h)=>v+h.minutes,0),today=entries.filter(h=>h.date===localDateString()).reduce((v,h)=>v+h.minutes,0);
-  $('metrics').innerHTML='<article><p>Concentrazione oggi</p><strong class="metric">'+Math.floor(today)+' min</strong></article><article><p>Totale registrato</p><strong class="metric">'+(total/60).toLocaleString('it-IT',{maximumFractionDigits:1})+' h</strong></article>';
+  const measured=new Map(state.history.filter(h=>h.measured).map(h=>[h.sessionId,h]));
+  for(const session of state.sessions)if(session.actualSeconds>0)
+    measured.set(session.id,{sessionId:session.id,title:session.title,date:session.date,minutes:session.actualSeconds/60,measured:true,area:session.area||session.title});
+  const entries=[...measured.values()];
+  const areaOf=h=>h.area||state.sessions.find(s=>s.id===h.sessionId)?.area||h.title||'Altre';
+  const total=entries.reduce((sum,h)=>sum+h.minutes,0);
+  const todayKey=localDateString();
+  const today=entries.filter(h=>h.date===todayKey).reduce((sum,h)=>sum+h.minutes,0);
+  const weekStart=new Date();
+  weekStart.setHours(0,0,0,0);
+  const weekday=(weekStart.getDay()+6)%7;
+  weekStart.setDate(weekStart.getDate()-weekday);
+  const weekKey=localDateString(weekStart);
+  const weeklyEntries=entries.filter(h=>h.date>=weekKey&&h.date<=todayKey);
+  const weekly=weeklyEntries.reduce((sum,h)=>sum+h.minutes,0);
+  const formatMinutes=minutes=>{
+    const rounded=Math.floor(minutes);
+    const hours=Math.floor(rounded/60),remainder=rounded%60;
+    return hours?hours+' h'+(remainder?' '+remainder+' min':''):rounded+' min';
+  };
+  const measures=[
+    ['Oggi',formatMinutes(today)],
+    ['Questa settimana',formatMinutes(weekly)],
+    ['Totale registrato',formatMinutes(total)]
+  ];
+  const areaTotals=new Map();
+  for(const h of weeklyEntries)areaTotals.set(areaOf(h),(areaTotals.get(areaOf(h))||0)+h.minutes);
+  const areaRows=[...areaTotals].sort((a,b)=>b[1]-a[1]);
+  $('metrics').innerHTML=measures.map(([name,value])=>
+    '<article class="stats-metric"><span>'+esc(name)+'</span><strong class="metric">'+esc(value)+'</strong></article>'
+  ).join('');
+  $('area-stats').innerHTML=areaRows.length?areaRows.map(([name,minutes])=>{
+    const amount=weekly>0?Math.min(100,minutes/weekly*100):0;
+    return '<div class="area-stat-row"><div class="row between"><strong>'+esc(name)+'</strong><span>'+esc(formatMinutes(minutes))+'</span></div><progress max="100" value="'+amount.toFixed(2)+'" aria-label="'+esc(name)+' — percentuale della concentrazione settimanale"></progress></div>';
+  }).join(''):'<p class="muted">Nessuna concentrazione registrata questa settimana.</p>';
   const legacy=state.history.filter(h=>!h.measured);
   $('history').innerHTML=[...entries,...legacy].sort((a,b)=>String(b.date).localeCompare(String(a.date))).slice(0,100).map(h=>'<div class="item"><span>'+esc(h.title||'Sessione')+'<small>'+esc(h.date||'')+(h.measured?'':' · storico precedente, non verificato')+'</small></span><span>'+Math.floor(h.minutes)+' min</span></div>').join('')||'<p class="muted">Le sessioni svolte appariranno qui.</p>';
   $('old-backup').hidden=!localStorage.getItem(COPY);renderResources();renderTimer();
@@ -351,7 +383,21 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape'&&document.body.class
 render();
 initRefinedUI();
 render(); // Fill the day toolbar created by the progressive UI enhancement.
-function cloudStatus(message,info){$('cloud-status').textContent=message;$('cloud-progress').hidden=!info.busy;$('cloud-setup').hidden=info.connected;$('cloud-actions').hidden=!info.connected;$('cloud-upload').hidden=info.ready;}
+function cloudStatus(message,info){
+  $('cloud-status').textContent=message;
+  $('cloud-progress').hidden=!info.busy;
+  $('cloud-setup').hidden=info.connected;
+  $('cloud-actions').hidden=!info.connected;
+  $('cloud-upload').hidden=info.ready;
+  const indicator=$('cloud-indicator'),label=$('cloud-indicator-text');
+  if(!indicator||!label)return;
+  const status=info.busy?'busy':!info.connected?'disconnected':info.phase==='error'?'error':!info.ready?'setup':info.dirty?'pending':'synced';
+  const names={busy:'Sincronizzazione…',disconnected:'Dropbox non collegato',error:'Errore Dropbox',setup:'Dropbox da configurare',pending:'Modifiche da sincronizzare',synced:'Sincronizzato'};
+  indicator.dataset.status=status;
+  label.textContent=names[status];
+  indicator.title=message;
+  indicator.setAttribute('aria-label',names[status]+'. Apri le impostazioni di sincronizzazione.');
+}
 async function resolveConflicts(conflicts){const choices={};for(const c of conflicts){const chosen=await chooseSyncConflict(c);if(chosen===null)return null;choices[c.key]=chosen;}return choices;}
 cloud=createDropboxSync({getState:()=>state,applyRemote,normalizeRemote:normalizeArchive,onStatus:cloudStatus,resolveConflicts});
 const run=fn=>Promise.resolve().then(fn).catch(e=>tell(e.message));
