@@ -14,7 +14,7 @@ permissions:
 
 concurrency:
   group: tempvs-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+  cancel-in-progress: false
 
 jobs:
   verify-build:
