@@ -1,5 +1,15 @@
 # TEMPVS
 
+## Interfaccia compatta — novembre 2026
+
+- La Home privilegia l'avvio rapido: il ciclo di concentrazione e le pause personalizzate sono in un pannello espandibile, ma restano disponibili senza modificare il modello dei dati.
+- In Pianifica vengono mostrate prima le sessioni del giorno; il modulo per le fasce disponibili e la tabella di pianificazione sono contestuali. La sintassi testuale rapida è conservata.
+- Modifica dell'orario e delle pause tramite finestre accessibili in pagina, anziché prompt nativi; dialoghi dedicati anche ai conflitti Dropbox.
+- Backup JSON e Dropbox sono in Impostazioni; Statistiche mostra principalmente i dati registrati.
+- Navigazione inferiore sui dispositivi mobili. Meno rendering delle statistiche quando la pagina non è visibile.
+- Il mini timer PiP continua a utilizzare `timer-pip.js` e il timer reale. Il supporto effettivo dipende dalle API del browser e richiede collaudo specifico su Safari/iPadOS.
+- File aggiunti: `ui-refine.js` e `ui-refine.css`, inclusi nella cache offline `tempo-pomodoro-v50`.
+
 ## Timer semplice — versione attuale
 
 La PWA carica soltanto `simple.js` e `simple.css`: Timer, Sessioni e Statistiche. I moduli della precedente Agenda restano nel repository per la cronologia del progetto, ma non vengono caricati dalla PWA. Il plugin Obsidian non è stato ridisegnato.
