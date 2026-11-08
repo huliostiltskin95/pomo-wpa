@@ -1,0 +1,40 @@
+name: Build TEMPVS Obsidian plugin
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'obsidian/**'
+      - 'core/tempo-core.js'
+      - 'core/tempo-simple.js'
+      - 'core/tempo-dropbox.js'
+      - 'package.json'
+      - '.github/workflows/build-tempvs-obsidian.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --no-audit --no-fund
+      - run: npm run build:obsidian
+      - name: Package only Obsidian assets
+        run: |
+          cp obsidian/styles.css obsidian/dist/styles.css
+          cp obsidian/manifest.json obsidian/dist/manifest.json
+      - name: Commit compiled plugin without touching PWA
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f obsidian/dist/main.js obsidian/dist/styles.css obsidian/dist/manifest.json
+          if ! git diff --cached --quiet; then
+            git commit -m "Build Obsidian TEMPVS plugin assets [skip ci]"
+            git push
+          fi
