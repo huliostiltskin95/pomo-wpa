@@ -5,6 +5,7 @@ try {
   const page=await browser.newPage({viewport:{width:390,height:844}}),errors=[];
   page.on('pageerror',error=>errors.push(error.message));
   await page.goto('http://127.0.0.1:8123/');
+  await page.waitForFunction(() => typeof document.querySelector('[data-page="sessions"]')?.onclick === 'function', null, {timeout: 15000});
   await page.getByRole('button',{name:'Pianifica',exact:true}).click();
   await page.locator('#quick-date').fill('2099-11-06');
   await page.locator('summary').filter({hasText:'Incolla più sessioni'}).click();
