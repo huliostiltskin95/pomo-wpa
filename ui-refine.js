@@ -212,6 +212,22 @@ export function initRefinedUI() {
     }
   }
 
+  // Present infrequently changed settings as independent sections.
+  const prefs=byId('preferences'),areasForm=byId('area-form'),newArea=byId('new-area-form');
+  const settingsPanel=byId('settings');
+  if(settingsPanel && prefs && areasForm && newArea){
+    const timerSection=group('Timer e pause', 'settings-group');
+    timerSection.open=true;
+    prefs.before(timerSection);timerSection.append(prefs);
+    const areaSection=group('Aree e risorse Markdown', 'settings-group');
+    const areaHeading=areasForm.previousElementSibling;
+    if(areaHeading?.tagName==='H3')areaHeading.remove();
+    areasForm.before(areaSection);
+    areaSection.append(areasForm,newArea);
+    const separator=timerSection.nextElementSibling;
+    if(separator?.tagName==='HR')separator.remove();
+  }
+
   // Maintenance belongs to Settings, not daily statistics.
   const settings=byId('settings');
   const backup=byId('backup-status')?.closest('article');
