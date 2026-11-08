@@ -74,3 +74,11 @@
 
 .tempvs-shortcuts .tempvs-icon-button{width:auto;flex:1;flex-direction:column;gap:4px;min-height:58px;font-size:var(--font-ui-smaller);color:var(--text-normal)}
 .tempvs-shortcuts .tempvs-icon-button span{font-size:12px}
+
+/* Obsidian TEMPVS ambient audio controls; independent of PWA styles. */
+.tempvs-sound-panel .tempvs-sound-choice{width:100%;min-height:44px;margin:7px 0 12px}
+.tempvs-sound-volume{display:flex;align-items:center;gap:14px;margin:10px 0}
+.tempvs-sound-volume label{min-width:62px}
+.tempvs-sound-volume input[type="range"]{flex:1;width:100%;min-height:44px;accent-color:var(--interactive-accent)}
+.tempvs-sound-toggle{width:100%;min-height:44px}
+.tempvs-sound-status{color:var(--text-muted);font-size:var(--font-ui-smaller);margin:9px 0}
