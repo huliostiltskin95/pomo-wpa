@@ -290,3 +290,43 @@ input,select,textarea{max-width:100%}
 @media(prefers-reduced-motion:reduce){
   *,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;transition-duration:.01ms!important}
 }
+
+/* Phase 4 — focused statistics, clear maintenance affordances. */
+.stats-metrics{grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.stats-metric{margin:0;min-width:0;padding:18px;display:flex;flex-direction:column;gap:8px}
+.stats-metric span{font-size:12px;color:#62776a}
+.stats-metric .metric{font-size:clamp(23px,3vw,36px);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.stats-areas{margin:18px 0}
+.stats-areas h2{font-size:17px;margin:0 0 16px}
+.area-stat-row{margin:13px 0}
+.area-stat-row .row{font-size:13px;gap:8px;margin-bottom:7px}
+.area-stat-row .row span{color:#516b5b;font-variant-numeric:tabular-nums}
+.area-stat-row progress{height:9px;accent-color:var(--accent);border-radius:20px}
+header{gap:10px}
+header .brand{margin-right:auto}
+.cloud-indicator{font-size:12px;min-height:40px;display:inline-flex;align-items:center;gap:7px;border-color:#d8e3dc;background:#fff;max-width:230px;white-space:normal;text-align:left}
+.cloud-indicator-dot{width:8px;height:8px;border-radius:50%;background:#85938b;flex:0 0 8px}
+.cloud-indicator[data-status=synced] .cloud-indicator-dot{background:#29845c}
+.cloud-indicator[data-status=busy] .cloud-indicator-dot{background:#326cc2}
+.cloud-indicator[data-status=pending] .cloud-indicator-dot,
+.cloud-indicator[data-status=setup] .cloud-indicator-dot{background:#b87e2d}
+.cloud-indicator[data-status=error] .cloud-indicator-dot{background:#c44635}
+.backup-settings{margin-top:24px;background:#f8fbf9;border:1px solid #dae6dc}
+.backup-settings>summary{font-weight:650}
+.settings-section-note{color:#5c6e61;font-size:12px;line-height:1.5}
+.backup-settings article{background:transparent}
+.backup-settings .dropbox-settings{border:1px solid #dbe7dd;background:#fff;margin:12px 0;padding:14px}
+.backup-settings .dropbox-settings summary{font-size:14px}
+#cloud-status{font-size:13px;overflow-wrap:anywhere}
+#cloud-progress{height:8px;accent-color:#276c53}
+#cloud-actions .row{gap:8px}
+#cloud-actions button{min-height:44px}
+@media(max-width:760px){
+ .stats-metrics{grid-template-columns:1fr 1fr}
+ .stats-metric:last-child{grid-column:1/-1}
+ header .cloud-indicator{font-size:0;min-width:42px;min-height:42px;max-width:42px;padding:12px;justify-content:center}
+ header .cloud-indicator-dot{width:11px;height:11px;flex-basis:11px}
+ header .cloud-indicator #cloud-indicator-text{display:none}
+ .backup-settings{padding:13px}
+ #cloud-actions .row button{flex-grow:1}
+}
