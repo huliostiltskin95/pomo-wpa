@@ -114,9 +114,12 @@ class TempvsView extends ItemView {
     const add = button(root,"+ Nuova sessione",()=>this.togglePanel("create"));
     add.addClass("mod-cta","tempvs-add-button");
     const quickActions = root.createDiv({cls:"tempvs-shortcuts"});
-    iconButton(quickActions,"calendar-days","Pianifica",()=>{this.creation="plan";this.togglePanel("create",true);this.showCreation();});
-    iconButton(quickActions,"volume-2","Suoni",()=>this.togglePanel("sound"));
-    iconButton(quickActions,"book-open","Risorse Obsidian",()=>this.togglePanel("notes"));
+    const planShortcut=iconButton(quickActions,"calendar-days","Pianifica",()=>{this.creation="plan";this.togglePanel("create",true);this.showCreation();});
+    planShortcut.createSpan({text:"Pianifica"});
+    const soundShortcut=iconButton(quickActions,"volume-2","Suoni",()=>this.togglePanel("sound"));
+    soundShortcut.createSpan({text:"Suoni"});
+    const noteShortcut=iconButton(quickActions,"book-open","Risorse Obsidian",()=>this.togglePanel("notes"));
+    noteShortcut.createSpan({text:"Risorse"});
     const panels = root.createDiv({cls:"tempvs-panels"});
     const create = panels.createDiv({cls:"tempvs-panel tempvs-create-panel"});
     create.hidden=true;
@@ -361,12 +364,13 @@ export default class TempvsPlugin extends Plugin {
   }
   async openView(forceLayout = false) {
     let leaf = this.app.workspace.getLeavesOfType(VIEW_TYPE)[0];
+    if (forceLayout && leaf) { leaf.detach(); leaf = null; }
     if (!leaf) {
       leaf = this.layout === "wide" ? this.app.workspace.getLeaf(true) : (this.app.workspace.getRightLeaf(false) || this.app.workspace.getLeaf(true));
+      if (!leaf) return;
       await leaf.setViewState({ type: VIEW_TYPE, active: true });
     }
     await this.app.workspace.revealLeaf(leaf);
-    if(forceLayout) for(const l of this.app.workspace.getLeavesOfType(VIEW_TYPE))l.view?.draw?.();
   }
   openSettings() { this.app.setting?.open(); this.app.setting?.openTabById(this.manifest.id); }
   refresh(full = false) {
