@@ -13,6 +13,42 @@ export function initRefinedUI() {
   if (!timerForm || document.body.dataset.refinedUi) return;
   document.body.dataset.refinedUi = 'true';
 
+  // Semantic page relationships and keyboard navigation without replacing
+  // the native buttons or the browser's own focus behavior.
+  const names={timer:'Timer',sessions:'Pianifica',stats:'Statistiche'};
+  const tabs=[...document.querySelectorAll('nav [data-page]')];
+  tabs.forEach(button=>{
+    const page=button.dataset.page;
+    if(!names[page])return;
+    button.setAttribute('aria-controls',page);
+    button.setAttribute('aria-label',names[page]);
+  });
+  const navigation=document.querySelector('nav[aria-label="Navigazione principale"]');
+  navigation?.addEventListener('keydown',event=>{
+    if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;
+    const current=tabs.indexOf(document.activeElement);
+    if(current<0)return;
+    event.preventDefault();
+    const next=event.key==='Home'?0:event.key==='End'?tabs.length-1:
+      (current+(event.key==='ArrowRight'?1:-1)+tabs.length)%tabs.length;
+    tabs[next].focus();
+  });
+  const ids={timer:'active-title',sessions:'sessions-heading',stats:'stats-heading'};
+  for(const [page,headingId] of Object.entries(ids)){
+    const panel=byId(page);
+    const heading=page==='timer'?byId('active-title'):panel?.querySelector('h1');
+    if(heading){
+      heading.id=headingId;
+      panel?.setAttribute('aria-labelledby',headingId);
+    }
+  }
+  // Allow skipping repeated navigation on a keyboard without changing layout.
+  const skip=document.createElement('a');
+  skip.href='#main-content';skip.className='skip-to-main';skip.textContent='Vai al contenuto';
+  const main=document.querySelector('main');
+  if(main){main.id='main-content';main.tabIndex=-1;document.body.prepend(skip);}
+
+
   // The primary action requires only area and gross duration.
   const advanced = group('Personalizza focus e pause', 'advanced-controls');
   for (const id of ['instant-focus','instant-pause-mode','instant-pause-minutes']) {
