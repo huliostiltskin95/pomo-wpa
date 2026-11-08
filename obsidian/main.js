@@ -38,7 +38,7 @@ class TempvsView extends ItemView {
     for (const a of plugin.config.areas) area.createEl("option", { text: a.name, attr: { value: a.name } });
     const gross = form.createEl("input", { attr: { type: "number", min: "1", max: "1439", value: "30", "aria-label": "Minuti lordi" } });
     gross.required = true;
-    const focus = form.createEl("input", { type: "number", attr: { min: "1", max: "240", value: String(plugin.state.defaults.workMinutes), "aria-label": "Minuti focus" } });
+    const focus = form.createEl("input", { attr: { type: "number", min: "1", max: "240", value: String(plugin.state.defaults.workMinutes), "aria-label": "Minuti focus" } });
     focus.required = true;
     const pause = form.createEl("input", { attr: { type: "number", min: "0", max: "1438", placeholder: "Pausa personalizzata (facoltativa)", "aria-label": "Minuti pausa personalizzata" } });
     form.createEl("button", { text: "Avvia", attr: { type: "submit" } });
