@@ -4,6 +4,7 @@ import {createPlannerTable} from './planner-table.js';
 import {localDateString,formatDate,formatTime,escapeHtml as esc,sessionBounds,getActiveSession,getNextSession,getPhase,mmss,hasSessionOverlaps} from './core/tempo-core.js';
 import {normalizeArchive,planSessions,parseQuick,measuredFocus,customPause,sessionPauseLabel,focusCycle,normalizeAreaColor,manualSessionEnd} from './core/tempo-simple.js';
 import {TempoAmbientAudio} from './core/tempo-audio.js';
+import {FocusEndChime} from './core/tempo-chime.js';
 import {createDropboxSync} from './core/tempo-dropbox.js';
 const $=id=>document.getElementById(id),KEY='tempo-pomodoro-v2',COPY='tempo-before-simple-v1';
 const uid=()=>crypto.randomUUID?.()||Date.now().toString(36)+Math.random().toString(36).slice(2);
@@ -160,6 +161,25 @@ function render(){
 }
 let audioRequest=0,audioPreviewUntil=0;
 const ambient=new TempoAmbientAudio(()=>updateAudioStatus());
+const focusEndChime=new FocusEndChime();
+let lastFocusSoundState=null;
+const chimeEnabled=()=>config().focusEndChime!==false;
+function maybeSignalFocusEnd(session,phase) {
+  const now=Date.now(),previous=lastFocusSoundState;
+  if(previous && previous.kind==='work' && !previous.paused && chimeEnabled()) {
+    const passedBoundary=now>=previous.endsAt && now-previous.endsAt<5000;
+    const enteredBreak=session && session.id===previous.id && phase?.kind==='break';
+    const sessionFinished=!session && previous.sessionEndsAt<=now && previous.endsAt===previous.sessionEndsAt;
+    if(passedBoundary && (enteredBreak||sessionFinished))focusEndChime.play();
+  }
+  lastFocusSoundState=session?{
+    id:session.id,kind:phase?.kind,paused:Boolean(session.paused),
+    endsAt:+phase.end,sessionEndsAt:+sessionBounds(session).end
+  }:null;
+}
+document.addEventListener('pointerdown',()=>{if(chimeEnabled())focusEndChime.arm();},{passive:true});
+document.addEventListener('keydown',()=>{if(chimeEnabled())focusEndChime.arm();},{passive:true});
+
 function focusAudio(){const s=active();return Boolean(s&&!s.paused&&getPhase(s).kind==='work');}
 function updateAudioStatus(){
   $('sound-toggle').textContent=audioArmed?'Disattiva audio':'Attiva audio';
@@ -196,6 +216,7 @@ const timerPip=createTimerPip({button:$('pip-toggle'),notify:tell,
 let lastManualPreviewMinute=-1;
 function renderTimer(){
   const s=active(),phase=s?getPhase(s):null;
+  maybeSignalFocusEnd(s,phase);
   $('timer').classList.toggle('timer-live',Boolean(s));
   if(!s&&document.body.classList.contains('focus-immersive'))exitImmersive();
   $('instant').hidden=Boolean(s);$('pause').hidden=!s;$('finish').hidden=!s;
@@ -332,9 +353,14 @@ function loadAreaFields(){
   $('area-color').value=colorFor($('edit-area').value).toLowerCase();
 }
 function openSettings(){
-  $('work').value=state.defaults.workMinutes;$('breaks').checked=state.defaults.breakEnabled;
+  $('work').value=state.defaults.workMinutes;$('breaks').checked=state.defaults.breakEnabled;$('focus-end-chime').checked=chimeEnabled();
   options($('edit-area'));loadAreaFields();$('settings').showModal();
 }
+$('chime-preview').onclick=()=>{
+  focusEndChime.arm();
+  const played=focusEndChime.play();
+  $('chime-status').textContent=played?'Segnale riprodotto.':'Audio non disponibile: verifica il volume o riprova toccando Prova segnale.';
+};
 $('settings-open').onclick=openSettings;$('area-edit').onclick=openSettings;$('settings-close').onclick=()=>$('settings').close();
 $('edit-area').onchange=loadAreaFields;
 $('area-form').onsubmit=e=>{e.preventDefault();commit(()=>{const area=areaFor($('edit-area').value);area.description=$('description').value;area.color=normalizeAreaColor($('area-color').value,area.name);});tell('Area aggiornata.');};
@@ -342,7 +368,7 @@ $('new-area-form').onsubmit=e=>{e.preventDefault();const name=$('new-area').valu
 $('preferences').onsubmit=e=>{e.preventDefault();
   const before=state.defaults.workMinutes,work=Number($('work').value);
   try{focusCycle(work);}catch(error){return tell(error.message);}
-  if(commit(()=>{state.defaults.workMinutes=work;state.defaults.breakEnabled=$('breaks').checked;})){
+  if(commit(()=>{state.defaults.workMinutes=work;state.defaults.breakEnabled=$('breaks').checked;config().focusEndChime=$('focus-end-chime').checked;})){
     for(const id of ['instant-focus','quick-focus'])if(Number($(id).value)===before)$(id).value=work;
     updatePausePreviews();tell('Impostazioni salvate per le prossime sessioni.');
   }
