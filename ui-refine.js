@@ -46,7 +46,7 @@ export function initRefinedUI() {
   const skip=document.createElement('a');
   skip.href='#main-content';skip.className='skip-to-main';skip.textContent='Vai al contenuto';
   const main=document.querySelector('main');
-  if(main){main.id='main-content';main.tabIndex=-1;document.body.prepend(skip);}
+  if(main){main.id='main-content';main.tabIndex=-1;document.body.prepend(skip);skip.addEventListener('click',event=>{event.preventDefault();main.focus();main.scrollIntoView({block:'start'});});}
 
 
   // The primary action requires only area and gross duration.
