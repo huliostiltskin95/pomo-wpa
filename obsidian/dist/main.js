@@ -1639,6 +1639,8 @@ var TempvsPlugin = class extends import_obsidian2.Plugin {
     this.ambient = new TempoAmbientAudio(() => this.refreshAudioControls());
     this.lastTick = Date.now();
     this.lastSave = Date.now();
+    this.lastNoticeCheck = Date.now();
+    this.lastNotifiedPhase = this.currentNoticePhase(new Date(this.lastNoticeCheck));
     this.dirty = false;
     this.writeChain = Promise.resolve();
     this.cloudMessage = "Dropbox non collegato";
@@ -1661,6 +1663,8 @@ var TempvsPlugin = class extends import_obsidian2.Plugin {
           throw error;
         }
         this.lastTick = Date.now();
+        this.lastNoticeCheck = this.lastTick;
+        this.lastNotifiedPhase = this.currentNoticePhase(new Date(this.lastTick));
         for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) leaf.view?.draw?.();
         this.syncAmbient();
         this.refresh(true);
@@ -1729,6 +1733,22 @@ var TempvsPlugin = class extends import_obsidian2.Plugin {
   }
   get config() {
     return this.state.defaults.simple;
+  }
+  currentNoticePhase(now = /* @__PURE__ */ new Date()) {
+    const active = getActiveSession(this.state.sessions.filter((s) => !s.finished), now);
+    if (!active || active.paused) return null;
+    const phase = getPhase(active, now);
+    return { id: active.id, kind: phase.kind, start: +phase.start, area: active.area || active.title };
+  }
+  notifyPhaseTransition(nowMs = Date.now()) {
+    const current = this.currentNoticePhase(new Date(nowMs));
+    const previous = this.lastNotifiedPhase;
+    const gap = nowMs - this.lastNoticeCheck;
+    this.lastNotifiedPhase = current;
+    this.lastNoticeCheck = nowMs;
+    if (!current || !previous || current.id !== previous.id || current.kind === previous.kind || gap < 0 || gap > 8e3 || nowMs - current.start < 0 || nowMs - current.start > 8e3 || document.hidden) return;
+    const message = current.kind === "break" ? "TEMPVS \xB7 Inizia la pausa \u2014 " + current.area : "TEMPVS \xB7 Riprende la concentrazione \u2014 " + current.area;
+    new import_obsidian2.Notice(message, 6500);
   }
   refreshAudioControls() {
     for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) leaf.view?.updateSoundControls?.();
@@ -1822,6 +1842,7 @@ var TempvsPlugin = class extends import_obsidian2.Plugin {
     this.lastTick = now;
   }
   tick() {
+    this.notifyPhaseTransition();
     this.record();
     const now = Date.now();
     if (this.dirty && now - this.lastSave >= 15e3) {
@@ -1925,6 +1946,8 @@ var TempvsPlugin = class extends import_obsidian2.Plugin {
     await this.change(() => {
       s.paused = !s.paused;
     });
+    this.lastNoticeCheck = Date.now();
+    this.lastNotifiedPhase = this.currentNoticePhase(new Date(this.lastNoticeCheck));
   }
   async finish() {
     const s = this.active();
@@ -1933,6 +1956,8 @@ var TempvsPlugin = class extends import_obsidian2.Plugin {
       s.finished = true;
       s.paused = false;
     });
+    this.lastNoticeCheck = Date.now();
+    this.lastNotifiedPhase = this.currentNoticePhase(new Date(this.lastNoticeCheck));
   }
   async removeSession(id) {
     const s = this.state.sessions.find((s2) => s2.id === id);
