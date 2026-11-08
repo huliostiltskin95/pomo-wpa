@@ -330,3 +330,12 @@ header .brand{margin-right:auto}
  .backup-settings{padding:13px}
  #cloud-actions .row button{flex-grow:1}
 }
+
+/* Phase 4 settings sections: native disclosure controls, no additional dependencies. */
+.settings-group{border:1px solid #dde8e0;background:#fff;border-radius:13px;padding:15px;margin:15px 0}
+.settings-group>summary{font-size:15px;font-weight:650;min-height:32px}
+.settings-group form{margin-top:14px}
+.settings-group form label{margin:12px 0}
+#settings>.row.between{gap:12px}
+#settings>.row.between h2{margin:0;font-size:21px}
+#settings .backup-settings{margin-bottom:8px}
