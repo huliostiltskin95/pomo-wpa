@@ -1,3 +1,13 @@
+## Fase 3 — Modifica e riprogrammazione (novembre 2026)
+
+- Spostamento delle sessioni con pannello dedicato: data e ora validate prima della conferma; durata lorda preservata e sovrapposizioni rifiutate.
+- Pause personalizzate con controllo automatico/manuale e validazione nell'intervallo consentito, sempre all'interno della durata lorda.
+- Riaprire il pannello è necessario se la sessione è stata cambiata, avviata, completata o eliminata durante la modifica.
+- Risoluzione dei conflitti Dropbox con confronto esplicito dei dati locali/remoti, opzioni radio e nessuna scelta preimpostata.
+- Corretto il controllo data nella navigazione giornaliera introdotta in fase 2.
+- Cache offline `tempo-pomodoro-v53`; logica del timer e modulo PiP invariati.
+- Controlli statici della sintassi e delle integrazioni superati; la verifica end-to-end su Safari/iPadOS e altri dispositivi rimane necessaria.
+
 # TEMPVS
 
 ## Fase 2 — Pianificazione giornaliera (novembre 2026)
