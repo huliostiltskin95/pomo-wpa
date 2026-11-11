@@ -1277,6 +1277,67 @@ var TempoAmbientAudio = class _TempoAmbientAudio {
   }
 };
 
+// core/tempo-chime.js
+var FocusEndChime = class {
+  constructor() {
+    this.context = null;
+    this.lastPlayed = -Infinity;
+  }
+  arm() {
+    const Context = globalThis.AudioContext || globalThis.webkitAudioContext;
+    if (!Context) return false;
+    try {
+      try {
+        if (globalThis.navigator?.audioSession) globalThis.navigator.audioSession.type = "playback";
+      } catch {
+      }
+      if (!this.context || this.context.state === "closed") this.context = new Context();
+      if (this.context.state !== "running") void this.context.resume().catch(() => {
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  async play(phase = "break") {
+    if (!this.arm()) return false;
+    const context = this.context;
+    try {
+      if (context.state !== "running") await context.resume();
+      if (context !== this.context || context.state !== "running") return false;
+      const now = context.currentTime;
+      if (now - this.lastPlayed < 0.8) return false;
+      this.lastPlayed = now;
+      const notes = phase === "work" ? [[0, 784], [0.2, 1047]] : [[0, 880], [0.2, 659]];
+      for (const [offset, frequency] of notes) {
+        const oscillator = context.createOscillator();
+        const envelope = context.createGain();
+        oscillator.type = "triangle";
+        oscillator.frequency.value = frequency;
+        envelope.gain.setValueAtTime(1e-4, now + offset);
+        envelope.gain.exponentialRampToValueAtTime(0.2, now + offset + 0.022);
+        envelope.gain.exponentialRampToValueAtTime(1e-4, now + offset + 0.4);
+        oscillator.connect(envelope);
+        envelope.connect(context.destination);
+        oscillator.start(now + offset);
+        oscillator.stop(now + offset + 0.42);
+        oscillator.onended = () => {
+          oscillator.disconnect();
+          envelope.disconnect();
+        };
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  destroy() {
+    if (this.context) void this.context.close().catch(() => {
+    });
+    this.context = null;
+  }
+};
+
 // obsidian/main.js
 var VIEW_TYPE = "tempvs-timer";
 var ZERO = () => normalizeArchive({ sessions: [] });
@@ -1614,6 +1675,16 @@ var TempvsSettings = class extends import_obsidian2.PluginSettingTab {
     new import_obsidian2.Setting(el).setName("Pause automatiche").addToggle((t) => t.setValue(Boolean(this.plugin.state.defaults.breakEnabled)).onChange(async (v) => this.plugin.change(() => {
       this.plugin.state.defaults.breakEnabled = v;
     })));
+    new import_obsidian2.Setting(el).setName("Avvisi sonori").setDesc("Segnale udibile ai cambi tra concentrazione e pausa, quando Obsidian \xE8 in primo piano.").addToggle((t) => t.setValue(this.plugin.chimeEnabled).onChange(async (value) => {
+      this.plugin.chimeEnabled = value;
+      if (value) this.plugin.chime.arm();
+      await this.plugin.persist();
+    }));
+    new import_obsidian2.Setting(el).setName("Prova avviso").setDesc("Tocca per attivare e verificare l'audio su questo dispositivo.").addButton((b) => b.setButtonText("Riproduci").onClick(() => {
+      void this.plugin.chime.play("break").then((ok) => {
+        if (!ok) new import_obsidian2.Notice("Audio non disponibile: controlla il volume e riprova toccando Riproduci.");
+      });
+    }));
     el.createEl("h3", { text: "Dropbox" });
     renderCloudSettings(el, this.plugin);
     el.createEl("p", { cls: "tempvs-muted", text: "Lo storico delle sessioni rimane salvato per statistiche, backup e sincronizzazione, ma non \xE8 mostrato nel timer." });
@@ -1632,11 +1703,13 @@ var TempvsPlugin = class extends import_obsidian2.Plugin {
       this.audioKind = ["white", "brown", "rain", "fire"].includes(data?.audio?.kind) ? data.audio.kind : "brown";
       const savedVolume = Number(data?.audio?.volume);
       this.audioVolume = data?.audio?.volume !== void 0 && Number.isFinite(savedVolume) ? Math.max(0, Math.min(100, Math.round(savedVolume))) : 25;
+      this.chimeEnabled = data?.notifications?.sound !== false;
     } catch (error) {
       new import_obsidian2.Notice("TEMPVS: dati non validi, archivio lasciato intatto. " + error.message, 1e4);
       throw error;
     }
     this.ambient = new TempoAmbientAudio(() => this.refreshAudioControls());
+    this.chime = new FocusEndChime();
     this.lastTick = Date.now();
     this.lastSave = Date.now();
     this.lastNoticeCheck = Date.now();
@@ -1718,6 +1791,12 @@ var TempvsPlugin = class extends import_obsidian2.Plugin {
       });
     }
     this.registerInterval(window.setInterval(() => this.tick(), 1e3));
+    const armChime = () => {
+      if (this.chimeEnabled) this.chime.arm();
+    };
+    this.registerDomEvent(document, "pointerdown", armChime);
+    this.registerDomEvent(document, "touchstart", armChime);
+    this.registerDomEvent(document, "keydown", armChime);
     this.registerDomEvent(document, "visibilitychange", () => {
       if (!document.hidden) {
         this.tick();
@@ -1749,6 +1828,7 @@ var TempvsPlugin = class extends import_obsidian2.Plugin {
     if (!current || !previous || current.id !== previous.id || current.kind === previous.kind || gap < 0 || gap > 8e3 || nowMs - current.start < 0 || nowMs - current.start > 8e3 || document.hidden) return;
     const message = current.kind === "break" ? "TEMPVS \xB7 Inizia la pausa \u2014 " + current.area : "TEMPVS \xB7 Riprende la concentrazione \u2014 " + current.area;
     new import_obsidian2.Notice(message, 6500);
+    if (this.chimeEnabled) void this.chime.play(current.kind).catch((error) => console.warn("TEMPVS: avviso acustico non disponibile", error));
   }
   refreshAudioControls() {
     for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) leaf.view?.updateSoundControls?.();
@@ -1857,8 +1937,9 @@ var TempvsPlugin = class extends import_obsidian2.Plugin {
     const archive = JSON.parse(JSON.stringify(this.state));
     const cloudData = this.cloudStorage?.snapshot() || {};
     const audio = { kind: this.audioKind, volume: this.audioVolume };
+    const notifications = { sound: this.chimeEnabled };
     const write = this.writeChain.catch(() => {
-    }).then(() => this.saveData({ archive, cloudData, ui: { compact: this.compact, layout: this.layout }, audio }));
+    }).then(() => this.saveData({ archive, cloudData, ui: { compact: this.compact, layout: this.layout }, audio, notifications }));
     this.writeChain = write;
     await write;
     if (JSON.stringify(this.state) === JSON.stringify(archive)) this.dirty = false;
@@ -1982,6 +2063,7 @@ var TempvsPlugin = class extends import_obsidian2.Plugin {
     }
   }
   async onunload() {
+    this.chime?.destroy();
     this.ambient?.destroy();
     this.record();
     clearTimeout(this.cloudSaveTimer);
