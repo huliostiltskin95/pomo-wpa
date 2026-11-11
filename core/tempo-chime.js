@@ -1,39 +1,50 @@
-// Short, locally synthesised focus-end cue. No external files or network.
+// Short, locally synthesised phase-change cue: no files, downloads or network.
 export class FocusEndChime {
   constructor() { this.context = null; this.lastPlayed = -Infinity; }
+
   arm() {
     const Context = globalThis.AudioContext || globalThis.webkitAudioContext;
     if (!Context) return false;
     try {
-      if (!this.context || this.context.state === 'closed') this.context = new Context();
-      if (this.context.state !== 'running') void this.context.resume().catch(() => {});
+      // Playback audio session makes iOS treat alerts as audible media, not a silent notification.
+      try { if (globalThis.navigator?.audioSession) globalThis.navigator.audioSession.type = "playback"; } catch {}
+      if (!this.context || this.context.state === "closed") this.context = new Context();
+      if (this.context.state !== "running") void this.context.resume().catch(() => {});
       return true;
     } catch { return false; }
   }
-  play() {
-    if (!this.arm() || this.context.state !== 'running') return false;
-    const context = this.context, now = context.currentTime;
-    if (now - this.lastPlayed < 0.8) return false;
-    this.lastPlayed = now;
-    // Two gentle notes, each with a short decay, kept below normal media volume.
-    for (const [offset,frequency] of [[0,660],[0.19,880]]) {
-      const oscillator = context.createOscillator();
-      const envelope = context.createGain();
-      oscillator.type = 'sine';
-      oscillator.frequency.value = frequency;
-      envelope.gain.setValueAtTime(0.0001,now+offset);
-      envelope.gain.exponentialRampToValueAtTime(0.12,now+offset+0.018);
-      envelope.gain.exponentialRampToValueAtTime(0.0001,now+offset+0.34);
-      oscillator.connect(envelope);
-      envelope.connect(context.destination);
-      oscillator.start(now+offset);
-      oscillator.stop(now+offset+0.36);
-      oscillator.onended=()=>{oscillator.disconnect();envelope.disconnect();};
-    }
-    return true;
+
+  async play(phase = "break") {
+    if (!this.arm()) return false;
+    const context = this.context;
+    try {
+      if (context.state !== "running") await context.resume();
+      if (context !== this.context || context.state !== "running") return false;
+      const now = context.currentTime;
+      if (now - this.lastPlayed < 0.8) return false;
+      this.lastPlayed = now;
+      // Descending notes mark a break; ascending notes mark resumed focus.
+      const notes = phase === "work" ? [[0, 784], [0.20, 1047]] : [[0, 880], [0.20, 659]];
+      for (const [offset, frequency] of notes) {
+        const oscillator = context.createOscillator();
+        const envelope = context.createGain();
+        oscillator.type = "triangle";
+        oscillator.frequency.value = frequency;
+        envelope.gain.setValueAtTime(0.0001, now + offset);
+        envelope.gain.exponentialRampToValueAtTime(0.20, now + offset + 0.022);
+        envelope.gain.exponentialRampToValueAtTime(0.0001, now + offset + 0.40);
+        oscillator.connect(envelope);
+        envelope.connect(context.destination);
+        oscillator.start(now + offset);
+        oscillator.stop(now + offset + 0.42);
+        oscillator.onended = () => { oscillator.disconnect(); envelope.disconnect(); };
+      }
+      return true;
+    } catch { return false; }
   }
+
   destroy() {
-    if (this.context) void this.context.close().catch(()=>{});
-    this.context=null;
+    if (this.context) void this.context.close().catch(() => {});
+    this.context = null;
   }
 }

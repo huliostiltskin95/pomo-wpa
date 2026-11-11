@@ -5,6 +5,7 @@ import { createDropboxSync } from "../core/tempo-dropbox.js";
 import { dropboxRequest, createCloudStorage, chooseTempvsConflicts, confirmTempvs } from "./cloud-adapter.js";
 import { noteLinks, appendNoteLink } from "./notes-integration.js";
 import { TempoAmbientAudio } from "../core/tempo-audio.js";
+import { FocusEndChime } from "../core/tempo-chime.js";
 import { getAmbientFocusMode } from "../core/tempo-core.js";
 
 const VIEW_TYPE = "tempvs-timer";
@@ -293,6 +294,18 @@ class TempvsSettings extends PluginSettingTab {
     new Setting(el).setName("Pause automatiche").addToggle(t=>t
       .setValue(Boolean(this.plugin.state.defaults.breakEnabled)).onChange(async v=>
         this.plugin.change(()=>{this.plugin.state.defaults.breakEnabled=v;})));
+    new Setting(el).setName("Avvisi sonori").setDesc("Segnale udibile ai cambi tra concentrazione e pausa, quando Obsidian è in primo piano.")
+      .addToggle(t=>t.setValue(this.plugin.chimeEnabled).onChange(async value=>{
+        this.plugin.chimeEnabled=value;
+        if(value)this.plugin.chime.arm();
+        await this.plugin.persist();
+      }));
+    new Setting(el).setName("Prova avviso").setDesc("Tocca per attivare e verificare l\u0027audio su questo dispositivo.")
+      .addButton(b=>b.setButtonText("Riproduci").onClick(()=>{
+        void this.plugin.chime.play("break").then(ok=>{
+          if(!ok)new Notice("Audio non disponibile: controlla il volume e riprova toccando Riproduci.");
+        });
+      }));
     el.createEl("h3",{text:"Dropbox"});
     renderCloudSettings(el,this.plugin);
     el.createEl("p",{cls:"tempvs-muted",text:"Lo storico delle sessioni rimane salvato per statistiche, backup e sincronizzazione, ma non è mostrato nel timer."});
@@ -312,11 +325,13 @@ export default class TempvsPlugin extends Plugin {
       const savedVolume=Number(data?.audio?.volume);
       this.audioVolume=data?.audio?.volume!==undefined&&Number.isFinite(savedVolume)
         ? Math.max(0,Math.min(100,Math.round(savedVolume))) : 25;
+      this.chimeEnabled=data?.notifications?.sound!==false;
     } catch (error) {
       new Notice("TEMPVS: dati non validi, archivio lasciato intatto. " + error.message, 10000);
       throw error;
     }
     this.ambient=new TempoAmbientAudio(()=>this.refreshAudioControls());
+    this.chime=new FocusEndChime();
     this.lastTick = Date.now();
     this.lastSave = Date.now();
     // Establish the starting phase without issuing a notification on plugin reload.
@@ -388,6 +403,12 @@ export default class TempvsPlugin extends Plugin {
       this.status.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); this.openView(); } });
     }
     this.registerInterval(window.setInterval(() => this.tick(), 1000));
+    // iPadOS/WebKit requires a real user gesture before Web Audio can become audible.
+    // Prepare the cue on normal interaction, independently from ambient sounds.
+    const armChime=()=>{if(this.chimeEnabled)this.chime.arm();};
+    this.registerDomEvent(document, "pointerdown", armChime);
+    this.registerDomEvent(document, "touchstart", armChime);
+    this.registerDomEvent(document, "keydown", armChime);
     this.registerDomEvent(document, "visibilitychange", () => { if (!document.hidden) { this.tick(); this.syncAmbient(); this.refresh(true); } });
     this.refresh(true);
     this.cloud.init().catch(error => {
@@ -417,6 +438,8 @@ export default class TempvsPlugin extends Plugin {
       ? "TEMPVS · Inizia la pausa — " + current.area
       : "TEMPVS · Riprende la concentrazione — " + current.area;
     new Notice(message, 6500);
+    if(this.chimeEnabled)void this.chime.play(current.kind).catch(error=>
+      console.warn("TEMPVS: avviso acustico non disponibile",error));
   }
   refreshAudioControls(){
     for(const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE))leaf.view?.updateSoundControls?.();
@@ -504,7 +527,8 @@ export default class TempvsPlugin extends Plugin {
     const archive = JSON.parse(JSON.stringify(this.state));
     const cloudData = this.cloudStorage?.snapshot() || {};
     const audio={kind:this.audioKind,volume:this.audioVolume};
-    const write = this.writeChain.catch(() => {}).then(() => this.saveData({ archive, cloudData, ui:{compact:this.compact,layout:this.layout},audio }));
+    const notifications={sound:this.chimeEnabled};
+    const write = this.writeChain.catch(() => {}).then(() => this.saveData({ archive, cloudData, ui:{compact:this.compact,layout:this.layout},audio,notifications }));
     this.writeChain = write;
     await write;
     if (JSON.stringify(this.state) === JSON.stringify(archive)) this.dirty = false;
@@ -601,6 +625,7 @@ export default class TempvsPlugin extends Plugin {
     }
   }
   async onunload() {
+    this.chime?.destroy();
     this.ambient?.destroy();
     this.record();
     clearTimeout(this.cloudSaveTimer);
