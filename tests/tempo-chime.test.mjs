@@ -28,7 +28,7 @@ test("phase cues activate on a gesture, play distinct notes and suppress duplica
     assert.equal(chime.arm(), true);
     assert.equal(await chime.play("break"), true);
     assert.deepEqual(notes, [880, 659]);
-    assert.equal(navigator.audioSession.type, "playback");
+    assert.equal(navigator.audioSession.type, "ambient");
     assert.equal(await chime.play("work"), false);
     chime.context.currentTime += 1;
     assert.equal(await chime.play("work"), true);

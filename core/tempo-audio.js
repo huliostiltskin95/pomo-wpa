@@ -43,8 +43,9 @@ export class TempoAmbientAudio {
     const generation = this.generation;
     let resumeTimeout;
     try {
-      // Safari otherwise treats Web Audio as ambient and may silence it in silent mode.
-      try { if (globalThis.navigator?.audioSession) globalThis.navigator.audioSession.type = "playback"; } catch (_) {}
+      // Mix optional background sounds with external audio rather than interrupting it.
+      // On iOS, ambient audio may be muted by the device silent-mode setting.
+      try { if (globalThis.navigator?.audioSession) globalThis.navigator.audioSession.type = "ambient"; } catch (_) {}
       if (!this.context || this.context.state === "closed") this.context = new Context();
       const context = this.context;
       // Invoke resume and start sources in the same user gesture (Safari/iOS).
