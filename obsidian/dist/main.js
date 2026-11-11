@@ -1119,7 +1119,7 @@ var TempoAmbientAudio = class _TempoAmbientAudio {
     let resumeTimeout;
     try {
       try {
-        if (globalThis.navigator?.audioSession) globalThis.navigator.audioSession.type = "playback";
+        if (globalThis.navigator?.audioSession) globalThis.navigator.audioSession.type = "ambient";
       } catch (_) {
       }
       if (!this.context || this.context.state === "closed") this.context = new Context();
@@ -1288,7 +1288,7 @@ var FocusEndChime = class {
     if (!Context) return false;
     try {
       try {
-        if (globalThis.navigator?.audioSession) globalThis.navigator.audioSession.type = "playback";
+        if (globalThis.navigator?.audioSession) globalThis.navigator.audioSession.type = "ambient";
       } catch {
       }
       if (!this.context || this.context.state === "closed") this.context = new Context();
