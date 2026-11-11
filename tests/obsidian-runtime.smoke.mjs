@@ -18,6 +18,7 @@ function mockPlugin(mobile) {
     loadData(){return Promise.resolve(saved);}
     saveData(value){saved=structuredClone(value);return Promise.resolve();}
     registerView(){}
+    addSettingTab(){}
     addCommand(command){this.commands.push(command);}
     addRibbonIcon(){}
     addStatusBarItem(){return element();}
@@ -26,11 +27,14 @@ function mockPlugin(mobile) {
   }
   class ItemView {}
   class Modal {}
+  class PluginSettingTab { constructor(app,plugin){this.app=app;this.plugin=plugin;} }
+  class Setting {}
+  const setIcon=()=>{};
   class Notice {constructor(message){if(/failed|errore/i.test(message))throw Error(message);}}
   const context={
     module:{exports:{}},exports:{},require:id=>{
       if(id!=="obsidian")throw Error("Unexpected external "+id);
-      return {Plugin,ItemView,Modal,Notice,Platform:{isMobile:mobile},requestUrl:async()=>{throw Error("No live Dropbox in mock");}};
+      return {Plugin,ItemView,Modal,Notice,PluginSettingTab,Setting,setIcon,Platform:{isMobile:mobile},requestUrl:async()=>{throw Error("No live Dropbox in mock");}};
     },
     console,Date,Intl,Math,JSON,Map,Set,Symbol,Error,Number,String,Boolean,Array,Object,
     Promise,URL,URLSearchParams,TextEncoder,Uint8Array,btoa,clearTimeout,setTimeout,
