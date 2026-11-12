@@ -169,3 +169,37 @@ test('immediate custom pause retains exact seconds and never extends the deadlin
  assert.equal(getPhase(s,new Date('2026-11-06T09:40:53')).kind,'break');
  assert.equal(getPhase(s,new Date('2026-11-06T09:45:53')).remaining,0);
 });
+
+test('gross pomodoro syntax schedules exactly 50:10-50:10 within two hours',async()=>{
+ const {getPhase}=await import('../core/tempo-core.js');
+ const request=parseQuick('Studio @2h +14:00 -60m',[{name:'Studio'}]);
+ assert.equal(request[0].cycleMinutes,60);
+ const {sessions:[s]}=planSessions(request,[],[],{...defaults,breakEnabled:false,customBreakMinutes:5},now,id,'2026-11-06');
+ assert.deepEqual([s.start,s.end,s.workMinutes,s.cycleMinutes,s.breakEnabled,s.customBreakMinutes],['14:00','16:00',50,60,true,undefined]);
+ for(const [time,kind,remaining] of [['14:00:00','work',3000],['14:50:00','break',600],['15:00:00','work',3000],['15:50:00','break',600],['15:59:59','break',1]]){
+   const phase=getPhase(s,new Date('2026-11-06T'+time));
+   assert.equal(phase.kind,kind);assert.equal(phase.remaining,remaining);
+ }
+ const restored=normalizeArchive(JSON.parse(JSON.stringify({sessions:[s]})));
+ assert.equal(restored.sessions[0].cycleMinutes,60);
+ assert.equal(mergeSnapshots(restored,restored,restored).merged.sessions[0].cycleMinutes,60);
+ assert.equal(measuredFocus(s,+new Date('2026-11-06T14:49:55'),+new Date('2026-11-06T14:50:05')),5);
+});
+test('gross cycles round to whole minutes, retain exact total and truncate at session end',async()=>{
+ const {getPhase}=await import('../core/tempo-core.js');
+ const req=parseQuick('Studio @70m -45m +09:00',[{name:'Studio'}]);
+ const {sessions:[s]}=planSessions(req,[],[],defaults,now,id,'2026-11-06');
+ assert.equal(s.workMinutes,38);
+ assert.equal(getPhase(s,new Date('2026-11-06T09:38:00')).remaining,7*60);
+ assert.equal(getPhase(s,new Date('2026-11-06T09:45:00')).kind,'work');
+ assert.equal(+getPhase(s,new Date('2026-11-06T09:45:00')).end,+new Date('2026-11-06T10:10:00'));
+ const split=planSessions(req.map(r=>({...r,start:undefined})),[w('2026-11-06','09:00','09:40'),w('2026-11-07','10:00','10:30')],[],defaults,now,id);
+ assert.deepEqual(split.sessions.map(s=>s.cycleMinutes),[45,45]);
+});
+test('invalid, duplicate and conflicting gross cycles are rejected before scheduling',()=>{
+ for(const suffix of ['-0m','-1m','-289m','-1.5m','--60m','-60m -30m','-60m ~50m','~50m -60m','-60m !5m','!0m -60m'])
+   assert.throws(()=>parseQuick('Studio @2h +14:00 '+suffix,[{name:'Studio'}]));
+ for(const patch of [{cycleMinutes:NaN},{cycleMinutes:60,focusMinutes:50},{cycleMinutes:60,customBreakMinutes:5}])
+   assert.throws(()=>planSessions([{area:'Studio',minutes:120,...patch}],[],[],defaults,now,id));
+ assert.throws(()=>normalizeArchive({sessions:[{...session,cycleMinutes:session.workMinutes}]}));
+});

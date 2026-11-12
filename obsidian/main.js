@@ -1,6 +1,6 @@
 import { Plugin, ItemView, Notice, Platform, PluginSettingTab, Setting, setIcon } from "obsidian";
 import { getActiveSession, getPhase, sessionBounds, hasSessionOverlaps, localDateString, formatTime, mmss } from "../core/tempo-core.js";
-import { normalizeArchive, manualSessionEnd, measuredFocus, parseQuick, planSessions } from "../core/tempo-simple.js";
+import { normalizeArchive, manualSessionEnd, measuredFocus, parseQuick, planSessions, grossCycle } from "../core/tempo-simple.js";
 import { createDropboxSync } from "../core/tempo-dropbox.js";
 import { dropboxRequest, createCloudStorage, chooseTempvsConflicts, confirmTempvs } from "./cloud-adapter.js";
 import { noteLinks, appendNoteLink } from "./notes-integration.js";
@@ -180,13 +180,19 @@ class TempvsView extends ItemView {
     const planFields=plan.createDiv({cls:"tempvs-plan-fields"});
     const startTime=field(planFields,"Ora di inizio").createEl("input",{attr:{type:"time",required:"",value:"09:00"}});
     const duration=field(planFields,"Durata · minuti").createEl("input",{attr:{type:"number",min:"1",max:"1439",value:"30",required:""}});
+    const cycleInput=field(plan,"Pomodoro lordo · minuti (facoltativo)").createEl("input",{attr:{type:"number",min:"2",max:"288",placeholder:"Es. 60 → 50 focus + 10 pausa","aria-label":"Durata lorda del pomodoro"}});
+    const cycleHint=plan.createEl("p",{cls:"tempvs-help",text:"Lascia vuoto per usare il focus predefinito. La durata totale della sessione comprende tutte le pause."});
+    cycleInput.addEventListener("input",()=>{
+      try{const c=grossCycle(Number(cycleInput.value));cycleHint.textContent=`Ogni pomodoro: ${c.focusMinutes} min focus + ${c.breakMinutes} min pausa. L’ultimo ciclo si ferma alla fine della sessione.`;}
+      catch{cycleHint.textContent=cycleInput.value?"Inserisci da 2 a 288 minuti interi.":"Lascia vuoto per usare il focus predefinito.";}
+    });
     const batch=plan.createEl("details",{cls:"tempvs-batch"});
     batch.createEl("summary",{text:"Inserisci più sessioni con il testo"});
-    batch.createEl("p",{cls:"tempvs-help",text:"Una sessione per riga: Area @durata +ora. Esempio: Studio @45m +16:00. Se compili questo campo, verranno usate queste righe."});
-    const lines=field(batch,"Sessioni in formato rapido").createEl("textarea",{attr:{"aria-label":"Sessioni",placeholder:"Studio @1,5h +16:00\nLavoro @45m +18:00 !5m",rows:"3"}});
+    batch.createEl("p",{cls:"tempvs-help",text:"Una sessione per riga: Area @durata +ora -pomodoro. Esempio: Studio @2h +14:00 -60m → 50/10 + 50/10. -60m include la pausa; ~50m indica solo il focus. Se compili questo campo, verranno usate queste righe."});
+    const lines=field(batch,"Sessioni in formato rapido").createEl("textarea",{attr:{"aria-label":"Sessioni",placeholder:"Studio @2h +14:00 -60m\nLavoro @45m +18:00 !5m",rows:"3"}});
     const updatePlanMode=()=>{
       const textMode=Boolean(lines.value.trim());
-      for(const input of [plannedArea,startTime,duration])input.disabled=textMode;
+      for(const input of [plannedArea,startTime,duration,cycleInput])input.disabled=textMode;
     };
     lines.addEventListener("input",updatePlanMode);
     plan.createEl("button",{text:"Programma",cls:"mod-cta",attr:{type:"submit"}});
@@ -195,7 +201,7 @@ class TempvsView extends ItemView {
       if(plan.dataset.busy)return;
       plan.dataset.busy="true";
       const submit=plan.querySelector('[type="submit"]');submit.disabled=true;
-      const text=lines.value.trim() || `${plannedArea.value} @${duration.value}m +${startTime.value}`;
+      const text=lines.value.trim() || `${plannedArea.value} @${duration.value}m +${startTime.value}${cycleInput.value?" -"+cycleInput.value+"m":""}`;
       plugin.schedule(text,dateInput.value).then(()=>{
         lines.value="";updatePlanMode();this.day=dateInput.value;this.togglePanel(null,true);this.update(true);
       }).catch(err=>new Notice(err.message))
@@ -354,7 +360,7 @@ class TempvsView extends ItemView {
       details.createSpan({text:s.area||s.title});
       const isActive=active?.id===s.id;
       item.toggleClass("is-current",isActive);
-      details.createEl("small",{cls:"tempvs-muted",text:isActive?(s.paused?"Focus sospeso":"In corso"):minutes((sessionBounds(s).end-sessionBounds(s).start)/1000)+" min · Programmata"});
+      details.createEl("small",{cls:"tempvs-muted",text:isActive?(s.paused?"Focus sospeso":"In corso"):minutes((sessionBounds(s).end-sessionBounds(s).start)/1000)+" min · Programmata"+(s.cycleMinutes!==undefined?` · ${s.workMinutes}/${s.cycleMinutes-s.workMinutes}`:"")});
       if(sessionBounds(s).start>now)
         iconButton(item,"trash-2","Elimina sessione "+(s.area||s.title),()=>plugin.removeSession(s.id));
     }

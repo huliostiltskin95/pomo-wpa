@@ -66,9 +66,13 @@ try {
   await page.getByRole('button',{name:'Giorno successivo'}).click();
   await page.getByRole('button',{name:'Pianifica',exact:true}).click();
   assert.equal(await page.getByLabel('Data',{exact:true}).inputValue(),await page.evaluate(()=>view.day));
-  await page.getByLabel('Ora di inizio',{exact:true}).fill('14:30');
+  await page.getByLabel('Ora di inizio',{exact:true}).fill('14:00');
+  await page.getByLabel('Durata · minuti',{exact:true}).fill('120');
+  await page.getByLabel('Durata lorda del pomodoro').fill('60');
+  assert.match(await page.locator('.tempvs-method-plan .tempvs-help').first().textContent(),/50 min focus \+ 10 min pausa/);
   await page.getByRole('button',{name:'Programma',exact:true}).click();
   await page.waitForFunction(()=>plugin.state.sessions.length===2);
+  assert.deepEqual(await page.evaluate(()=>[plugin.state.sessions[1].workMinutes,plugin.state.sessions[1].cycleMinutes]),[50,60]);
   assert.equal(await page.locator('.tempvs-session').count(),1);
   await page.getByRole('button',{name:'Concludi',exact:true}).click();
   await page.waitForFunction(()=>plugin.state.sessions[0].finished);
@@ -87,7 +91,7 @@ try {
   await page.locator('.tempvs-method').selectOption('plan');
   await page.getByLabel('Ora di inizio',{exact:true}).fill('');
   await page.locator('.tempvs-batch summary').click();
-  await page.getByLabel('Sessioni',{exact:true}).fill('Studio @30m +16:00\nStudio @30m +17:00');
+  await page.getByLabel('Sessioni',{exact:true}).fill('Studio @30m +17:00 -30m\nStudio @30m +18:00');
   await page.getByRole('button',{name:'Programma',exact:true}).click();
   await page.waitForFunction(()=>plugin.state.sessions.length===4);
   assert.equal(await page.locator('.tempvs-session').count(),3);

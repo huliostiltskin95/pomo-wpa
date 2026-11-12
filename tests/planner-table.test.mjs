@@ -25,3 +25,9 @@ test('availability rows omit fixed start and summaries mark next-day ends',()=>{
  assert.equal(rowRequest({...row,placement:'windows',start:''},areas,25).start,undefined);
  assert.match(requestSummary(rowRequest({...row,start:'23:45'},areas,25),'2026-12-20'),/00:30 \(\+1 giorno\)/);
 });
+test('gross-cycle imports survive table conversion and summary',()=>{
+ const request=rowRequest({...row,minutes:'120',mode:'cycle',cycle:'60'},areas,25);
+ assert.deepEqual(request,{area:'Studio',minutes:120,start:'09:00',cycleMinutes:60});
+ assert.match(requestSummary(request,'2026-12-20'),/100 min focus \+ 20 min pause · cicli 50\/10/);
+ assert.throws(()=>rowRequest({...row,mode:'cycle',cycle:''},areas,25));
+});

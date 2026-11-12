@@ -4,6 +4,7 @@ Il timer mostra fase, avanzamento e orario finale. I controlli Pausa/Riprendi so
 
 - **Nuova sessione**: scegli area, durata totale e un preset da 15, 30 o 60 minuti. Focus e pausa finale personalizzata sono nelle opzioni avanzate.
 - **Pianifica**: scegli giorno, area, ora e durata. Il giorno iniziale segue la data selezionata nell’agenda. Per inserire più sessioni, espandi l’inserimento testuale: le righe compilate sostituiscono i campi guidati.
+- **Pomodoro lordo**: nella pianificazione inserisci ad esempio 60 per cicli 50/10. Equivalente testuale: `Studio @2h +14:00 -60m`. La durata totale resta di due ore; il ciclo esplicito include la pausa.
 - **Suoni / Risorse**: aprono un pannello con stato visibile sul comando. Chiudi con × oppure Escape. I campi restano compilati durante gli aggiornamenti del timer e passando tra pannelli.
 
 ## Build e installazione

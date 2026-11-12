@@ -64,4 +64,4 @@ jobs:
             obsidian/styles.css#styles.css \
             --target "${{ github.sha }}" \
             --title "TEMPVS $VERSION" \
-            --notes "TEMPVS Obsidian: timer con avanzamento, durate rapide, pianificazione guidata e testuale, pannelli interattivi e navigazione da tastiera. Aggiornamento tramite BRAT."
+            --notes "TEMPVS Obsidian: pianificazione con durata lorda dei pomodori. Studio @2h +14:00 -60m produce due cicli da 50 minuti di focus e 10 di pausa. Disponibile anche il campo guidato Pomodoro lordo. Aggiornamento tramite BRAT."

@@ -10,10 +10,12 @@ try {
   await page.getByRole('button',{name:/Nuova sessione/}).click();
   await page.locator('.planner-open-quick').click();
   await page.locator('#quick-date').fill('2099-11-06');
-  await page.locator('#quick').fill('Studio @45m +08:30');
+  await page.locator('#quick').fill('Studio @45m +08:30\nStudio @2h +14:00 -60m');
   await page.locator('#planner-import').click();
   // Import adds rows; remove the initial default row that targets an empty availability window.
   await page.locator('#planner-rows tr').first().locator('[data-remove]').click();
+  assert.equal(await page.locator('[data-field="mode"]').last().inputValue(),'cycle');
+  assert.equal(await page.locator('[data-field="cycle"]').last().inputValue(),'60');
   await page.locator('#prepare-plan').click();
   assert.match(await page.locator('#proposal-list').innerText(),/Studio/);
   await page.locator('#confirm-plan').click();
@@ -33,5 +35,6 @@ try {
   const archive=await page.evaluate(()=>JSON.parse(localStorage.getItem('tempo-pomodoro-v2')));
   assert.ok(archive.sessions.some(s=>s.date==='2099-11-06'));
   assert.ok(archive.sessions.some(s=>s.finished));
+  assert.ok(archive.sessions.some(s=>s.start==='14:00'&&s.end==='16:00'&&s.workMinutes===50&&s.cycleMinutes===60));
   assert.deepEqual(errors,[]);
 } finally { await browser.close(); }

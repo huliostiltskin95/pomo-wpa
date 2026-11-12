@@ -52,6 +52,7 @@ function normalizeSession(session) {
 }
 function validSession(session) {
   if (!session || typeof session.id !== "string" || !session.id.trim() || typeof session.title !== "string" || !session.title.trim() || typeof session.date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(session.date) || !Number.isInteger(session.workMinutes) || session.workMinutes < 1 || session.workMinutes > 240) return false;
+  if (session.cycleMinutes !== void 0 && (!Number.isInteger(session.cycleMinutes) || session.cycleMinutes < 2 || session.cycleMinutes > 288 || session.cycleMinutes <= session.workMinutes || session.customBreakMinutes !== void 0)) return false;
   const [year, month, day] = session.date.split("-").map(Number);
   const date = new Date(year, month - 1, day);
   if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return false;
@@ -117,7 +118,7 @@ function getPhase(session, now = /* @__PURE__ */ new Date()) {
       totalRemaining: Math.ceil(remainingSession / 1e3)
     };
   }
-  const breakMs = pauseMinutes(session.workMinutes) * 6e4;
+  const breakMs = (session.cycleMinutes !== void 0 ? session.cycleMinutes - session.workMinutes : pauseMinutes(session.workMinutes)) * 6e4;
   const cycleMs = workMs + breakMs;
   const cycleIndex = Math.floor(elapsed / cycleMs);
   const within = elapsed % cycleMs;
@@ -177,6 +178,12 @@ function focusCycle(focusMinutes, breakEnabled = true) {
     throw Error("La concentrazione per ciclo deve durare da 1 a 240 minuti.");
   return { focusMinutes, breakMinutes: breakEnabled ? pauseMinutes(focusMinutes) : 0 };
 }
+function grossCycle(cycleMinutes) {
+  if (!Number.isInteger(cycleMinutes) || cycleMinutes < 2 || cycleMinutes > 288)
+    throw Error("Il pomodoro lordo deve durare da 2 a 288 minuti interi.");
+  const focusMinutes = Math.min(cycleMinutes - 1, Math.round(cycleMinutes * 5 / 6));
+  return { focusMinutes, breakMinutes: cycleMinutes - focusMinutes };
+}
 function customPause(minutes2, grossMinutes) {
   if (!Number.isInteger(minutes2) || minutes2 < 0 || minutes2 >= grossMinutes)
     throw Error("La pausa deve essere un numero intero di minuti, da 0 a meno della durata lorda.");
@@ -209,13 +216,19 @@ function normalizeArchive(data) {
 function planSessions(requests, windows, existing, defaults, now = /* @__PURE__ */ new Date(), id = () => crypto.randomUUID(), selectedDate = localDateString(now)) {
   const result = [];
   let remainder = 0;
-  const cycleFor = (request) => focusCycle(request.focusMinutes ?? defaults.workMinutes, defaults.breakEnabled).focusMinutes;
+  const cycleFor = (request) => request.cycleMinutes !== void 0 ? grossCycle(request.cycleMinutes).focusMinutes : focusCycle(request.focusMinutes ?? defaults.workMinutes, defaults.breakEnabled).focusMinutes;
+  const cycleSettings = (request) => request.cycleMinutes !== void 0 ? { cycleMinutes: request.cycleMinutes, breakEnabled: true } : {};
   for (const request of requests) {
     cycleFor(request);
+    if (request.cycleMinutes !== void 0) {
+      if (request.focusMinutes !== void 0 || request.customBreakMinutes !== void 0) throw Error("Usa un solo tipo di ciclo: -minuti, ~focus oppure !pausa finale.");
+      continue;
+    }
     const pause = request.customBreakMinutes ?? defaults.customBreakMinutes;
     if (pause !== void 0) customPause(pause, request.minutes);
   }
   const applyPause = (request, sessions) => {
+    if (request.cycleMinutes !== void 0) return;
     let pause = request.customBreakMinutes ?? defaults.customBreakMinutes;
     if (pause === void 0) return;
     for (const session of [...sessions].reverse()) {
@@ -228,7 +241,7 @@ function planSessions(requests, windows, existing, defaults, now = /* @__PURE__ 
   for (const request of requests.filter((r) => r.start)) {
     if (request.minutes > 1440) throw Error("Una sessione con orario fisso pu\xF2 durare al massimo 24 ore.");
     const start = dateTime(selectedDate, request.start), end = new Date(+start + request.minutes * 6e4);
-    const session = { id: id(), title: request.area, area: request.area, date: selectedDate, start: request.start, end: formatTime(end), workMinutes: cycleFor(request), breakEnabled: defaults.breakEnabled !== false, actualSeconds: 0 };
+    const session = { id: id(), title: request.area, area: request.area, date: selectedDate, start: request.start, end: formatTime(end), workMinutes: cycleFor(request), breakEnabled: defaults.breakEnabled !== false, ...cycleSettings(request), actualSeconds: 0 };
     if (!validSession(session)) throw Error("Data o orario non valido.");
     if (+start < +now) throw Error("L\u2019orario " + request.start + " \xE8 gi\xE0 passato nel giorno scelto. Cambia giorno o orario.");
     applyPause(request, [session]);
@@ -253,7 +266,7 @@ function planSessions(requests, windows, existing, defaults, now = /* @__PURE__ 
         const minutes2 = Math.min(left, Math.floor((end - start) / 6e4), 1439);
         if (minutes2 <= 0) continue;
         const finish = new Date(start + minutes2 * 6e4);
-        result.push({ id: id(), title: request.area, area: request.area, date: localDateString(new Date(start)), start: formatTime(new Date(start)), end: formatTime(finish), workMinutes: cycleFor(request), breakEnabled: defaults.breakEnabled !== false, actualSeconds: 0 });
+        result.push({ id: id(), title: request.area, area: request.area, date: localDateString(new Date(start)), start: formatTime(new Date(start)), end: formatTime(finish), workMinutes: cycleFor(request), breakEnabled: defaults.breakEnabled !== false, ...cycleSettings(request), actualSeconds: 0 });
         left -= minutes2;
         if (!left) break;
       }
@@ -268,21 +281,26 @@ function planSessions(requests, windows, existing, defaults, now = /* @__PURE__ 
 function parseQuick(text, areas) {
   return text.trim().split("\n").filter((s) => s.trim()).map((line) => {
     const match = line.trim().match(/^(.+?)\s+@(\d+(?:[.,]\d+)?)\s*(h|min|m)(.*)$/i);
-    if (!match) throw Error("Usa: Studio @2h +08:30 ~40m (orario e ciclo facoltativi).");
+    if (!match) throw Error("Usa: Studio @2h +14:00 -60m (orario e ciclo facoltativi).");
     const area = areas.find((a) => a.name.toLocaleLowerCase() === match[1].trim().toLocaleLowerCase());
     const minutes2 = Math.round(Number(match[2].replace(",", ".")) * (match[3].toLowerCase() === "h" ? 60 : 1));
     if (!area || minutes2 < 1 || minutes2 > 10080) throw Error("Controlla area e durata lorda (da 1 minuto a 168 ore).");
-    let start, focusMinutes, customBreakMinutes;
+    let start, focusMinutes, customBreakMinutes, cycleMinutes;
     for (const token of match[4].trim().split(/\s+/).filter(Boolean)) {
       if (/^\+([01]\d|2[0-3]):[0-5]\d$/.test(token) && !start)
         start = token.slice(1);
       else if (/^~\d{1,3}m?$/i.test(token) && focusMinutes === void 0)
         focusMinutes = focusCycle(Number(token.slice(1).replace(/m$/i, ""))).focusMinutes;
-      else if (/^!\d{1,4}m?$/i.test(token) && customBreakMinutes === void 0)
+      else if (/^-\d{1,3}m?$/i.test(token) && cycleMinutes === void 0) {
+        cycleMinutes = Number(token.slice(1).replace(/m$/i, ""));
+        grossCycle(cycleMinutes);
+      } else if (/^!\d{1,4}m?$/i.test(token) && customBreakMinutes === void 0)
         customBreakMinutes = customPause(Number(token.slice(1).replace(/m$/i, "")), minutes2);
-      else throw Error("Opzione non valida: " + token + ". Usa +HH:MM, ~40m e/o !5m per la pausa personalizzata.");
+      else throw Error("Opzione non valida: " + token + ". Usa +HH:MM, -60m (pomodoro lordo), ~40m (focus) o !5m (pausa finale).");
     }
-    return { area: area.name, minutes: minutes2, ...start ? { start } : {}, ...focusMinutes !== void 0 ? { focusMinutes } : {}, ...customBreakMinutes !== void 0 ? { customBreakMinutes } : {} };
+    if (cycleMinutes !== void 0 && (focusMinutes !== void 0 || customBreakMinutes !== void 0))
+      throw Error("Non combinare -minuti con ~focus o !pausa finale.");
+    return { area: area.name, minutes: minutes2, ...cycleMinutes !== void 0 ? { cycleMinutes } : {}, ...start ? { start } : {}, ...focusMinutes !== void 0 ? { focusMinutes } : {}, ...customBreakMinutes !== void 0 ? { customBreakMinutes } : {} };
   });
 }
 function measuredFocus(session, from, to) {
@@ -1555,13 +1573,23 @@ var TempvsView = class extends import_obsidian2.ItemView {
     const planFields = plan.createDiv({ cls: "tempvs-plan-fields" });
     const startTime = field(planFields, "Ora di inizio").createEl("input", { attr: { type: "time", required: "", value: "09:00" } });
     const duration = field(planFields, "Durata \xB7 minuti").createEl("input", { attr: { type: "number", min: "1", max: "1439", value: "30", required: "" } });
+    const cycleInput = field(plan, "Pomodoro lordo \xB7 minuti (facoltativo)").createEl("input", { attr: { type: "number", min: "2", max: "288", placeholder: "Es. 60 \u2192 50 focus + 10 pausa", "aria-label": "Durata lorda del pomodoro" } });
+    const cycleHint = plan.createEl("p", { cls: "tempvs-help", text: "Lascia vuoto per usare il focus predefinito. La durata totale della sessione comprende tutte le pause." });
+    cycleInput.addEventListener("input", () => {
+      try {
+        const c = grossCycle(Number(cycleInput.value));
+        cycleHint.textContent = `Ogni pomodoro: ${c.focusMinutes} min focus + ${c.breakMinutes} min pausa. L\u2019ultimo ciclo si ferma alla fine della sessione.`;
+      } catch {
+        cycleHint.textContent = cycleInput.value ? "Inserisci da 2 a 288 minuti interi." : "Lascia vuoto per usare il focus predefinito.";
+      }
+    });
     const batch = plan.createEl("details", { cls: "tempvs-batch" });
     batch.createEl("summary", { text: "Inserisci pi\xF9 sessioni con il testo" });
-    batch.createEl("p", { cls: "tempvs-help", text: "Una sessione per riga: Area @durata +ora. Esempio: Studio @45m +16:00. Se compili questo campo, verranno usate queste righe." });
-    const lines = field(batch, "Sessioni in formato rapido").createEl("textarea", { attr: { "aria-label": "Sessioni", placeholder: "Studio @1,5h +16:00\nLavoro @45m +18:00 !5m", rows: "3" } });
+    batch.createEl("p", { cls: "tempvs-help", text: "Una sessione per riga: Area @durata +ora -pomodoro. Esempio: Studio @2h +14:00 -60m \u2192 50/10 + 50/10. -60m include la pausa; ~50m indica solo il focus. Se compili questo campo, verranno usate queste righe." });
+    const lines = field(batch, "Sessioni in formato rapido").createEl("textarea", { attr: { "aria-label": "Sessioni", placeholder: "Studio @2h +14:00 -60m\nLavoro @45m +18:00 !5m", rows: "3" } });
     const updatePlanMode = () => {
       const textMode = Boolean(lines.value.trim());
-      for (const input of [plannedArea, startTime, duration]) input.disabled = textMode;
+      for (const input of [plannedArea, startTime, duration, cycleInput]) input.disabled = textMode;
     };
     lines.addEventListener("input", updatePlanMode);
     plan.createEl("button", { text: "Programma", cls: "mod-cta", attr: { type: "submit" } });
@@ -1571,7 +1599,7 @@ var TempvsView = class extends import_obsidian2.ItemView {
       plan.dataset.busy = "true";
       const submit = plan.querySelector('[type="submit"]');
       submit.disabled = true;
-      const text = lines.value.trim() || `${plannedArea.value} @${duration.value}m +${startTime.value}`;
+      const text = lines.value.trim() || `${plannedArea.value} @${duration.value}m +${startTime.value}${cycleInput.value ? " -" + cycleInput.value + "m" : ""}`;
       plugin.schedule(text, dateInput.value).then(() => {
         lines.value = "";
         updatePlanMode();
@@ -1757,7 +1785,7 @@ var TempvsView = class extends import_obsidian2.ItemView {
       details.createSpan({ text: s.area || s.title });
       const isActive = active?.id === s.id;
       item.toggleClass("is-current", isActive);
-      details.createEl("small", { cls: "tempvs-muted", text: isActive ? s.paused ? "Focus sospeso" : "In corso" : minutes((sessionBounds(s).end - sessionBounds(s).start) / 1e3) + " min \xB7 Programmata" });
+      details.createEl("small", { cls: "tempvs-muted", text: isActive ? s.paused ? "Focus sospeso" : "In corso" : minutes((sessionBounds(s).end - sessionBounds(s).start) / 1e3) + " min \xB7 Programmata" + (s.cycleMinutes !== void 0 ? ` \xB7 ${s.workMinutes}/${s.cycleMinutes - s.workMinutes}` : "") });
       if (sessionBounds(s).start > now)
         iconButton(item, "trash-2", "Elimina sessione " + (s.area || s.title), () => plugin.removeSession(s.id));
     }

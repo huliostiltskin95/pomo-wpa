@@ -184,7 +184,7 @@ La cartella `obsidian/` contiene l'integrazione iniziale per Obsidian. Il plugin
 
 In Obsidian apri **BRAT → Add Beta plugin** e inserisci `huliostiltskin95/pomo-wpa` (oppure l’URL del repository), quindi aggiungi e abilita **Tempo — Pomodoro**.
 
-La release **0.5.4** include la nuova interfaccia TEMPVS: avanzamento del timer, durate rapide, pianificazione guidata e pannelli interattivi. Se il plugin è già installato, esegui **BRAT: Check for updates to all beta plugins and UPDATE** e ricaricalo se richiesto.
+La release **0.5.5** include la nuova interfaccia TEMPVS: avanzamento del timer, durate rapide, pianificazione guidata, pomodori lordi con `-60m` e pannelli interattivi. Se il plugin è già installato, esegui **BRAT: Check for updates to all beta plugins and UPDATE** e ricaricalo se richiesto.
 
 ### Build del plugin Obsidian
 
@@ -250,3 +250,9 @@ La sintassi rapida accetta `Studio @45m +09:00 !5m`; `!5m` prevale sulla scelta 
 La pianificazione ora usa una riga per sessione: area, minuti lordi, collocazione nelle fasce o orario fisso, pausa automatica/personalizzata/nessuna e riepilogo immediato. In modalità automatica, **Ciclo** consente di modificare il focus della singola riga rispetto al valore comune. Le sovrapposizioni, le pause non valide e la disponibilità insufficiente sono segnalate durante la compilazione. Ogni modifica invalida la proposta precedente: scegli **Prepara programma**, controlla gli orari e poi **Conferma programma**.
 
 **Incolla più sessioni** conserva la sintassi rapida e aggiunge le righe alla tabella senza salvarle nel calendario. Un errore nel testo non importa righe parziali. Sugli schermi stretti la tabella diventa una serie di schede con gli stessi campi. Le sessioni già salvate restano invariate.
+
+### Pomodori con durata lorda (0.5.5)
+
+`Studio @2h +14:00 -60m` riserva due ore totali e imposta cicli di 60 minuti, pausa compresa: **50 focus + 10 pausa, 50 focus + 10 pausa**, dalle 14:00 alle 16:00. `@` indica la durata totale della sessione; `-` quella di ogni pomodoro. Nel plugin Obsidian puoi usare anche il campo **Pomodoro lordo · minuti** della pianificazione guidata.
+
+Il rapporto focus/pausa è 5:1, arrotondato ai minuti interi mantenendo esatta la durata lorda (es. `-45m` → 38/7). Sono accettati da 2 a 288 minuti; se il totale della sessione non contiene cicli interi, l’ultimo termina all’orario finale. Un ciclo lordo esplicito include sempre la pausa e non si combina con `~focus` o `!pausa finale`. Le righe precedenti senza `-` mantengono il comportamento esistente. Il parser condiviso e la tabella PWA conservano lo stesso ciclo nelle importazioni.
