@@ -30,7 +30,7 @@ jobs:
       - name: Test plugin and shared core
         run: |
           npm test
-          node --test tests/obsidian-runtime.smoke.mjs tests/*.test.js
+          node --test tests/obsidian-runtime.smoke.mjs
       - name: Validate packaged files and version
         id: version
         shell: bash
@@ -64,4 +64,4 @@ jobs:
             obsidian/styles.css#styles.css \
             --target "${{ github.sha }}" \
             --title "TEMPVS $VERSION" \
-            --notes "TEMPVS Obsidian: pianificazione con durata lorda dei pomodori. Studio @2h +14:00 -60m produce due cicli da 50 minuti di focus e 10 di pausa. Disponibile anche il campo guidato Pomodoro lordo. Aggiornamento tramite BRAT."
+            --notes "TEMPVS Obsidian: build unificata, protezione dei dati salvati in caso di errore cloud, blocco dei salvataggi sovrapposti e annullamento delle risposte Dropbox dopo scollegamento o unload. Mantiene pomodori lordi e pianificazione guidata. Aggiornamento tramite BRAT."

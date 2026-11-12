@@ -34,6 +34,8 @@ test("phase cues activate on a gesture, play distinct notes and suppress duplica
     assert.equal(await chime.play("work"), true);
     assert.deepEqual(notes, [880, 659, 784, 1047]);
     chime.destroy();
+    assert.equal(await chime.play("break"),true,"a fresh audio context must not inherit the old clock's cooldown");
+    chime.destroy();
   } finally {
     if (prior === undefined) delete globalThis.AudioContext;
     else globalThis.AudioContext = prior;

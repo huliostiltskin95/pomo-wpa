@@ -14,6 +14,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Install build dependencies
+        run: npm install --no-package-lock
       - name: Check PWA JavaScript syntax
         run: |
           node --check simple.js
@@ -32,20 +34,15 @@ jobs:
           node --check core/tempo-tasks.js
           node --check core/tempo-core.js
           node --check core/tempo-audio.js
-          node --experimental-default-type=module --test tests/*.test.js
           npm test
-      - name: Install Obsidian plugin build dependencies
-        working-directory: obsidian
-        run: npm install
       - name: Build Obsidian plugin
-        working-directory: obsidian
-        run: npm run build
+        run: npm run build:obsidian
       - name: Upload plugin build
         uses: actions/upload-artifact@v4
         with:
           name: tempo-obsidian-plugin
           path: |
-            obsidian/main.js
-            obsidian/manifest.json
-            obsidian/styles.css
+            obsidian/dist/main.js
+            obsidian/dist/manifest.json
+            obsidian/dist/styles.css
           if-no-files-found: error

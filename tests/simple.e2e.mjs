@@ -36,5 +36,36 @@ try {
   assert.ok(archive.sessions.some(s=>s.date==='2099-11-06'));
   assert.ok(archive.sessions.some(s=>s.finished));
   assert.ok(archive.sessions.some(s=>s.start==='14:00'&&s.end==='16:00'&&s.workMinutes===50&&s.cycleMinutes===60));
+  // Switching a gross-cycle session to a custom final pause must remain loadable.
+  await page.getByRole('button',{name:'Pianifica',exact:true}).click();
+  await page.locator('#session-date').fill('2099-11-06');
+  await page.locator('[data-edit-pause]').last().click();
+  await page.getByRole('checkbox',{name:'Usa i cicli automatici'}).uncheck();
+  await page.getByLabel('Pausa finale (minuti)').fill('5');
+  await page.locator('.edit-dialog').getByRole('button',{name:'Conferma',exact:true}).click();
+  await page.waitForFunction(()=>JSON.parse(localStorage.getItem('tempo-pomodoro-v2')).sessions.some(s=>s.start==='14:00'&&s.customBreakMinutes===5));
+  await page.reload();
+  const edited=await page.evaluate(()=>JSON.parse(localStorage.getItem('tempo-pomodoro-v2')).sessions.find(s=>s.start==='14:00'));
+  assert.equal(edited.cycleMinutes,undefined);assert.equal(edited.customBreakMinutes,5);
+  await page.waitForFunction(()=>typeof document.querySelector('[data-page="timer"]').onclick==='function');
+  await page.getByRole('button',{name:'Timer',exact:true}).click();
+  // A cloud metadata quota error must not undo an already committed local archive.
+  await page.evaluate(()=>{
+    const original=Storage.prototype.setItem;
+    Storage.prototype.setItem=function(key,value){if(key==='tempo-dropbox-sync-v1')throw Error('simulated sync quota');return original.call(this,key,value);};
+  });
+  await page.getByRole('button',{name:'Inizia ora',exact:true}).click();
+  await page.getByRole('button',{name:'Pausa',exact:true}).click();
+  const saved=await page.evaluate(()=>JSON.parse(localStorage.getItem('tempo-pomodoro-v2')));
+  assert.ok(saved.sessions.some(s=>s.paused&&!s.finished));
+  assert.equal(await page.getByRole('button',{name:'Riprendi',exact:true}).isVisible(),true);
   assert.deepEqual(errors,[]);
+  const noAudio=await browser.newPage();
+  await noAudio.addInitScript(()=>{window.AudioContext=undefined;window.webkitAudioContext=undefined;});
+  await noAudio.goto('http://127.0.0.1:8123/');
+  await noAudio.waitForFunction(()=>typeof document.querySelector('#settings-open').onclick==='function');
+  await noAudio.locator('#settings-open').click();
+  await noAudio.locator('#chime-preview').click();
+  assert.match(await noAudio.locator('#chime-status').textContent(),/Audio non disponibile/);
+  await noAudio.close();
 } finally { await browser.close(); }

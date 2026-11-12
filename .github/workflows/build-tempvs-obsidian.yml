@@ -25,10 +25,6 @@ jobs:
           node-version: '22'
       - run: npm install --no-audit --no-fund
       - run: npm run build:obsidian
-      - name: Package only Obsidian assets
-        run: |
-          cp obsidian/styles.css obsidian/dist/styles.css
-          cp obsidian/manifest.json obsidian/dist/manifest.json
       - name: Commit compiled plugin without touching PWA
         run: |
           git config user.name "github-actions[bot]"

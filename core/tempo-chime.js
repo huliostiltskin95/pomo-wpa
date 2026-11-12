@@ -9,7 +9,10 @@ export class FocusEndChime {
       // Mix short alerts with other audio (music, recordings, dictation) on iOS.
       // Playback mode would interrupt external media even while the timer is idle.
       try { if (globalThis.navigator?.audioSession) globalThis.navigator.audioSession.type = "ambient"; } catch {}
-      if (!this.context || this.context.state === "closed") this.context = new Context();
+      if (!this.context || this.context.state === "closed") {
+        this.context = new Context();
+        this.lastPlayed = -Infinity;
+      }
       if (this.context.state !== "running") void this.context.resume().catch(() => {});
       return true;
     } catch { return false; }

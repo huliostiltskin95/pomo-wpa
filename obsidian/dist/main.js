@@ -214,11 +214,17 @@ function normalizeArchive(data) {
   return { ...data, sessions: data.sessions.map(normalizeSession), tasks: data.tasks || [], history: data.history || [], syncDeleted: data.syncDeleted || { tasks: [], sessions: [] }, defaults: { ...data.defaults, workMinutes: data.defaults?.workMinutes || 25, breakEnabled: data.defaults?.breakEnabled !== false, simple: { ...config, areas, windows: config.windows || [] } } };
 }
 function planSessions(requests, windows, existing, defaults, now = /* @__PURE__ */ new Date(), id = () => crypto.randomUUID(), selectedDate = localDateString(now)) {
+  if (!Array.isArray(requests) || !Array.isArray(windows) || !Array.isArray(existing)) throw Error("Richieste e fasce non valide.");
+  if (!Number.isFinite(+now)) throw Error("Data attuale non valida.");
   const result = [];
   let remainder = 0;
   const cycleFor = (request) => request.cycleMinutes !== void 0 ? grossCycle(request.cycleMinutes).focusMinutes : focusCycle(request.focusMinutes ?? defaults.workMinutes, defaults.breakEnabled).focusMinutes;
   const cycleSettings = (request) => request.cycleMinutes !== void 0 ? { cycleMinutes: request.cycleMinutes, breakEnabled: true } : {};
   for (const request of requests) {
+    if (!request || typeof request.area !== "string" || !request.area.trim() || !Number.isInteger(request.minutes) || request.minutes < 1 || request.minutes > 10080)
+      throw Error("Indica area e durata lorda da 1 a 10080 minuti interi.");
+    if (request.start !== void 0 && !/^([01]\d|2[0-3]):[0-5]\d$/.test(request.start))
+      throw Error("Orario fisso non valido: usa HH:MM.");
     cycleFor(request);
     if (request.cycleMinutes !== void 0) {
       if (request.focusMinutes !== void 0 || request.customBreakMinutes !== void 0) throw Error("Usa un solo tipo di ciclo: -minuti, ~focus oppure !pausa finale.");
@@ -536,7 +542,23 @@ async function fail(response) {
 }
 function createDropboxSync({ getState, applyRemote, normalizeRemote, onStatus, resolveConflicts, platform = {} }) {
   const storage = platform.storage ?? globalThis.localStorage;
-  const request = platform.request ?? fetch;
+  const rawRequest = platform.request ?? fetch;
+  let generation = 0, disposed = false;
+  const assertCurrent = (epoch) => {
+    if (disposed || epoch !== generation) throw Error("Operazione Dropbox annullata.");
+  };
+  const request = async (...args) => {
+    const epoch = generation;
+    assertCurrent(epoch);
+    const response = await rawRequest(...args);
+    assertCurrent(epoch);
+    const body = (method) => async () => {
+      const value = await response[method]();
+      assertCurrent(epoch);
+      return value;
+    };
+    return { ok: response.ok, status: response.status, headers: response.headers, json: body("json"), text: body("text") };
+  };
   const isOnline = platform.isOnline ?? (() => typeof navigator === "undefined" || navigator.onLine !== false);
   const transientStorage = platform.transientStorage ?? globalThis.sessionStorage;
   if (!storage || !transientStorage) throw new Error("Archivio locale Dropbox non disponibile.");
@@ -577,7 +599,7 @@ function createDropboxSync({ getState, applyRemote, normalizeRemote, onStatus, r
       data: { app: "TEMPVS", version: 5, ...local }
     });
   };
-  const status = (message, phase = "idle") => onStatus(message, { connected: Boolean(auth.refreshToken), dirty: meta.dirty, ready: meta.ready, phase, busy: ["checking", "uploading", "downloading", "merging"].includes(phase) });
+  const status = (message, phase = "idle") => !disposed && onStatus(message, { connected: Boolean(auth.refreshToken), dirty: meta.dirty, ready: meta.ready, phase, busy: ["checking", "uploading", "downloading", "merging"].includes(phase) });
   const storeMeta = () => write(META_KEY, meta);
   const storeAuth = () => write(AUTH_KEY, auth);
   const snapshot = (data = current()) => ({
@@ -587,6 +609,7 @@ function createDropboxSync({ getState, applyRemote, normalizeRemote, onStatus, r
     ...syncState(data)
   });
   function changed() {
+    if (disposed) return;
     meta.dirty = true;
     storeMeta();
     status("Modifiche locali in attesa di caricamento", "pending");
@@ -689,6 +712,7 @@ function createDropboxSync({ getState, applyRemote, normalizeRemote, onStatus, r
     return info2.rev;
   }
   function synced(data, rev) {
+    if (disposed) return;
     saveBase(data);
     meta.rev = rev;
     meta.ready = true;
@@ -704,14 +728,17 @@ function createDropboxSync({ getState, applyRemote, normalizeRemote, onStatus, r
     }
   }
   async function adopt(data, rev, original = current()) {
+    const epoch = generation;
     if (stateJSON(current()) !== stateJSON(original))
       throw new Error("Dati locali cambiati durante il download. Riprova la sincronizzazione.");
     backupBeforeReplacement(data);
     await applyRemote(data);
+    assertCurrent(epoch);
     synced(data, rev);
   }
   async function applyMerged(item, { manual = false } = {}) {
     if (overridePending && !manual) return false;
+    const epoch = generation;
     const local = current(), base = baseline();
     let decisions = {}, result = mergeSnapshots(base, local, item.file, decisions);
     if (result.conflicts.length && !manual) {
@@ -726,6 +753,7 @@ function createDropboxSync({ getState, applyRemote, normalizeRemote, onStatus, r
       if (++rounds > 6) throw new Error("Troppi conflitti consecutivi: esporta un backup e riprova.");
       status("Scelta delle modifiche da conservare\u2026", "merging");
       const selected = await resolveConflicts(result.conflicts);
+      assertCurrent(epoch);
       if (!selected) {
         status("Unione annullata: nessun dato sovrascritto.", "pending");
         return false;
@@ -753,11 +781,13 @@ function createDropboxSync({ getState, applyRemote, normalizeRemote, onStatus, r
       return true;
     }
     await applyRemote(merged);
+    assertCurrent(epoch);
     synced(merged, revision);
     status(meta.dirty ? "Unione salvata su Dropbox; nuove modifiche locali ancora da inviare." : "Archivi uniti e sincronizzati.", meta.dirty ? "pending" : "idle");
     return true;
   }
   async function firstSync(direction) {
+    const epoch = generation;
     if (!auth.refreshToken) throw new Error("Collega prima Dropbox.");
     if (meta.ready) throw new Error("Sincronizzazione gi\xE0 inizializzata.");
     if (!isOnline()) throw new Error("Connessione assente.");
@@ -773,6 +803,7 @@ function createDropboxSync({ getState, applyRemote, normalizeRemote, onStatus, r
         throw new Error("I dati locali sono cambiati durante il download. Riprova.");
       backupBeforeReplacement(item.file);
       await applyRemote(item.file);
+      assertCurrent(epoch);
       synced(item.file, item.rev);
       return;
     }
@@ -787,7 +818,7 @@ function createDropboxSync({ getState, applyRemote, normalizeRemote, onStatus, r
     throw new Error("Operazione iniziale non riconosciuta.");
   }
   async function sync() {
-    if (overridePending) return;
+    if (disposed || overridePending) return;
     if (inFlight) return inFlight;
     inFlight = (async () => {
       if (!auth.refreshToken || !meta.ready) return;
@@ -870,7 +901,7 @@ function createDropboxSync({ getState, applyRemote, normalizeRemote, onStatus, r
       throw e;
     } finally {
       overridePending = false;
-      if (meta.dirty && meta.ready) {
+      if (!disposed && meta.dirty && meta.ready) {
         clearTimeout(delay);
         delay = setTimeout(() => sync().catch((e) => status(e.message, "error")), 2500);
       }
@@ -902,6 +933,7 @@ function createDropboxSync({ getState, applyRemote, normalizeRemote, onStatus, r
     }
   }
   async function forceDownload(allowDirty = false) {
+    const epoch = generation;
     if (!auth.refreshToken || !meta.ready) throw new Error("Inizializza prima la sincronizzazione.");
     if (meta.dirty && !allowDirty) throw new Error("Modifiche locali da conservare: download bloccato.");
     if (overridePending) throw new Error("Un'altra operazione manuale \xE8 in corso.");
@@ -916,6 +948,7 @@ function createDropboxSync({ getState, applyRemote, normalizeRemote, onStatus, r
         throw new Error("I dati locali sono cambiati durante il download. Riprova.");
       backupBeforeReplacement(item.file);
       await applyRemote(item.file);
+      assertCurrent(epoch);
       synced(item.file, item.rev);
       status("Archivio Dropbox scaricato.");
     } finally {
@@ -923,13 +956,20 @@ function createDropboxSync({ getState, applyRemote, normalizeRemote, onStatus, r
     }
   }
   function disconnect() {
+    ++generation;
     clearTimeout(delay);
+    transientStorage.removeItem("tempo-dropbox-pkce");
     auth = {};
     meta = { rev: null, dirty: false, ready: false };
     storage.removeItem(AUTH_KEY);
     storage.removeItem(META_KEY);
     storage.removeItem(BASE_KEY);
     status("Dropbox scollegato. Dati locali conservati.");
+  }
+  function destroy() {
+    disposed = true;
+    ++generation;
+    clearTimeout(delay);
   }
   function info() {
     return { connected: Boolean(auth.refreshToken), ready: meta.ready, dirty: meta.dirty };
@@ -940,7 +980,7 @@ function createDropboxSync({ getState, applyRemote, normalizeRemote, onStatus, r
     if (meta.ready) await sync().catch(() => {
     });
   }
-  return { init, connect, exchangeManualCode, firstSync, sync, changed, mergeNow, forceUpload, forceDownload, disconnect, info, recovery };
+  return { init, connect, exchangeManualCode, firstSync, sync, changed, mergeNow, forceUpload, forceDownload, disconnect, destroy, info, recovery };
 }
 
 // obsidian/cloud-adapter.js
@@ -1309,7 +1349,10 @@ var FocusEndChime = class {
         if (globalThis.navigator?.audioSession) globalThis.navigator.audioSession.type = "ambient";
       } catch {
       }
-      if (!this.context || this.context.state === "closed") this.context = new Context();
+      if (!this.context || this.context.state === "closed") {
+        this.context = new Context();
+        this.lastPlayed = -Infinity;
+      }
       if (this.context.state !== "running") void this.context.resume().catch(() => {
       });
       return true;
@@ -2093,18 +2136,28 @@ var TempvsPlugin = class extends import_obsidian2.Plugin {
     if (JSON.stringify(this.cloudStorage?.snapshot() || {}) === JSON.stringify(cloudData)) this.cloudDirty = false;
   }
   async change(mutator) {
-    this.record();
-    const previous = JSON.stringify(this.state);
+    if (this.changing) throw Error("Salvataggio in corso. Attendi prima di riprovare.");
+    this.changing = true;
     try {
-      mutator();
-      await this.persist();
-      this.cloud?.changed();
-      await this.persist();
+      this.record();
+      const previous = JSON.stringify(this.state);
+      try {
+        mutator();
+        await this.persist();
+      } catch (error) {
+        this.state = JSON.parse(previous);
+        this.refresh(true);
+        throw error;
+      }
+      try {
+        this.cloud?.changed();
+        await this.persist();
+      } catch (error) {
+        new import_obsidian2.Notice("TEMPVS: dati salvati in locale; sincronizzazione da riprovare. " + error.message);
+      }
       this.refresh(true);
-    } catch (error) {
-      this.state = JSON.parse(previous);
-      this.refresh(true);
-      throw error;
+    } finally {
+      this.changing = false;
     }
   }
   async setCompact(value) {
@@ -2210,6 +2263,7 @@ var TempvsPlugin = class extends import_obsidian2.Plugin {
     }
   }
   async onunload() {
+    this.cloud?.destroy();
     this.chime?.destroy();
     this.ambient?.destroy();
     this.record();

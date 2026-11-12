@@ -2,7 +2,7 @@ import {initRefinedUI,editSessionDetails,chooseSyncConflict,updatePlannerDay} fr
 import {createTimerPip,timerColor} from './timer-pip.js';
 import {createPlannerTable} from './planner-table.js';
 import {localDateString,formatDate,formatTime,escapeHtml as esc,sessionBounds,getActiveSession,getNextSession,getPhase,mmss,hasSessionOverlaps} from './core/tempo-core.js';
-import {normalizeArchive,planSessions,parseQuick,measuredFocus,customPause,sessionPauseLabel,focusCycle,normalizeAreaColor,manualSessionEnd} from './core/tempo-simple.js';
+import {normalizeArchive,planSessions,measuredFocus,customPause,sessionPauseLabel,focusCycle,normalizeAreaColor,manualSessionEnd} from './core/tempo-simple.js';
 import {TempoAmbientAudio} from './core/tempo-audio.js';
 import {FocusEndChime} from './core/tempo-chime.js';
 import {createDropboxSync} from './core/tempo-dropbox.js';
@@ -28,22 +28,19 @@ function pauseSettings(prefix,gross) {
     ? {customBreakMinutes:customPause(Number($(prefix+'-pause-minutes').value),gross)} : {};
 }
 function updatePausePreviews() {
-  for(const prefix of ['instant']){
-    const custom=$(prefix+'-pause-mode').value==='custom';
-    $(prefix+'-pause-field').hidden=!custom;
-    $(prefix+'-pause-minutes').disabled=!custom;
-    $(prefix+'-focus').disabled=custom;
-    let label=pauseLabel($(prefix+'-focus').value,state.defaults.breakEnabled);
-    if(custom){
-      try{
-        const pause=pauseSettings(prefix,prefix==='instant'?Number($('instant-minutes').value):10081).customBreakMinutes;
-        label=prefix==='instant'
-          ? (Number($('instant-minutes').value)-pause)+' min focus + '+pause+' min pausa finale = '+$('instant-minutes').value+' min lordi.'
-          : pause+' min di pausa finale per richiesta, sottratti dalla durata lorda. Nessun ciclo automatico.';
-      }catch(e){label=e.message;}
-    }
-    $(prefix+'-pause-preview').textContent=label;
+  const prefix='instant';
+  const custom=$(prefix+'-pause-mode').value==='custom';
+  $(prefix+'-pause-field').hidden=!custom;
+  $(prefix+'-pause-minutes').disabled=!custom;
+  $(prefix+'-focus').disabled=custom;
+  let label=pauseLabel($(prefix+'-focus').value,state.defaults.breakEnabled);
+  if(custom){
+    try{
+      const pause=pauseSettings(prefix,Number($('instant-minutes').value)).customBreakMinutes;
+      label=(Number($('instant-minutes').value)-pause)+' min focus + '+pause+' min pausa finale = '+$('instant-minutes').value+' min lordi.';
+    }catch(e){label=e.message;}
   }
+  $(prefix+'-pause-preview').textContent=label;
 }
 function deadlineLabel(end, now = new Date()) {
   const date = localDateString(end),today = localDateString(now);
@@ -84,7 +81,15 @@ function enterImmersive() {
 }
 const available=()=>state.sessions.filter(s=>!s.finished);
 const active=()=>getActiveSession(available());
-function commit(change){const previous=JSON.stringify(state);try{change();archiveStore.save(state);proposal=null;$('proposal').hidden=true;cloud?.changed();render();planner?.syncAreas();return true;}catch(e){state=JSON.parse(previous);tell('Salvataggio non riuscito: '+e.message);return false;}}
+function commit(change){
+  const previous=JSON.stringify(state);
+  try{change();archiveStore.save(state);}
+  catch(e){state=JSON.parse(previous);tell('Salvataggio non riuscito: '+e.message);return false;}
+  // The archive is committed. A sync/UI failure must not roll memory back behind disk.
+  proposal=null;$('proposal').hidden=true;
+  try{cloud?.changed();}catch(e){tell('Dati salvati in locale; sincronizzazione da riprovare: '+e.message);}
+  render();planner?.syncAreas();return true;
+}
 function download(data,name){const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
 function backup(){download({app:'TEMPVS',version:6,exportedAt:new Date().toISOString(),...state},'tempvs-'+localDateString()+'.json');$('backup-status').textContent='Backup esportato alle '+formatTime(new Date());}
 function options(select,chosen){
@@ -330,6 +335,7 @@ $('session-list').onclick=async e=>{
           delete target.customBreakMinutes;
           target.breakEnabled=state.defaults.breakEnabled;
         }else{
+          delete target.cycleMinutes;
           target.customBreakMinutes=minutes;
           target.breakEnabled=minutes>0;
         }
@@ -358,14 +364,14 @@ function openSettings(){
   $('work').value=state.defaults.workMinutes;$('breaks').checked=state.defaults.breakEnabled;$('focus-end-chime').checked=chimeEnabled();
   options($('edit-area'));loadAreaFields();$('settings').showModal();
 }
-$('chime-preview').onclick=()=>{
+$('chime-preview').onclick=async()=>{
   focusEndChime.arm();
-  const played=focusEndChime.play();
+  const played=await focusEndChime.play();
   $('chime-status').textContent=played?'Segnale riprodotto.':'Audio non disponibile: verifica il volume o riprova toccando Prova segnale.';
 };
 $('settings-open').onclick=openSettings;$('area-edit').onclick=openSettings;$('settings-close').onclick=()=>$('settings').close();
 $('edit-area').onchange=loadAreaFields;
-$('area-form').onsubmit=e=>{e.preventDefault();commit(()=>{const area=areaFor($('edit-area').value);area.description=$('description').value;area.color=normalizeAreaColor($('area-color').value,area.name);});tell('Area aggiornata.');};
+$('area-form').onsubmit=e=>{e.preventDefault();if(commit(()=>{const area=areaFor($('edit-area').value);area.description=$('description').value;area.color=normalizeAreaColor($('area-color').value,area.name);}))tell('Area aggiornata.');};
 $('new-area-form').onsubmit=e=>{e.preventDefault();const name=$('new-area').value.trim();if(!name||config().areas.some(a=>a.name.toLowerCase()===name.toLowerCase()))return tell('Scegli un nome diverso.');if(commit(()=>config().areas.push({name,description:'',color:normalizeAreaColor(undefined,name)}))){$('new-area').value='';options($('edit-area'),name);loadAreaFields();}};
 $('preferences').onsubmit=e=>{e.preventDefault();
   const before=state.defaults.workMinutes,work=Number($('work').value);

@@ -20,7 +20,18 @@ export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus
   const storage=platform.storage ?? globalThis.localStorage;
   // request() may use Obsidian requestUrl on mobile, where WebView fetch
   // can reject the Dropbox API through browser CORS rules.
-  const request=platform.request ?? fetch;
+  const rawRequest=platform.request ?? fetch;
+  let generation=0,disposed=false;
+  const assertCurrent=epoch=>{
+    if(disposed || epoch!==generation)throw Error('Operazione Dropbox annullata.');
+  };
+  // A disconnected/unloaded client must never apply a late network response.
+  const request=async(...args)=>{
+    const epoch=generation;assertCurrent(epoch);
+    const response=await rawRequest(...args);assertCurrent(epoch);
+    const body=method=>async()=>{const value=await response[method]();assertCurrent(epoch);return value;};
+    return {ok:response.ok,status:response.status,headers:response.headers,json:body('json'),text:body('text')};
+  };
   const isOnline=platform.isOnline ?? (()=>typeof navigator==="undefined" || navigator.onLine!==false);
   const transientStorage=platform.transientStorage ?? globalThis.sessionStorage;
   if(!storage || !transientStorage)throw new Error("Archivio locale Dropbox non disponibile.");
@@ -51,12 +62,12 @@ export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus
       savedAt:new Date().toISOString(),data:{app:"TEMPVS",version:5,...local}
     });
   };
-  const status=(message,phase="idle")=>onStatus(message,{connected:Boolean(auth.refreshToken),dirty:meta.dirty,ready:meta.ready,phase,busy:["checking","uploading","downloading","merging"].includes(phase)});
+  const status=(message,phase="idle")=>!disposed&&onStatus(message,{connected:Boolean(auth.refreshToken),dirty:meta.dirty,ready:meta.ready,phase,busy:["checking","uploading","downloading","merging"].includes(phase)});
   const storeMeta=()=>write(META_KEY,meta);
   const storeAuth=()=>write(AUTH_KEY,auth);
   const snapshot=(data=current())=>({app:"Tempo Pomodoro",version:5,
     exportedAt:new Date().toISOString(),...syncState(data)});
-  function changed(){meta.dirty=true;storeMeta();status("Modifiche locali in attesa di caricamento","pending");clearTimeout(delay);if(meta.ready&&auth.refreshToken)delay=setTimeout(()=>{sync().catch(e=>status(e.message));},2500);}
+  function changed(){if(disposed)return;meta.dirty=true;storeMeta();status("Modifiche locali in attesa di caricamento","pending");clearTimeout(delay);if(meta.ready&&auth.refreshToken)delay=setTimeout(()=>{sync().catch(e=>status(e.message));},2500);}
   async function connect(appKey){
     appKey=(appKey||auth.appKey||"").trim();
     if(!/^[a-z0-9]{8,}$/i.test(appKey))throw new Error("Inserisci una App key Dropbox valida.");
@@ -136,6 +147,7 @@ export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus
     return info.rev;
   }
   function synced(data,rev){
+    if(disposed)return;
     saveBase(data);
     meta.rev=rev;meta.ready=true;
     meta.dirty=stateJSON(current())!==stateJSON(data);
@@ -148,14 +160,17 @@ export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus
     }
   }
   async function adopt(data,rev,original=current()){
+    const epoch=generation;
     if(stateJSON(current())!==stateJSON(original))
       throw new Error("Dati locali cambiati durante il download. Riprova la sincronizzazione.");
     backupBeforeReplacement(data);
     await applyRemote(data);
+    assertCurrent(epoch);
     synced(data,rev);
   }
   async function applyMerged(item,{manual=false}={}){
     if(overridePending&&!manual)return false;
+    const epoch=generation;
     const local=current(),base=baseline();
     let decisions={},result=mergeSnapshots(base,local,item.file,decisions);
     if(result.conflicts.length && !manual){
@@ -169,6 +184,7 @@ export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus
       if(++rounds>6)throw new Error("Troppi conflitti consecutivi: esporta un backup e riprova.");
       status("Scelta delle modifiche da conservare…","merging");
       const selected=await resolveConflicts(result.conflicts);
+      assertCurrent(epoch);
       if(!selected){status("Unione annullata: nessun dato sovrascritto.","pending");return false;}
       decisions={...decisions,...selected};
       result=mergeSnapshots(base,local,item.file,decisions);
@@ -197,6 +213,7 @@ export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus
     }
     // The upload succeeded: now update the local copy and the common base.
     await applyRemote(merged);
+    assertCurrent(epoch);
     synced(merged,revision);
     status(meta.dirty
       ?"Unione salvata su Dropbox; nuove modifiche locali ancora da inviare."
@@ -204,6 +221,7 @@ export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus
     return true;
   }
   async function firstSync(direction){
+    const epoch=generation;
     if(!auth.refreshToken)throw new Error("Collega prima Dropbox.");
     if(meta.ready)throw new Error("Sincronizzazione già inizializzata.");
     if(!isOnline())throw new Error("Connessione assente.");
@@ -219,6 +237,7 @@ export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus
         throw new Error("I dati locali sono cambiati durante il download. Riprova.");
       backupBeforeReplacement(item.file);
       await applyRemote(item.file);
+      assertCurrent(epoch);
       synced(item.file,item.rev);
       return;
     }
@@ -233,7 +252,7 @@ export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus
     throw new Error("Operazione iniziale non riconosciuta.");
   }
   async function sync(){
-    if(overridePending)return;
+    if(disposed||overridePending)return;
     if(inFlight)return inFlight;
     inFlight=(async()=>{
       if(!auth.refreshToken||!meta.ready)return;
@@ -302,7 +321,7 @@ export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus
     }catch(e){status(e.message,"error");throw e;}
     finally{
       overridePending=false;
-      if(meta.dirty&&meta.ready){
+      if(!disposed&&meta.dirty&&meta.ready){
         clearTimeout(delay);
         delay=setTimeout(()=>sync().catch(e=>status(e.message,"error")),2500);
       }
@@ -326,6 +345,7 @@ export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus
     finally{overridePending=false;}
   }
   async function forceDownload(allowDirty=false){
+    const epoch=generation;
     if(!auth.refreshToken||!meta.ready)throw new Error("Inizializza prima la sincronizzazione.");
     if(meta.dirty&&!allowDirty)throw new Error("Modifiche locali da conservare: download bloccato.");
     if(overridePending)throw new Error("Un'altra operazione manuale è in corso.");
@@ -338,17 +358,23 @@ export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus
         throw new Error("I dati locali sono cambiati durante il download. Riprova.");
       backupBeforeReplacement(item.file);
       await applyRemote(item.file);
+      assertCurrent(epoch);
       synced(item.file,item.rev);
       status("Archivio Dropbox scaricato.");
     }finally{overridePending=false;}
   }
   function disconnect(){
+    ++generation;
     clearTimeout(delay);
+    transientStorage.removeItem("tempo-dropbox-pkce");
     auth={};meta={rev:null,dirty:false,ready:false};
     storage.removeItem(AUTH_KEY);
     storage.removeItem(META_KEY);
     storage.removeItem(BASE_KEY);
     status("Dropbox scollegato. Dati locali conservati.");
+  }
+  function destroy(){
+    disposed=true;++generation;clearTimeout(delay);
   }
   function info(){return {connected:Boolean(auth.refreshToken),ready:meta.ready,dirty:meta.dirty};}
   async function init(){
@@ -356,6 +382,6 @@ export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus
     status(auth.refreshToken?(meta.ready?"Dropbox connesso":"Dropbox collegato: inizializzazione necessaria"):"Dropbox non collegato");
     if(meta.ready)await sync().catch(()=>{});
   }
-  return {init,connect,exchangeManualCode,firstSync,sync,changed,mergeNow,forceUpload,forceDownload,disconnect,info,recovery};
+  return {init,connect,exchangeManualCode,firstSync,sync,changed,mergeNow,forceUpload,forceDownload,disconnect,destroy,info,recovery};
 
 }

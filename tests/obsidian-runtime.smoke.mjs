@@ -70,3 +70,36 @@ for(const mobile of [false,true])test("Obsidian "+(mobile?"mobile":"desktop")+" 
   assert.equal(next.compact,mobile);
   await next.onunload();
 });
+
+test('sync metadata failure does not undo an already saved Obsidian session',async()=>{
+ const {PluginClass,getSaved}=mockPlugin(false),p=new PluginClass();await p.onload();
+ const save=p.saveData.bind(p);let writes=0;
+ p.saveData=value=>{if(++writes===2)return Promise.reject(Error('quota'));return save(value);};
+ await p.start('Studio',30,25);
+ assert.equal(p.state.sessions.length,1);
+ assert.equal(getSaved().archive.sessions.length,1);
+ await p.onunload();
+});
+test('overlapping Obsidian mutations cannot roll back each other',async()=>{
+ const {PluginClass}=mockPlugin(false),p=new PluginClass();await p.onload();
+ const save=p.saveData.bind(p);let unblock;
+ p.saveData=value=>new Promise(resolve=>{unblock=()=>resolve(save(value));});
+ const first=p.change(()=>{p.state.defaults.workMinutes=50;});
+ // Let the queued write begin before attempting another mutation.
+ await Promise.resolve();await Promise.resolve();
+ await assert.rejects(p.change(()=>{p.state.defaults.workMinutes=99;}),/Salvataggio in corso/);
+ p.saveData=save;unblock();await first;
+ assert.equal(p.state.defaults.workMinutes,50);
+ await p.onunload();
+});
+test('local write failure rolls back and unlocks the next Obsidian mutation',async()=>{
+ const {PluginClass}=mockPlugin(false),p=new PluginClass();await p.onload();
+ const save=p.saveData.bind(p);
+ p.saveData=()=>Promise.reject(Error('disk full'));
+ await assert.rejects(p.start('Studio',30,25),/disk full/);
+ assert.equal(p.state.sessions.length,0);
+ p.saveData=save;
+ await p.start('Studio',30,25);
+ assert.equal(p.state.sessions.length,1);
+ await p.onunload();
+});

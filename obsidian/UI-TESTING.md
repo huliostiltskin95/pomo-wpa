@@ -22,7 +22,7 @@ Copia i tre file in `obsidian/dist/` (`main.js`, `styles.css`, `manifest.json`) 
 
 ```sh
 npm test
-node --test tests/*.test.js tests/obsidian-runtime.smoke.mjs
+node --test tests/obsidian-runtime.smoke.mjs
 npm install --no-save --no-package-lock playwright
 npx playwright install chromium
 node tests/obsidian-ui.e2e.mjs

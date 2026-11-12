@@ -203,3 +203,8 @@ test('invalid, duplicate and conflicting gross cycles are rejected before schedu
    assert.throws(()=>planSessions([{area:'Studio',minutes:120,...patch}],[],[],defaults,now,id));
  assert.throws(()=>normalizeArchive({sessions:[{...session,cycleMinutes:session.workMinutes}]}));
 });
+
+test('scheduler rejects malformed requests even when no window can fit them',()=>{
+ for(const request of [null,{}, {area:'Studio',minutes:NaN},{area:'Studio',minutes:0},{area:'Studio',minutes:1.5},{area:'Studio',minutes:10081},{area:' ',minutes:30},{area:'Studio',minutes:30,start:''},{area:'Studio',minutes:30,start:'25:00'}])
+   assert.throws(()=>planSessions([request],[],[],defaults,now,id));
+});

@@ -62,11 +62,18 @@ export function normalizeArchive(data) {
   return {...data,sessions:data.sessions.map(normalizeSession),tasks:data.tasks||[],history:data.history||[],syncDeleted:data.syncDeleted||{tasks:[],sessions:[]},defaults:{...data.defaults,workMinutes:data.defaults?.workMinutes||25,breakEnabled:data.defaults?.breakEnabled!==false,simple:{...config,areas,windows:config.windows||[]}}};
 }
 export function planSessions(requests, windows, existing, defaults, now=new Date(), id=()=>crypto.randomUUID(), selectedDate=localDateString(now)) {
+  if(!Array.isArray(requests)||!Array.isArray(windows)||!Array.isArray(existing))throw Error('Richieste e fasce non valide.');
+  if(!Number.isFinite(+now))throw Error('Data attuale non valida.');
   const result=[];let remainder=0;
   const cycleFor=request=>request.cycleMinutes!==undefined?grossCycle(request.cycleMinutes).focusMinutes:focusCycle(request.focusMinutes ?? defaults.workMinutes,defaults.breakEnabled).focusMinutes;
   const cycleSettings=request=>request.cycleMinutes!==undefined?{cycleMinutes:request.cycleMinutes,breakEnabled:true}:{};
   // Reject invalid focus overrides even when no window can accommodate the request.
   for(const request of requests){
+    if(!request || typeof request.area!=='string' || !request.area.trim() ||
+       !Number.isInteger(request.minutes) || request.minutes<1 || request.minutes>10080)
+      throw Error('Indica area e durata lorda da 1 a 10080 minuti interi.');
+    if(request.start!==undefined && !/^([01]\d|2[0-3]):[0-5]\d$/.test(request.start))
+      throw Error('Orario fisso non valido: usa HH:MM.');
     cycleFor(request);
     if(request.cycleMinutes!==undefined){
       if(request.focusMinutes!==undefined||request.customBreakMinutes!==undefined)throw Error('Usa un solo tipo di ciclo: -minuti, ~focus oppure !pausa finale.');

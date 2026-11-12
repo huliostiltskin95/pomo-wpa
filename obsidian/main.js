@@ -631,19 +631,18 @@ export default class TempvsPlugin extends Plugin {
     if (JSON.stringify(this.cloudStorage?.snapshot() || {}) === JSON.stringify(cloudData)) this.cloudDirty = false;
   }
   async change(mutator) {
-    this.record();
-    const previous = JSON.stringify(this.state);
+    if(this.changing)throw Error('Salvataggio in corso. Attendi prima di riprovare.');
+    this.changing=true;
     try {
-      mutator();
-      await this.persist();
-      this.cloud?.changed();
-      await this.persist();
+      this.record();
+      const previous=JSON.stringify(this.state);
+      try {mutator();await this.persist();}
+      catch(error){this.state=JSON.parse(previous);this.refresh(true);throw error;}
+      // Local save succeeded: failure to persist sync metadata must not undo it.
+      try {this.cloud?.changed();await this.persist();}
+      catch(error){new Notice('TEMPVS: dati salvati in locale; sincronizzazione da riprovare. '+error.message);}
       this.refresh(true);
-    } catch (error) {
-      this.state = JSON.parse(previous);
-      this.refresh(true);
-      throw error;
-    }
+    } finally {this.changing=false;}
   }
   async setCompact(value){
     this.compact=Boolean(value);
@@ -721,6 +720,7 @@ export default class TempvsPlugin extends Plugin {
     }
   }
   async onunload() {
+    this.cloud?.destroy();
     this.chime?.destroy();
     this.ambient?.destroy();
     this.record();
