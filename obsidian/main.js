@@ -78,7 +78,7 @@ function renderCloudSettings(parent, plugin) {
 
 class TempvsView extends ItemView {
   constructor(leaf, plugin) {
-    super(leaf); this.plugin = plugin; this.day = today(); this.panel = null; this.creation = "start";
+    super(leaf); this.plugin = plugin; this.day = today(); this.panel = null; this.creation = "start"; this.panelId="tempvs-"+uuid(); this.planDay=null;
   }
   getViewType() { return VIEW_TYPE; }
   getDisplayText() { return "TEMPVS"; }
@@ -92,7 +92,9 @@ class TempvsView extends ItemView {
     root.addClass("tempvs-root");
     root.toggleClass("tempvs-wide", plugin.layout === "wide");
     const heading = root.createDiv({cls:"tempvs-header"});
-    heading.createEl("h3", {text:"TEMPVS"});
+    const brand = heading.createDiv({cls:"tempvs-brand"});
+    brand.createEl("h3", {text:"TEMPVS"});
+    brand.createSpan({text:"Un momento alla volta",cls:"tempvs-muted"});
     const actions = heading.createDiv({cls:"tempvs-heading-actions"});
     const cloud = iconButton(actions,"cloud","Impostazioni Dropbox",()=>plugin.openSettings());
     cloud.addClass("tempvs-cloud-indicator");
@@ -101,32 +103,39 @@ class TempvsView extends ItemView {
     timer.createDiv({cls:"tempvs-phase"});
     timer.createDiv({cls:"tempvs-clock"});
     timer.createDiv({cls:"tempvs-area"});
+    const progress=timer.createDiv({cls:"tempvs-progress",attr:{role:"progressbar","aria-label":"Avanzamento della fase","aria-valuemin":"0","aria-valuemax":"100"}});
+    progress.createDiv({cls:"tempvs-progress-fill"});
+    timer.createDiv({cls:"tempvs-timer-hint"});
     const controls = root.createDiv({cls:"tempvs-controls tempvs-primary-controls"});
     const pauseButton = button(controls,"Pausa",()=>plugin.togglePause());
     pauseButton.addClass("mod-cta","tempvs-pause-button");
     const finishButton = button(controls,"Concludi",()=>plugin.finish());
     finishButton.addClass("tempvs-finish-button");
     const sessionHeader = root.createDiv({cls:"tempvs-section-heading"});
-    sessionHeader.createEl("h4",{text:"Prossime sessioni"});
+    sessionHeader.createEl("h4",{text:"La tua agenda"});
     const nav = sessionHeader.createDiv({cls:"tempvs-date-nav"});
     iconButton(nav,"chevron-left","Giorno precedente",()=>{this.day=shiftDate(this.day,-1);this.update(true);});
-    const dateLabel = nav.createEl("button",{cls:"tempvs-day-label",text:"Oggi"});
+    const dateLabel = nav.createEl("button",{cls:"tempvs-day-label",text:"Oggi",attr:{title:"Torna a oggi","aria-label":"Data selezionata: oggi. Torna a oggi"}});
     dateLabel.onclick=()=>{this.day=today();this.update(true);};
     iconButton(nav,"chevron-right","Giorno successivo",()=>{this.day=shiftDate(this.day,1);this.update(true);});
     root.createDiv({cls:"tempvs-sessions"});
     const add = button(root,"+ Nuova sessione",()=>this.togglePanel("create"));
     add.addClass("mod-cta","tempvs-add-button");
+    add.dataset.panel="create";
     const quickActions = root.createDiv({cls:"tempvs-shortcuts"});
     const planShortcut=iconButton(quickActions,"calendar-days","Pianifica",()=>{this.creation="plan";this.togglePanel("create",true);this.showCreation();});
     planShortcut.createSpan({text:"Pianifica"});
+    planShortcut.dataset.panel="create";
     const soundShortcut=iconButton(quickActions,"volume-2","Suoni",()=>this.togglePanel("sound"));
     soundShortcut.createSpan({text:"Suoni"});
+    soundShortcut.dataset.panel="sound";
     const noteShortcut=iconButton(quickActions,"book-open","Risorse Obsidian",()=>this.togglePanel("notes"));
     noteShortcut.createSpan({text:"Risorse"});
+    noteShortcut.dataset.panel="notes";
     const panels = root.createDiv({cls:"tempvs-panels"});
     const create = panels.createDiv({cls:"tempvs-panel tempvs-create-panel"});
     create.hidden=true;
-    create.createEl("h4",{text:"Nuova sessione"});
+    create.createEl("h4",{text:"Crea il tuo prossimo momento"});
     const method = create.createEl("select",{cls:"tempvs-method",attr:{"aria-label":"Metodo di inserimento"}});
     method.createEl("option",{text:"Avvia adesso",value:"start"});
     method.createEl("option",{text:"Pianificazione rapida",value:"plan"});
@@ -134,31 +143,63 @@ class TempvsView extends ItemView {
     method.onchange=()=>{this.creation=method.value;this.showCreation();};
     const startBox=create.createDiv({cls:"tempvs-method-start"});
     const form=startBox.createEl("form",{cls:"tempvs-form"});
-    const area=form.createEl("select",{attr:{"aria-label":"Area"}});
+    const field=(parent,label)=>parent.createEl("label",{cls:"tempvs-field",text:label});
+    const area=field(form,"A cosa vuoi dedicarti?").createEl("select",{attr:{"aria-label":"Area"}});
     for(const a of plugin.config.areas)area.createEl("option",{text:a.name,attr:{value:a.name}});
-    const gross=form.createEl("input",{attr:{type:"number",min:"1",max:"1439",value:"30","aria-label":"Durata lorda in minuti",placeholder:"Minuti lordi"}});
+    const gross=field(form,"Durata totale · minuti").createEl("input",{attr:{type:"number",min:"1",max:"1439",value:"30","aria-label":"Durata totale in minuti",placeholder:"Minuti totali"}});
     gross.required=true;
+    const presets=form.createDiv({cls:"tempvs-presets",attr:{role:"group","aria-label":"Durate rapide"}});
+    const updatePresets=()=>{for(const el of presets.children)el.setAttribute("aria-pressed",String(el.dataset.minutes===gross.value));};
+    for(const value of [15,30,60]){
+      const preset=button(presets,value+" min",()=>{gross.value=String(value);updatePresets();});
+      preset.type="button";preset.dataset.minutes=String(value);
+    }
+    gross.addEventListener("input",updatePresets);updatePresets();
+    form.createEl("p",{cls:"tempvs-help",text:"La durata totale comprende focus e pause. Il timer segue l’orario anche quando sospendi il conteggio del focus."});
     const advanced=form.createEl("details");
     advanced.createEl("summary",{text:"Focus e pause (avanzate)"});
-    const focus=advanced.createEl("input",{attr:{type:"number",min:"1",max:"240",value:String(plugin.state.defaults.workMinutes),"aria-label":"Minuti focus"}});
+    const focus=field(advanced,"Durata di ogni focus · minuti").createEl("input",{attr:{type:"number",min:"1",max:"240",value:String(plugin.state.defaults.workMinutes),"aria-label":"Minuti focus"}});
     focus.required=true;
-    const pause=advanced.createEl("input",{attr:{type:"number",min:"0",max:"1438",placeholder:"Pausa personalizzata (facoltativa)","aria-label":"Minuti di pausa"}});
+    const pause=field(advanced,"Pausa finale · minuti (facoltativa)").createEl("input",{attr:{type:"number",min:"0",max:"1438",placeholder:"Pausa personalizzata (facoltativa)","aria-label":"Minuti di pausa"}});
     form.createEl("button",{text:"Avvia",cls:"mod-cta",attr:{type:"submit"}});
     form.addEventListener("submit",e=>{
       e.preventDefault();
+      if(form.dataset.busy)return;
+      form.dataset.busy="true";
+      const submit=form.querySelector('[type="submit"]');submit.disabled=true;
       plugin.start(area.value,Number(gross.value),Number(focus.value),pause.value===""?undefined:Number(pause.value))
-        .then(()=>this.togglePanel(null,true)).catch(err=>new Notice(err.message));
+        .then(()=>this.togglePanel(null,true)).catch(err=>new Notice(err.message))
+        .finally(()=>{delete form.dataset.busy;submit.disabled=false;});
     });
     const planBox=create.createDiv({cls:"tempvs-method-plan"});
     const plan=planBox.createEl("form",{cls:"tempvs-form"});
-    const dateInput=plan.createEl("input",{attr:{type:"date","aria-label":"Data",value:today()}});
-    const lines=plan.createEl("textarea",{attr:{"aria-label":"Sessioni",placeholder:"Studio @1,5h +16:00\nLavoro @45m +18:00 !5m",rows:"3"}});
+    const dateInput=field(plan,"Giorno").createEl("input",{attr:{type:"date","aria-label":"Data",value:today()}});
+    dateInput.required=true;
+    const plannedArea=field(plan,"Area").createEl("select",{attr:{"aria-label":"Area da pianificare"}});
+    for(const a of plugin.config.areas)plannedArea.createEl("option",{text:a.name,value:a.name});
+    const planFields=plan.createDiv({cls:"tempvs-plan-fields"});
+    const startTime=field(planFields,"Ora di inizio").createEl("input",{attr:{type:"time",required:"",value:"09:00"}});
+    const duration=field(planFields,"Durata · minuti").createEl("input",{attr:{type:"number",min:"1",max:"1439",value:"30",required:""}});
+    const batch=plan.createEl("details",{cls:"tempvs-batch"});
+    batch.createEl("summary",{text:"Inserisci più sessioni con il testo"});
+    batch.createEl("p",{cls:"tempvs-help",text:"Una sessione per riga: Area @durata +ora. Esempio: Studio @45m +16:00. Se compili questo campo, verranno usate queste righe."});
+    const lines=field(batch,"Sessioni in formato rapido").createEl("textarea",{attr:{"aria-label":"Sessioni",placeholder:"Studio @1,5h +16:00\nLavoro @45m +18:00 !5m",rows:"3"}});
+    const updatePlanMode=()=>{
+      const textMode=Boolean(lines.value.trim());
+      for(const input of [plannedArea,startTime,duration])input.disabled=textMode;
+    };
+    lines.addEventListener("input",updatePlanMode);
     plan.createEl("button",{text:"Programma",cls:"mod-cta",attr:{type:"submit"}});
     plan.addEventListener("submit",e=>{
       e.preventDefault();
-      plugin.schedule(lines.value,dateInput.value).then(()=>{
-        lines.value="";this.day=dateInput.value;this.togglePanel(null,true);
-      }).catch(err=>new Notice(err.message));
+      if(plan.dataset.busy)return;
+      plan.dataset.busy="true";
+      const submit=plan.querySelector('[type="submit"]');submit.disabled=true;
+      const text=lines.value.trim() || `${plannedArea.value} @${duration.value}m +${startTime.value}`;
+      plugin.schedule(text,dateInput.value).then(()=>{
+        lines.value="";updatePlanMode();this.day=dateInput.value;this.togglePanel(null,true);this.update(true);
+      }).catch(err=>new Notice(err.message))
+        .finally(()=>{delete plan.dataset.busy;submit.disabled=false;});
     });
     const sounds=panels.createDiv({cls:"tempvs-panel tempvs-sound-panel"});
     sounds.hidden=true;
@@ -178,6 +219,8 @@ class TempvsView extends ItemView {
     // Preserve iOS user activation: never defer this handler to a microtask.
     soundToggle.addEventListener("click",()=>void plugin.toggleAmbient().catch(e=>new Notice(e.message)));
     sounds.createDiv({cls:"tempvs-sound-status",attr:{role:"status","aria-live":"polite"}});
+    const volumeValue=soundVolume.createEl("output",{text:slider.value+"%","attr":{"aria-label":"Volume selezionato"}});
+    slider.addEventListener("input",()=>{volumeValue.textContent=slider.value+"%";});
     const notes=panels.createDiv({cls:"tempvs-panel tempvs-notes-panel"});
     notes.hidden=true;
     notes.createEl("h4",{text:"Risorse Obsidian"});
@@ -188,6 +231,15 @@ class TempvsView extends ItemView {
     noteArea.onchange=()=>this.renderNotes();
     button(notes,"Collega nota attiva all'area",async()=>{await plugin.attachActiveNote(noteArea.value);this.renderNotes();});
     notes.createDiv({cls:"tempvs-note-links"});
+    for(const [name,panel] of [["create",create],["sound",sounds],["notes",notes]]){
+      const header=panel.createDiv({cls:"tempvs-panel-heading"});
+      header.appendChild(panel.querySelector("h4"));
+      panel.prepend(header);
+      iconButton(header,"x","Chiudi pannello",()=>{this.togglePanel(null,true);root.querySelector(`[data-panel="${name}"]`)?.focus();});
+    }
+    root.onkeydown=e=>{
+      if(e.key==="Escape"&&this.panel){const name=this.panel;this.togglePanel(null,true);root.querySelector(`[data-panel="${name}"]`)?.focus();e.stopPropagation();}
+    };
     this.showCreation();
     this.applyPanel();
     this.update(true);
@@ -200,16 +252,32 @@ class TempvsView extends ItemView {
     if(plan)plan.hidden=this.creation!=="plan";
     const choice=root.querySelector(".tempvs-method");
     if(choice)choice.value=this.creation;
+    if(this.creation==="plan"&&this.planDay!==this.day){
+      root.querySelector('input[type="date"]').value=this.day;
+      this.planDay=this.day;
+    }
   }
   togglePanel(panel, force=false) {
     this.panel=force?panel:(this.panel===panel?null:panel);
+    this.showCreation();
     this.applyPanel();
+    if(this.panel){
+      const el=this.containerEl.children[1].querySelector(".tempvs-"+this.panel+"-panel");
+      el?.scrollIntoView({behavior:window.matchMedia("(prefers-reduced-motion: reduce)").matches?"instant":"smooth",block:"nearest"});
+      el?.querySelector("select, input, button")?.focus({preventScroll:true});
+    }
   }
   applyPanel() {
     const root=this.containerEl.children[1];
     for(const name of ["create","sound","notes"]){
       const el=root.querySelector(".tempvs-"+name+"-panel");
-      if(el)setPanel(el,this.panel===name);
+      if(el){el.id=this.panelId+"-"+name;setPanel(el,this.panel===name);}
+    }
+    if(this.panel==="notes")this.renderNotes();
+    for(const trigger of root.querySelectorAll("[data-panel]")){
+      trigger.setAttribute("aria-controls",this.panelId+"-"+trigger.dataset.panel);
+      trigger.setAttribute("aria-expanded",String(trigger.dataset.panel===this.panel));
+      trigger.toggleClass("is-active",trigger.dataset.panel===this.panel);
     }
   }
   updateSoundControls(){
@@ -241,13 +309,23 @@ class TempvsView extends ItemView {
     const plugin=this.plugin;
     const active=plugin.active();
     const phase=active?getPhase(active):null;
-    root.querySelector(".tempvs-phase").textContent=phase?phase.label:"Nessuna sessione attiva";
-    root.querySelector(".tempvs-clock").textContent=phase?mmss(phase.remaining):"--:--";
-    root.querySelector(".tempvs-area").textContent=active?(active.area||active.title):"";
+    root.querySelector(".tempvs-timer").dataset.state=active?.paused?"paused":phase?.kind||"idle";
+    root.querySelector(".tempvs-phase").textContent=active?.paused?"Conteggio focus sospeso":phase?phase.label:"Pronto per concentrarti";
+    root.querySelector(".tempvs-clock").textContent=phase?mmss(phase.remaining):String(plugin.state.defaults.workMinutes).padStart(2,"0")+":00";
+    root.querySelector(".tempvs-area").textContent=active?(active.area||active.title):"Scegli un’area e inizia una sessione";
+    const progress=root.querySelector(".tempvs-progress");
+    progress.hidden=!phase;
+    progress.setAttribute("aria-valuenow",String(Math.round(phase?.progress||0)));
+    progress.firstElementChild.style.width=(phase?.progress||0)+"%";
+    root.querySelector(".tempvs-timer-hint").textContent=phase
+      ? "Fine sessione alle "+formatTime(phase.sessionEnd)+(active.paused?" · L’orario continua a scorrere":"")
+      : "Il tuo prossimo passo: Nuova sessione";
     const pause=root.querySelector(".tempvs-pause-button");
     const finish=root.querySelector(".tempvs-finish-button");
     if(pause){pause.disabled=!active;pause.textContent=active?.paused?"Riprendi":"Pausa";}
+    if(pause)pause.title="Sospende il conteggio del focus; gli orari della sessione continuano a scorrere.";
     if(finish)finish.disabled=!active;
+    root.querySelector(".tempvs-primary-controls").hidden=!active;
     this.updateSoundControls();
     const cloud=root.querySelector(".tempvs-cloud-indicator");
     if(cloud){
@@ -257,7 +335,10 @@ class TempvsView extends ItemView {
     }
     if(!full)return;
     const dayLabel=root.querySelector(".tempvs-day-label");
-    if(dayLabel)dayLabel.textContent=this.day===today()?"Oggi":this.day.split("-").reverse().join("/");
+    if(dayLabel){
+      dayLabel.textContent=this.day===today()?"Oggi":new Intl.DateTimeFormat("it-IT",{day:"numeric",month:"short"}).format(new Date(this.day+"T12:00:00"));
+      dayLabel.setAttribute("aria-label","Data selezionata: "+this.day+". Torna a oggi");
+    }
     const list=root.querySelector(".tempvs-sessions");
     list.empty();
     const now=new Date();
@@ -269,11 +350,20 @@ class TempvsView extends ItemView {
       const item=list.createDiv({cls:"tempvs-session"});
       const info=item.createDiv({cls:"tempvs-session-info"});
       info.createEl("strong",{text:s.start+"–"+s.end});
-      info.createSpan({text:s.area||s.title});
+      const details=info.createDiv({cls:"tempvs-session-details"});
+      details.createSpan({text:s.area||s.title});
+      const isActive=active?.id===s.id;
+      item.toggleClass("is-current",isActive);
+      details.createEl("small",{cls:"tempvs-muted",text:isActive?(s.paused?"Focus sospeso":"In corso"):minutes((sessionBounds(s).end-sessionBounds(s).start)/1000)+" min · Programmata"});
       if(sessionBounds(s).start>now)
         iconButton(item,"trash-2","Elimina sessione "+(s.area||s.title),()=>plugin.removeSession(s.id));
     }
-    if(!sessions.length)list.createEl("p",{cls:"tempvs-muted",text:"Nessuna sessione prevista per questa data."});
+    if(!sessions.length){
+      const empty=list.createDiv({cls:"tempvs-empty"});
+      setIcon(empty.createDiv({cls:"tempvs-empty-icon"}),"calendar-check");
+      empty.createEl("strong",{text:"Spazio per i tuoi progetti"});
+      empty.createEl("p",{text:"Nessuna sessione in agenda. Avvia un focus o pianifica un momento per questa giornata."});
+    }
     if(this.panel==="notes")this.renderNotes();
   }
 }

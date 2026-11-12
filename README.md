@@ -180,22 +180,24 @@ La gestione delle attività PWA è in `agenda.js` e `core/tempo-tasks.js`; **non
 
 La cartella `obsidian/` contiene l'integrazione iniziale per Obsidian. Il plugin usa lo stesso core, ma salva i propri dati tramite l'API di persistenza di Obsidian (`data.json` del plugin). I dati PWA in `localStorage` e quelli Obsidian sono separati: non c'è sincronizzazione automatica tra i due ambienti.
 
+### Installazione con BRAT
+
+In Obsidian apri **BRAT → Add Beta plugin** e inserisci `huliostiltskin95/pomo-wpa` (oppure l’URL del repository), quindi aggiungi e abilita **Tempo — Pomodoro**.
+
+La release **0.5.4** include la nuova interfaccia TEMPVS: avanzamento del timer, durate rapide, pianificazione guidata e pannelli interattivi. Se il plugin è già installato, esegui **BRAT: Check for updates to all beta plugins and UPDATE** e ricaricalo se richiesto.
+
 ### Build del plugin Obsidian
 
-Requisiti: Node.js e npm.
+Requisiti: Node.js e npm. Esegui dalla radice del repository:
 
 ```bash
-cd obsidian
 npm install
-npm run build
+npm run build:obsidian
 ```
 
-La build genera `obsidian/main.js`. Per installare manualmente nel vault, crea la cartella `.obsidian/plugins/tempo-pomodoro/` e copia al suo interno:
-- `obsidian/main.js` (generato dalla build)
-- `obsidian/manifest.json`
-- `obsidian/styles.css`
+La build genera `main.js`, `manifest.json` e `styles.css` in `obsidian/dist/`. Per installare manualmente, copia i tre file in `.obsidian/plugins/tempo-pomodoro/` nel vault, mantenendo l’eventuale `data.json`. Poi abilita **Tempo — Pomodoro** da **Impostazioni → Plugin comunitari**.
 
-Poi abilita **Tempo — Pomodoro** da **Impostazioni → Plugin comunitari**. Per lo sviluppo, esegui `npm run dev` dalla cartella `obsidian/` e lascia attivo il processo di watch.
+Sorgente attuale: `obsidian/main.js`. Il vecchio entry point TypeScript non è usato per le release BRAT. Istruzioni e verifiche dell’interfaccia: [obsidian/UI-TESTING.md](obsidian/UI-TESTING.md).
 
 ### Funzioni attualmente disponibili nel plugin
 
