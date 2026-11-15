@@ -69,4 +69,4 @@ jobs:
             obsidian/styles.css#styles.css \
             --target "${{ github.sha }}" \
             --title "TEMPVS $VERSION" \
-            --notes "TEMPVS 0.5.8: pianificazione e sessioni modificabili nelle daily note tramite blocchi TEMPVS, preview con conferma, sincronizzazione bidirezionale con il pannello, identificativi stabili e protezione dello storico. Aggiornamento tramite BRAT."
+            --notes "TEMPVS $VERSION: blocco giornaliero in testo semplice, fasce compatte, aggiornamento automatico dalla nota al plugin e dal plugin alla nota, senza preview o conferme. Protezione delle modifiche in corso e dello storico. Aggiornamento tramite BRAT."

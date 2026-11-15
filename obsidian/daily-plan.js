@@ -78,15 +78,18 @@ export const isLocked=(session,now=new Date())=>session.finished||session.actual
 export function daySessions(state,date,blockId){
  return state.sessions.filter(s=>s.date===date||(blockId&&s.noteBlockId===blockId)).sort((a,b)=>sessionBounds(a).start-sessionBounds(b).start);
 }
-export function serializeDailyPlan(sessions,date,blockId){
- const lines=['<!-- tempvs-block:'+blockId+' -->','date: '+date];
+// Keep identifiers in plugin data, never in the user's planning field.
+export function serializeDailyPlan(sessions,date){
+ const groups=[];
  for(const s of [...sessions].sort((a,b)=>sessionBounds(a).start-sessionBounds(b).start)){
   if(s.date!==date&&s.date!==dayAfter(date))throw Error('Una sessione collegata è stata spostata fuori dalla giornata della nota.');
-  const gross=Math.round((sessionBounds(s).end-sessionBounds(s).start)/60000);
-  const instruction=gross===1440?`${s.area||s.title} @1440m +${s.start}`:`${s.area||s.title} +${s.start}-${s.end} -${gross}m`;
-  lines.push(`${instruction}${s.date!==date?' +1d':''} <!-- tempvs-session:${encodeURIComponent(s.id)} -->`);
+  const bounds=sessionBounds(s),gross=Math.round((bounds.end-bounds.start)/60000);
+  const key=JSON.stringify([s.areaId,s.area||s.title,gross,s.workMinutes,s.breakEnabled,s.customBreakMinutes,s.cycleMinutes]);
+  const last=groups.at(-1);
+  if(last&&last.key===key&&+last.until===+bounds.start&&s.date===last.date&&+bounds.end-last.from<86400000){last.end=s.end;last.until=bounds.end;}
+  else groups.push({key,date:s.date,area:s.area||s.title,start:s.start,end:s.end,gross,from:+bounds.start,until:bounds.end});
  }
- return lines.join('\n');
+ return groups.map(g=>(g.gross===1440?`${g.area} @1440m +${g.start}`:`${g.area} +${g.start}-${g.end} -${g.gross}m`)+(g.date!==date?' +1d':'')).join('\n');
 }
 export function prepareDailyPlan({source,date,blockId,state,now=new Date(),id=()=>globalThis.crypto?.randomUUID?.()||Date.now().toString(36)+'-'+Math.random().toString(36).slice(2)}){
  if(!validDay(date))throw Error('Data non valida.');
@@ -134,3 +137,4 @@ export function applyDailyPlan(state,proposal){
  state.sessions=state.sessions.filter(s=>!affected.has(s.id)).concat(proposal.sessions.map(s=>({...s,...(current.has(s.id)?{actualSeconds:current.get(s.id).actualSeconds||0,paused:current.get(s.id).paused}:{} )})));
  state.syncDeleted.sessions=[...new Set([...state.syncDeleted.sessions,...proposal.removeIds])];
 }
+

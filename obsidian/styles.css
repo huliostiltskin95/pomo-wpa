@@ -132,3 +132,7 @@
 .tempvs-daily-preview{font-size:var(--font-ui-small)}
 .tempvs-daily-preview p{margin:6px 0}
 .tempvs-daily-error,.tempvs-daily [role=alert]{color:var(--text-error)}
+
+/* The daily plan is plain text, readable on narrow screens. */
+.tempvs-daily pre { margin: 0 0 0.5em; white-space: pre-wrap; overflow-wrap: anywhere; }
+.tempvs-daily pre code { white-space: inherit; }

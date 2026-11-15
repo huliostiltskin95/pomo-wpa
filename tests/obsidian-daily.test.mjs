@@ -26,7 +26,7 @@ test('daily snippet expands into whole gross sessions and roundtrips identities 
  const plan=prepare('Studio +10:00-12:00 -30m');assert.equal(plan.sessions.length,4);
  let state=apply(empty(),plan);const originalIds=state.sessions.map(s=>s.id);
  const source=serializeDailyPlan(state.sessions,date,blockId);
- assert.equal(blockIdentity(source),blockId);
+ assert.equal(blockIdentity(source),null);assert.doesNotMatch(source,/tempvs-session/);
  const next=prepare(source,state);state=apply(state,next);
  assert.deepEqual(state.sessions.map(s=>s.id),originalIds);assert.equal(state.sessions.length,4);
 });
@@ -44,26 +44,26 @@ test('matching existing plugin sessions adopts stable IDs and preserves custom p
  assert.equal(plan.sessions[0].id,id);assert.equal(plan.sessions[0].customBreakMinutes,5);
  assert.equal(plan.sessions[0].noteBlockId,blockId);
 });
-test('editing a linked future row retains identity and deleting it creates a tombstone',()=>{
+test('editing plain future rows replaces changed sessions and records deletions',()=>{
  let state=apply(empty(),prepare('Studio +10:00-11:00 -30m'));
- const id=state.sessions[0].id;
- let source=serializeDailyPlan(state.sessions,date,blockId).replace('Studio +10:00-10:30','Lavoro +14:00-14:30');
- state=apply(state,prepare(source,state));assert.equal(state.sessions[0].id,id);assert.equal(state.sessions[0].area,'Lavoro');assert.equal(state.sessions[0].start,'14:00');
- source=serializeDailyPlan(state.sessions,date,blockId).split('\n').filter(line=>!line.includes('tempvs-session:'+id)).join('\n');
- state=apply(state,prepare(source,state));assert.equal(state.sessions.length,1);assert(state.syncDeleted.sessions.includes(id));
+ const [removed,kept]=state.sessions.map(s=>s.id);
+ state=apply(state,prepare('Lavoro +14:00-14:30 -30m\nStudio +10:30-11:00 -30m',state));
+ assert(state.syncDeleted.sessions.includes(removed));assert(state.sessions.some(s=>s.id===kept));
+ const changed=state.sessions.find(s=>s.area==='Lavoro');assert.equal(changed.start,'14:00');
+ state=apply(state,prepare('Studio +10:30-11:00 -30m',state));assert.equal(state.sessions.length,1);assert(state.syncDeleted.sessions.includes(changed.id));
 });
 test('started and completed rows stay visible and cannot be moved or removed',()=>{
  for(const properties of [{actualSeconds:60},{finished:true},{timerStartedAt:'2099-11-06T10:00:13',timerEndsAt:'2099-11-06T10:30:13'}]){
   const state=apply(empty(),prepare('Studio +10:00-10:30 -30m'));Object.assign(state.sessions[0],properties);
   const source=serializeDailyPlan(state.sessions,date,blockId);
   assert.equal(prepare(source,state).sessions[0].id,state.sessions[0].id);
-  assert.throws(()=>prepare(source.replace('+10:00-10:30','+14:00-14:30'),state),/avviate o concluse/);
+  assert.throws(()=>prepare(source.replace('+10:00-10:30','+14:00-14:30'),state),/avviat[ae] o conclus[ae]/);
   assert.throws(()=>prepare('',state),/avviata o conclusa/);
  }
 });
 test('rows cannot claim IDs owned by another block or silently resurrect deleted sessions',()=>{
  const state=apply(empty(),prepare('Studio +10:00-10:30 -30m'));
- const source=serializeDailyPlan(state.sessions,date,blockId);
+ const source=`Studio +10:00-10:30 -30m <!-- tempvs-session:${state.sessions[0].id} -->`;
  assert.throws(()=>prepare(source,state,{blockId:'another'}),/altro blocco/);
  state.syncDeleted.sessions.push(state.sessions[0].id);state.sessions=[];
  assert.throws(()=>prepare(source,state),/eliminata/);
@@ -73,7 +73,7 @@ test('invalid later rows, duplicate IDs, overlaps and past new sessions are reje
  for(const source of ['Studio +10:00-12:00 -30m\nSconosciuta +14:00-15:00 -30m','Studio +10:00-11:00 -30m\nLavoro +10:15-11:15 -30m'])assert.throws(()=>prepare(source,state));
  assert.equal(JSON.stringify(state),before);
  const saved=apply(empty(),prepare('Studio +10:00-10:30 -30m'));
- const source=serializeDailyPlan(saved.sessions,date,blockId),line=source.split('\n').at(-1);
+ const source=`Studio +10:00-10:30 -30m <!-- tempvs-session:${saved.sessions[0].id} -->`,line=source;
  assert.throws(()=>prepare(source+'\n'+line,saved),/duplicati/);
  assert.throws(()=>prepare('Studio +10:00-10:30 -30m',empty(),{now:new Date('2099-11-07')}),/passato/);
 });
@@ -91,3 +91,4 @@ test('timer observations do not invalidate previews and measured focus is never 
  state.sessions[0].actualSeconds=10;assert.equal(archivePlanningKey(state),key);
  applyDailyPlan(state,plan);assert.equal(state.sessions[0].actualSeconds,10);
 });
+

@@ -115,25 +115,21 @@ try {
     plugin.processors.TEMPVS('Studio +10:00-12:00 -30m\n',root,{sourcePath:file.path,getSectionInfo:()=>({lineStart:2}),addChild:child=>{window.dailyChild=child;child.onload();}});
   });
   const daily=page.locator('.daily-container');
-  await daily.getByRole('button',{name:'Prepara modifiche',exact:true}).click();
-  await page.waitForFunction(()=>document.querySelector('.tempvs-daily-preview')?.textContent.includes('4 sessioni'));
-  assert.match(await daily.locator('.tempvs-daily-preview').textContent(),/4 sessioni/);
-  await daily.getByRole('button',{name:'Applica alla nota e al plugin',exact:true}).click();
   await page.waitForFunction(()=>plugin.state.sessions.filter(s=>s.date==='2099-11-06').length===4);
-  await page.waitForFunction(()=>document.querySelectorAll('.daily-container tbody tr').length===4);
+  assert.equal(await daily.locator('button').count(),0);
+  assert.equal(await daily.locator('textarea').count(),0);
+  assert.doesNotMatch(await daily.locator('code').textContent(),/tempvs-session/);
   const ids=await page.evaluate(()=>plugin.state.sessions.filter(s=>s.date==='2099-11-06').map(s=>s.id));
-  await daily.getByRole('button',{name:'Modifica righe',exact:true}).click();
-  const editor=daily.getByRole('textbox',{name:'Pianificazione TEMPVS della nota'});
-  assert.doesNotMatch(await editor.inputValue(),/tempvs-session/);
-  await editor.fill((await editor.inputValue()).replace('Studio +10:00-10:30','Lavoro +14:00-14:30'));
-  await daily.getByRole('button',{name:'Prepara modifiche',exact:true}).click();
-  await daily.getByRole('button',{name:'Applica alla nota e al plugin',exact:true}).click();
+  await page.evaluate(()=>{
+    window.dailyText=dailyText.replace('Studio +10:00-12:00 -30m','Studio +10:00-11:30 -30m\nLavoro +14:00-14:30 -30m');
+    plugin.daily.schedule('Daily/2099-11-06.md');
+  });
   await page.waitForFunction(()=>plugin.state.sessions.some(s=>s.date==='2099-11-06'&&s.area==='Lavoro'&&s.start==='14:00'));
-  assert.equal(await page.evaluate(id=>plugin.state.sessions.find(s=>s.start==='14:00'&&s.date==='2099-11-06').id,ids[0]),ids[0]);
-  await page.evaluate(async id=>{await plugin.removeSession(id);await plugin.schedule('Personale +16:00-17:00 -1h','2099-11-06');},ids[0]);
+  assert.deepEqual(await page.evaluate(()=>plugin.state.sessions.filter(s=>s.date==='2099-11-06'&&s.area==='Studio').map(s=>s.id)),ids.slice(0,3));
+  await page.evaluate(async()=>{const s=plugin.state.sessions.find(s=>s.area==='Lavoro'&&s.date==='2099-11-06');await plugin.removeSession(s.id);await plugin.schedule('Personale +16:00-17:00 -1h','2099-11-06');});
   await page.waitForFunction(()=>dailyText.includes('Personale +16:00-17:00'));
   assert(!await page.evaluate(()=>dailyText.includes('Lavoro +14:00-14:30')));
-  await page.waitForFunction(()=>document.querySelectorAll('.daily-container tbody tr').length===4);
+  await page.waitForFunction(()=>document.querySelector('.daily-container code')?.textContent.includes('Personale +16:00-17:00'));
   for(const width of [280,390,768]){
     await page.setViewportSize({width,height:900});
     assert(await daily.evaluate(el=>el.scrollWidth<=el.clientWidth),'daily block overflow at '+width);
@@ -145,3 +141,4 @@ try {
   assert.deepEqual(await page.evaluate(()=>notices.filter(n=>/errore|invalid|sovrappost/i.test(n))),[]);
   console.log('Obsidian UI: creation, planning, pause/resume, finish, volume, Escape, drafts and responsive layouts passed.');
 } finally { await browser.close(); }
+

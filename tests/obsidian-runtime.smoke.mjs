@@ -116,12 +116,12 @@ function dailyVault(plugin,initial='Studio +10:00-12:00 -30m'){
 test('daily note apply is idempotent, survives reload and mirrors new plugin sessions',async()=>{
  const {PluginClass,getSaved}=mockPlugin(false),p=new PluginClass(),vault=dailyVault(p);await p.onload();
  const plan=await p.daily.preview(vault.child());assert.equal(p.state.sessions.length,0);
- await p.daily.apply(plan);assert.equal(p.state.sessions.length,4);assert(vault.text().includes('tempvs-session:'));assert(vault.text().endsWith('Altre note.\n'));
+ await p.daily.apply(plan);assert.equal(p.state.sessions.length,4);assert(!vault.text().includes('tempvs-session:'));assert(vault.text().endsWith('Altre note.\n'));
  const ids=p.state.sessions.map(s=>s.id);
  const again=await p.daily.preview(vault.child());await p.daily.apply(again);
  assert.deepEqual(p.state.sessions.map(s=>s.id),ids);assert.equal(Object.keys(getSaved().dailyNotes).length,1);
  await p.schedule('Lavoro +14:00-15:00 -30m','2099-11-06');
- assert.equal(p.state.sessions.length,6);assert(vault.text().includes('Lavoro +14:00-14:30'));
+ assert.equal(p.state.sessions.length,6);assert(vault.text().includes('Lavoro +14:00-15:00'));
  await p.removeSession(p.state.sessions.at(-1).id);assert.equal(p.state.sessions.length,5);assert(!vault.text().includes('Lavoro +14:30-15:00'));
  await p.onunload();
  const next=new PluginClass();const reopened=dailyVault(next);reopened.edit(vault.text());await next.onload();
@@ -132,7 +132,7 @@ test('daily note refuses stale previews and keeps drafts during plugin changes',
  const plan=await p.daily.preview(vault.child());vault.edit(vault.text().replace('-30m','-45m'));
  await assert.rejects(p.daily.apply(plan),/nota è cambiata/);assert.equal(p.state.sessions.length,0);
  await p.daily.apply(await p.daily.preview(vault.child()));
- const draft=vault.text().replace('Studio +10:00-10:45','Studio +10:00-11:00');vault.edit(draft);
+ const draft=vault.text().replace('Studio +10:00-11:30','Studio +10:00-12:00');vault.edit(draft);
  await p.schedule('Lavoro +14:00-14:30 -30m','2099-11-06');assert.equal(vault.text(),draft);
  const child=vault.child(),preview=await p.daily.preview(child);
  await p.schedule('Personale +16:00-16:30 -30m','2099-11-06');
@@ -168,3 +168,4 @@ test('unlinking a daily note preserves all sessions and removes only the local a
  await p.daily.detach(vault.file.path);
  assert.deepEqual(p.state.sessions.map(s=>s.id),ids);assert(p.state.sessions.every(s=>!s.noteBlockId));assert.equal(Object.keys(p.dailyNotes).length,0);assert.equal(vault.text(),text);await p.onunload();
 });
+

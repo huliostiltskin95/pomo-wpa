@@ -1,0 +1,73 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import vm from 'node:vm';
+import * as dailyPlan from '../obsidian/daily-plan.js';
+import {normalizeArchive} from '../core/tempo-simple.js';
+import {prepareDailyPlan,applyDailyPlan,serializeDailyPlan,parseDailySource,findDailyBlocks} from '../obsidian/daily-plan.js';
+const day='2099-11-15', now=new Date('2099-11-15T09:00:00');
+const initial='Studio +14:00-16:00 -60m\nPersonale +16:00-17:00 -60m\nStudio +18:00-20:00 -60m';
+const revised='Studio +14:00-16:00 -60m\nStudio +21:00-23:00 -60m';
+const state=()=>normalizeArchive({sessions:[],history:[],defaults:{}});
+function apply(s,source){const p=prepareDailyPlan({state:s,source,date:day,blockId:'daily',now});applyDailyPlan(s,p);return p;}
+test('requested ranges create five sessions, edits remove three and add two without duplicates',()=>{
+ const s=state();apply(s,initial);assert.equal(s.sessions.length,5);const ids=s.sessions.slice(0,2).map(x=>x.id);
+ assert.equal(serializeDailyPlan(s.sessions,day),initial);
+ const p=apply(s,revised);assert.equal(p.removeIds.length,3);assert.equal(s.sessions.length,4);assert.deepEqual(s.sessions.slice(0,2).map(x=>x.id),ids);
+ apply(s,revised);assert.equal(s.sessions.length,4);assert.equal(serializeDailyPlan(s.sessions,day),revised);
+});
+test('invalid and overlapping input leaves the archive unchanged',()=>{
+ const s=state();apply(s,initial);const before=JSON.stringify(s);
+ for(const source of ['Studio +14:00-',initial+'\nStudio +14:00-15:00 -60m'])assert.throws(()=>apply(s,source));
+ assert.equal(JSON.stringify(s),before);
+});
+test('midnight round trip and pause configuration survive plain serialization',()=>{
+ const s=state();apply(s,'Studio +23:00-02:00 -60m');s.sessions[0].customBreakMinutes=5;
+ const source=serializeDailyPlan(s.sessions,day);assert.equal(parseDailySource(source,s.defaults.simple.areas).length,3);
+ apply(s,source);assert.equal(s.sessions[0].customBreakMinutes,5);
+});
+test('completed sessions cannot be deleted from the text',()=>{
+ const s=state();apply(s,initial);s.sessions[0].finished=true;assert.throws(()=>apply(s,''));
+});
+// Exercise the controller source independently of whether a bundle was built first.
+const code=fs.readFileSync(new URL('../obsidian/daily-blocks.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'').replace(/export /g,'');
+const context={...dailyPlan,normalizeArchive,MarkdownRenderChild:class{},Notice:class{},moment:()=>({isValid:()=>false}),module:{exports:{}},console,setTimeout,clearTimeout,crypto:globalThis.crypto};
+vm.createContext(context);vm.runInContext(code+'\nmodule.exports.DailyBlocks=DailyBlocks;',context);
+function fixture(){
+ let text='# Daily\n\n```TEMPVS\n'+initial+'\n```\n\nOther text';
+ const file={path:day+'.md',basename:day,extension:'md'};
+ const plugin={state:state(),dailyNotes:{},app:{vault:{getAbstractFileByPath:()=>file,read:async()=>text,process:async(f,fn)=>{text=fn(text);}},workspace:{getLeavesOfType:()=>[]}},persist:async()=>{},change:async fn=>fn()};
+ const daily=new context.module.exports.DailyBlocks(plugin);
+ return {plugin,daily,file,get text(){return text;},set text(v){text=v;}};
+}
+test('automatic note import, replacement, plugin writeback, and unrelated text preservation',async()=>{
+ const f=fixture();await f.daily.syncFile(f.file.path);assert.equal(f.plugin.state.sessions.length,5);assert.match(f.text,/Other text$/);assert.doesNotMatch(f.text,/tempvs-block|tempvs-session|date:/);
+ f.text=f.text.replace(initial,revised);await f.daily.syncFile(f.file.path);assert.equal(f.plugin.state.sessions.length,4);
+ const s=f.plugin.state.sessions.find(s=>s.start==='21:00');s.start='20:00';s.end='21:00';
+ await f.daily.archiveChanged();assert.match(f.text,/Studio \+20:00-21:00 -60m/);assert.match(f.text,/Other text$/);
+ await f.daily.syncFile(f.file.path);assert.equal(f.plugin.state.sessions.length,4);f.daily.destroy();
+});
+test('pending and invalid edits are not overwritten by archive changes',async()=>{
+ const f=fixture();await f.daily.syncFile(f.file.path);f.text=f.text.replace(initial,'Studio +');const pending=f.text;
+ await f.daily.archiveChanged();assert.equal(f.text,pending);await assert.rejects(f.daily.syncFile(f.file.path));assert.equal(f.plugin.state.sessions.length,5);f.daily.destroy();
+});
+test('unsaved editor buffer prevents writeback; multiple blocks are rejected',async()=>{
+ const f=fixture();await f.daily.syncFile(f.file.path);const saved=f.text;
+ f.plugin.app.workspace.getLeavesOfType=()=>[{view:{file:f.file,editor:{getValue:()=>saved+'editing'}}}];
+ f.plugin.state.sessions.pop();await f.daily.archiveChanged();assert.equal(f.text,saved);
+ f.text+='\n```TEMPVS\n\n```';await assert.rejects(f.daily.syncFile(f.file.path));f.daily.destroy();
+});
+test('old metadata migrates to simple text without changing session ids',async()=>{
+ const f=fixture();await f.daily.syncFile(f.file.path);const ids=f.plugin.state.sessions.map(s=>s.id),id=Object.keys(f.plugin.dailyNotes)[0];
+ const legacy='<!-- tempvs-block:'+id+' -->\ndate: '+day+'\n'+f.plugin.state.sessions.map(s=>`${s.area} +${s.start}-${s.end} -60m <!-- tempvs-session:${s.id} -->`).join('\n');
+ f.text=f.text.replace(initial,legacy);await f.daily.syncFile(f.file.path);assert.doesNotMatch(f.text,/tempvs-session|tempvs-block/);assert.deepEqual(f.plugin.state.sessions.map(s=>s.id),ids);f.daily.destroy();
+});
+test('sessions added from the panel can subsequently be removed from the note',async()=>{
+ const f=fixture();await f.daily.syncFile(f.file.path);
+ const newPlan=prepareDailyPlan({state:f.plugin.state,source:'Lavoro +21:00-22:00 -60m',date:day,blockId:'new',now});
+ const added=newPlan.sessions[0];delete added.noteBlockId;f.plugin.state.sessions.push(added);
+ await f.daily.archiveChanged();assert.match(f.text,/Lavoro \+21:00-22:00/);
+ assert.equal(added.noteBlockId,Object.keys(f.plugin.dailyNotes)[0]);
+ f.text=f.text.replace('\nLavoro +21:00-22:00 -60m','');await f.daily.syncFile(f.file.path);
+ assert(!f.plugin.state.sessions.some(s=>s.id===added.id));assert(f.plugin.state.syncDeleted.sessions.includes(added.id));f.daily.destroy();
+});
