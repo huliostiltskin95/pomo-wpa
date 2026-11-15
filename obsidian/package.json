@@ -1,6 +1,6 @@
 {
   "name": "tempo-obsidian",
-  "version": "0.5.13",
+  "version": "0.5.14",
   "private": true,
   "description": "Tempo Pomodoro Obsidian plugin build",
   "scripts": {

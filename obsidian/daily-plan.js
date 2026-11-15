@@ -1,5 +1,5 @@
 import {parseQuick,planSessions,normalizeArchive} from '../core/tempo-simple.js';
-import {localDateString,sessionBounds,dateTime,getPhase,sessionsOverlap} from '../core/tempo-core.js';
+import {localDateString,sessionBounds,dateTime,getPhase,sessionsOverlap,hasSessionOverlaps} from '../core/tempo-core.js';
 
 const blockPattern=/^\s*<!-- tempvs-block:([^\s>]+) -->\s*$/;
 const rowPattern=/\s*<!-- tempvs-session:([^\s>]+)(?: day:([01]))? -->\s*$/;
@@ -72,11 +72,11 @@ export function parseDailySource(source,areas){
  return requests;
 }
 const dayAfter=day=>{const d=new Date(day+'T12:00:00');d.setDate(d.getDate()+1);return localDateString(d);};
-export const planningKey=session=>JSON.stringify([session.id,session.areaId,session.area,session.title,session.date,session.start,session.end,session.workMinutes,session.breakEnabled,session.customBreakMinutes,session.cycleMinutes,session.noteBlockId,Boolean(session.finished),session.timerStartedAt,session.timerEndsAt,session.manualRecordedAt,Boolean(session.manualSuperseded)]);
+export const planningKey=session=>JSON.stringify([session.id,session.areaId,session.area,session.title,session.date,session.start,session.end,session.workMinutes,session.breakEnabled,session.customBreakMinutes,session.cycleMinutes,session.noteBlockId,Boolean(session.finished),session.timerStartedAt,session.timerEndsAt,session.manualRecordedAt,Boolean(session.manualSuperseded),Boolean(session.dailyRetired)]);
 export const archivePlanningKey=state=>JSON.stringify({sessions:state.sessions.map(planningKey),defaults:state.defaults});
 export const isLocked=(session,now=new Date())=>session.finished||session.actualSeconds>0||session.timerStartedAt||sessionBounds(session).start<=now;
 export function daySessions(state,date,blockId){
- return state.sessions.filter(s=>!s.manualSuperseded&&(s.date===date||(blockId&&s.noteBlockId===blockId))).sort((a,b)=>sessionBounds(a).start-sessionBounds(b).start);
+ return state.sessions.filter(s=>!s.manualSuperseded&&!s.dailyRetired&&(s.date===date||(blockId&&s.noteBlockId===blockId))).sort((a,b)=>sessionBounds(a).start-sessionBounds(b).start);
 }
 // Keep identifiers in plugin data, never in the user's planning field.
 export function serializeDailyPlan(sessions,date){
@@ -103,7 +103,7 @@ function rowChanges(source,previousSource,areas,owned,date){
  // Pair edited rows in their original order; extra removed rows retain history.
  for(let i=0;i<Math.min(old.length,remaining.length);i++){
   changedRows.add(remaining[i].row);
-  const ids=old[i].requests.map(r=>owned.find(s=>!s.manualSuperseded&&s.date===(r.dayOffset?dayAfter(date):date)&&s.start===r.start&&(s.areaId?s.areaId===r.areaId:s.area===r.area)&&Math.round((sessionBounds(s).end-sessionBounds(s).start)/60000)===r.minutes)?.id);
+  const ids=old[i].requests.map(r=>owned.find(s=>!s.manualSuperseded&&!s.dailyRetired&&s.date===(r.dayOffset?dayAfter(date):date)&&s.start===r.start&&(s.areaId?s.areaId===r.areaId:s.area===r.area)&&Math.round((sessionBounds(s).end-sessionBounds(s).start)/60000)===r.minutes)?.id);
   previousByRow.set(remaining[i].row,ids.filter(Boolean));
   remaining[i].requests.forEach((r,index)=>{if(ids[index])byRequest.set(r,ids[index]);});
  }
@@ -118,7 +118,7 @@ export function recordedFocusSeconds(session,until=new Date()){
 }
 function manualRecord(session,now){
  const result={...session,actualSeconds:recordedFocusSeconds(session,now),actualSource:'manual',manualRecordedAt:now.toISOString()};
- if(sessionBounds(session).end<=now)result.finished=true;
+ result.finished=sessionBounds(session).end<=now;
  return result;
 }
 function originalRecord(session){
@@ -130,11 +130,13 @@ function correctNoteWork(previous,seconds){
  if(total>0){const baseline=Math.max(previous.actualSeconds||0,total);return Object.fromEntries(Object.entries(work).map(([id,s])=>[id,s*seconds/baseline]));}
  return previous?.noteEstimateId?{[previous.noteEstimateId]:seconds}:{};
 }
-export function prepareDailyPlan({source,date,blockId,state,previousSource,now=new Date(),id=()=>globalThis.crypto?.randomUUID?.()||Date.now().toString(36)+'-'+Math.random().toString(36).slice(2)}){
+export function prepareDailyPlan({source,date,blockId,state,previousSource,protectedBlockIds,now=new Date(),id=()=>globalThis.crypto?.randomUUID?.()||Date.now().toString(36)+'-'+Math.random().toString(36).slice(2)}){
  if(!validDay(date))throw Error('Data non valida.');
  const areas=state.defaults.simple.areas,requests=parseDailySource(source,areas),owned=state.sessions.filter(s=>s.noteBlockId===blockId);
+ const protectedBlocks=protectedBlockIds===undefined?null:new Set(protectedBlockIds);
+ const foreign=s=>s.noteBlockId&&s.noteBlockId!==blockId&&(protectedBlocks===null||protectedBlocks.has(s.noteBlockId));
  const changes=rowChanges(source,previousSource,areas,owned,date),positions=new Map();
- const candidates=[],claimed=new Set(),correctionIds=[],correctedRows=new Set(),changedIntervals=new Set();
+ const candidates=[],claimed=new Set(),correctionIds=[],correctedRows=new Set();
  for(const request of requests){
   const dateOf=request.dayOffset?dayAfter(date):date,start=dateTime(dateOf,request.start),elapsed=start<=now;
   const position=positions.get(request.sourceRow)||0;positions.set(request.sourceRow,position+1);
@@ -145,8 +147,8 @@ export function prepareDailyPlan({source,date,blockId,state,previousSource,now=n
   }
   const exact=s=>s.date===dateOf&&s.start===request.start&&(s.areaId?s.areaId===request.areaId:s.area===request.area)&&Math.round((sessionBounds(s).end-sessionBounds(s).start)/60000)===request.minutes;
   if(!existing&&elapsed){const matched=changes.byRequest.get(request.sourceRow+':'+position);existing=owned.find(s=>s.id===matched&&!claimed.has(s.id));}
-  if(!existing)existing=state.sessions.find(s=>!claimed.has(s.id)&&!s.manualSuperseded&&(!s.noteBlockId||s.noteBlockId===blockId)&&exact(s));
-  if(existing?.noteBlockId&&existing.noteBlockId!==blockId)throw Error('Una sessione appartiene già a un altro blocco TEMPVS.');
+  if(!existing)existing=state.sessions.find(s=>!claimed.has(s.id)&&!s.manualSuperseded&&!s.dailyRetired&&!foreign(s)&&exact(s));
+  if(existing&&foreign(existing))throw Error('Una sessione appartiene già a un altro blocco TEMPVS.');
   if(existing&&claimed.has(existing.id))throw Error('La stessa sessione compare due volte nel blocco.');
   const samePause=existing&&(!request.cycleMinutes||request.rangeSession||request.cycleMinutes===existing.cycleMinutes)&&(request.focusMinutes===undefined||request.focusMinutes===existing.workMinutes)&&(request.customBreakMinutes===undefined||request.customBreakMinutes===existing.customBreakMinutes);
   const correction=elapsed&&(!existing||!exact(existing)||!samePause||changes.changedRows.has(request.sourceRow)||changes.addedRows.has(request.sourceRow));
@@ -163,24 +165,27 @@ export function prepareDailyPlan({source,date,blockId,state,previousSource,now=n
    // Otherwise sessionBounds would continue reading the old immediate timer.
    if(!exact(existing)||correction){delete session.timerStartedAt;delete session.timerEndsAt;}
   }
-  session.noteBlockId=blockId;
-  if(!existing||!exact(existing)||correction)changedIntervals.add(session.id);
+  delete session.dailyRetired;session.noteBlockId=blockId;
   if(correction){delete session.manualSuperseded;session=manualRecord(session,now);if(existing)session.manualOriginal=originalRecord(existing);correctionIds.push(session.id);correctedRows.add(request.sourceRow);}
   candidates.push(session);claimed.add(session.id);
  }
- const omitted=owned.filter(s=>!claimed.has(s.id));
- // A shortened corrected range no longer credits surplus old slots; retain their
- // original measurements for recovery instead of counting both old and new time.
+ // Validate the note against itself before reconciling any archived reservation.
+ if(hasSessionOverlaps(candidates))throw Error('Le righe della nota si sovrappongono tra loro.');
+ const intersects=s=>candidates.some(c=>sessionsOverlap(s,c));
+ const omitted=state.sessions.filter(s=>!claimed.has(s.id)&&!foreign(s)&&(s.noteBlockId===blockId||s.date===date||intersects(s)));
  const previousCorrected=new Set([...correctedRows].flatMap(row=>changes.previousByRow.get(row)||[]));
- const superseded=omitted.filter(s=>isLocked(s,now)&&previousCorrected.has(s.id));
+ const superseded=omitted.filter(s=>isLocked(s,now)&&(previousCorrected.has(s.id)||intersects(s)||s.manualSuperseded)&&(!s.dailyRetired&&!s.manualSuperseded||s.actualSeconds>0||Object.values(s.noteWork||{}).some(n=>n>0)));
  const retainedIds=omitted.filter(s=>isLocked(s,now)).map(s=>s.id);
+ const retireIds=omitted.filter(s=>(!s.dailyRetired||!s.finished||s.paused)&&isLocked(s,now)).map(s=>s.id);
  const removed=omitted.filter(s=>!isLocked(s,now));
+ const reconciled=new Set(omitted.map(s=>s.id));
  const other=state.sessions.filter(s=>!claimed.has(s.id)&&!removed.some(r=>r.id===s.id)&&!superseded.some(r=>r.id===s.id));
- // Completed records must also be checked: their hours are manually declared work.
- const occupied=[...other,...candidates].filter(s=>!s.manualSuperseded&&(!s.finished||s.actualSource==='manual'||s.actualSeconds>0));
- for(const session of candidates)if(changedIntervals.has(session.id)&&occupied.some(s=>s.id!==session.id&&sessionsOverlap(session,s)))throw Error('Le righe si sovrappongono a una sessione della giornata.');
+ // Only a reservation belonging to another real daily note can prevent replacement.
+ // Old/hidden sessions of this day are archive data, never competing instructions.
+ const conflict=state.sessions.find(s=>!claimed.has(s.id)&&!reconciled.has(s.id)&&!s.dailyRetired&&!s.manualSuperseded&&intersects(s));
+ if(conflict)throw Error('Un intervallo appartiene a un’altra nota giornaliera collegata. Correggi anche quella nota.');
  normalizeArchive({...state,sessions:[...other,...candidates]});
- return {date,blockId,sessions:candidates,correctionIds,supersededIds:superseded.map(s=>s.id),retainedIds,removeIds:removed.map(s=>s.id),unusedMinutes:requests.reduce((n,r)=>n+(r.unusedMinutes||0),0),planningKey:archivePlanningKey(state),recordedAt:now.toISOString(),source,previousSource};
+ return {date,blockId,sessions:candidates,correctionIds,supersededIds:superseded.map(s=>s.id),retainedIds,retireIds,removeIds:removed.map(s=>s.id),unusedMinutes:requests.reduce((n,r)=>n+(r.unusedMinutes||0),0),planningKey:archivePlanningKey(state),recordedAt:now.toISOString(),source,previousSource,protectedBlockIds};
 }
 export function applyDailyPlan(state,proposal){
  const corrected=new Set(proposal.correctionIds||[]),affected=new Set([...proposal.sessions.map(s=>s.id),...proposal.removeIds]),current=new Map(state.sessions.map(s=>[s.id,s]));
@@ -189,6 +194,11 @@ export function applyDailyPlan(state,proposal){
   if(corrected.has(s.id))return {...s,noteWork:correctNoteWork(previous||s,s.actualSeconds),...(previous?{manualOriginal:originalRecord(previous),paused:previous.paused}:{})};
   return {...s,...(previous?{actualSeconds:previous.actualSeconds||0,...(previous.noteWork?{noteWork:previous.noteWork}:{}),paused:previous.paused}:{})};
  }));
+ for(const session of state.sessions)if(proposal.retireIds?.includes(session.id)){
+  const {dailyOriginal,...snapshot}=session;
+  session.dailyOriginal=dailyOriginal||JSON.parse(JSON.stringify(snapshot));
+  session.dailyRetired=true;session.finished=true;session.paused=false;
+ }
  for(const session of state.sessions)if(proposal.supersededIds?.includes(session.id))Object.assign(session,{manualOriginal:originalRecord(session),actualSeconds:0,noteWork:{},finished:true,manualSuperseded:true,manualRecordedAt:proposal.recordedAt,actualSource:'manual'});
  const historical=new Map(state.sessions.filter(s=>corrected.has(s.id)||proposal.supersededIds?.includes(s.id)).map(s=>[s.id,s]));
  state.history=state.history.map(h=>{const s=historical.get(h.sessionId);return s?{...h,title:s.title,date:s.date,area:s.area,areaId:s.areaId,minutes:s.actualSeconds/60,measured:true,actualSource:'manual',noteWork:s.noteWork}:h;});

@@ -1,3 +1,7 @@
+## Obsidian 0.5.14 · agenda coerente con la daily note
+
+La pianificazione nel blocco TEMPVS/TEMPUS ha priorità sulle vecchie prenotazioni della giornata: vengono riconciliate automaticamente anche all’avvio e dopo Dropbox. Le sessioni archiviate non bloccano il blocco valido e non riappaiono nel calendario. Agenda e timer seguono gli intervalli della nota, con anteprima della prossima sessione. [Dettagli e riproduzione del caso segnalato](obsidian/DAILY-PLAN.md).
+
 ## Obsidian 0.5.13 · intervalli trascorsi modificabili
 
 I blocchi giornalieri TEMPVS/TEMPUS consentono di correggere gli orari anche a posteriori e registrare il tempo corretto come lavoro svolto, al netto delle pause. Le vecchie righe lasciate invariate conservano le misurazioni esistenti. [Funzionamento e conservazione dei dati](obsidian/DAILY-PLAN.md).

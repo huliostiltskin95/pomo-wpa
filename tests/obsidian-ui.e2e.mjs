@@ -200,6 +200,35 @@ try {
   assert.equal(await page.evaluate(()=>plugin.state.sessions.filter(s=>s.date==='2020-11-10').reduce((n,s)=>n+s.actualSeconds,0)),3000);
   assert.match(await page.locator('.past-container code').textContent(),/10:15-11:15/);
   console.log('Retrospective blocks: corrected intervals, manual net totals and no duplicate historical credits passed.');
+  // Reproduce the screenshot: valid Italian daily note, stale overlapping archive,
+  // and an in-progress Svago break at 20:25 that must drive the actual timer.
+  await page.evaluate(async()=>{
+   const NativeDate=Date,clock=+new NativeDate('2026-11-15T20:25:00');
+   window.Date=class extends NativeDate{constructor(...args){super(...(args.length?args:[clock]));}static now(){return clock;}};
+   const file={path:'agenda/15 novembre 2026.md',basename:'15 novembre 2026',extension:'md'};
+   window.screenshotNote='---\ntitle: 15 novembre 2026\n---\n\n# 15 novembre 2026\n\n```TEMPVS\ndate: 2026-11-15\nPersonale +01:26-01:56 -30m\nStudio +15:00-16:00 -60m\nSvago +18:30-21:00 -120m\nStudio +21:00-23:00 -60m\n```';
+   plugin.dailyNotes=Object.create(null);plugin.app.workspace.getActiveFile=()=>file;
+   const oldLeaves=plugin.app.workspace.getLeavesOfType;plugin.app.workspace.getLeavesOfType=type=>type==='markdown'?[]:oldLeaves(type);
+   plugin.app.vault={getAbstractFileByPath:path=>path===file.path?file:null,getMarkdownFiles:()=>[file],read:async()=>screenshotNote,process:async(file,change)=>{window.screenshotNote=change(screenshotNote);}};
+   await plugin.change(()=>{
+    if(!plugin.config.areas.some(a=>a.name==='Svago'))plugin.config.areas.push({id:'svago',name:'Svago',description:'',color:'#54769B'});
+    plugin.state.history=[];
+    plugin.state.sessions=[{id:'stale-calendar',date:'2026-11-15',start:'18:00',end:'22:00',area:'Studio',title:'Studio',workMinutes:25,breakEnabled:true,actualSeconds:3600}];
+   });
+   plugin.daily.errors.set(file.path,'Le righe si sovrappongono a una sessione della giornata.');
+   await plugin.daily.syncFile(file.path);plugin.refresh(true);
+  });
+  await page.waitForFunction(()=>document.querySelector('.tempvs-clock')?.textContent==='05:00');
+  assert.equal(await page.locator('.tempvs-area').textContent(),'Svago');assert.equal(await page.locator('.tempvs-phase').textContent(),'Pausa');
+  assert.equal(await page.locator('.tempvs-session').count(),5);assert.equal(await page.locator('.tempvs-daily-status').isVisible(),false);
+  assert.match(await page.locator('.tempvs-sessions').textContent(),/01:26–01:56/);assert.match(await page.locator('.tempvs-sessions').textContent(),/21:00–22:00/);
+  await page.evaluate(async()=>{
+   window.screenshotNote=screenshotNote.replace('Svago +18:30-21:00 -120m\n','');await plugin.daily.syncFile('agenda/15 novembre 2026.md');
+  });
+  assert.equal(await page.locator('.tempvs-area').textContent(),'Studio');assert.equal(await page.locator('.tempvs-clock').textContent(),'50:00');
+  assert.match(await page.locator('.tempvs-timer-hint').textContent(),/21:00/);
+  assert.equal(await page.locator('.tempvs-primary-controls').isVisible(),false);
+  console.log('Screenshot regression: note overrides old calendar, shows all daily slots, current 5-minute break and next 50-minute focus.');
   assert.deepEqual(errors,[]);
   assert.deepEqual(await page.evaluate(()=>notices.filter(n=>/errore|invalid|sovrappost/i.test(n))),[]);
   console.log('Obsidian UI: creation, planning, pause/resume, finish, volume, Escape, drafts and responsive layouts passed.');

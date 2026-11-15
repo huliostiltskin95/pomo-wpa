@@ -118,3 +118,20 @@ test('historical automatic edits record corrected actual time and never restore 
  await f.daily.archiveChanged();assert(!f.text.includes('+11:00-12:00'));await f.daily.syncFile(f.file.path);
  assert.equal(f.plugin.state.sessions.reduce((n,s)=>n+s.actualSeconds,0),3000);assert.equal(f.plugin.state.sessions.length,4);f.daily.destroy();
 });
+test('pre-upgrade unchanged source reconciles stale overlapping reservations on initialization',async()=>{
+ const f=fixture();await f.daily.syncFile(f.file.path);const id=Object.keys(f.plugin.dailyNotes)[0];
+ delete f.plugin.dailyNotes[id].agendaVersion;
+ f.plugin.state.sessions.push({id:'stale',date:day,start:'14:30',end:'15:30',title:'Studio',area:'Studio',workMinutes:25,breakEnabled:true,actualSeconds:0});
+ f.plugin.app.vault.getMarkdownFiles=()=>[f.file];
+ const original=f.text;await f.daily.initialize();assert.equal(f.text,original);assert.equal(f.plugin.state.sessions.length,5);assert(f.plugin.state.syncDeleted.sessions.includes('stale'));assert.equal(f.plugin.dailyNotes[id].agendaVersion,2);f.daily.destroy();
+});
+test('remote archive reconciliation follows unchanged note instead of writing stale remote slots into it',async()=>{
+ const f=fixture();await f.daily.syncFile(f.file.path);const original=f.text;
+ f.plugin.state.sessions.push({id:'remote',date:day,start:'14:30',end:'15:30',title:'Studio',area:'Studio',workMinutes:25,breakEnabled:true,actualSeconds:0});
+ await f.daily.reconcilePlans();assert.equal(f.text,original);assert.equal(f.plugin.state.sessions.length,5);assert(f.plugin.state.syncDeleted.sessions.includes('remote'));f.daily.destroy();
+});
+test('an already synchronized open note still selects its day in the plugin panel',async()=>{
+ const f=fixture();await f.daily.syncFile(f.file.path);const panel={day:'2099-11-14',update(){}};
+ f.plugin.app.workspace.getActiveFile=()=>f.file;f.plugin.app.workspace.getLeavesOfType=type=>type==='tempvs-timer'?[{view:panel}]:[];
+ await f.daily.syncFile(f.file.path);assert.equal(panel.day,day);f.daily.destroy();
+});

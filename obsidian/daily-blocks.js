@@ -50,9 +50,24 @@ export class DailyBlocks {
  async initialize(){
   for(const file of this.plugin.app.vault.getMarkdownFiles()){
    if(this.destroyed)return;
-   try{await this.syncFile(file.path);}catch(error){this.errors.set(file.path,error.message);}
+   try{await this.syncFile(file.path,{force:true});}catch(error){this.errors.set(file.path,error.message);}
   }
   await this.archiveChanged();
+ }
+ async reconcilePlans(){
+  const vault=this.plugin.app.vault;
+  const files=vault?.getMarkdownFiles?.()||Object.values(this.bindings).map(b=>vault?.getAbstractFileByPath(b.path)).filter(Boolean);
+  for(const file of files){
+   if(this.destroyed)return;
+   try{const context=await this.context(file.path);if(context&&!context.kind)await this.syncFile(file.path,{force:true});}
+   catch(error){this.errors.set(file.path,error.message);}
+  }
+  this.plugin.refresh?.(true);this.refresh();
+ }
+ protectedBlocks(id){return Object.entries(this.bindings).filter(([other,b])=>other!==id&&this.plugin.app.vault.getAbstractFileByPath(b.path)).map(([other])=>other);}
+ selectDay(path,date){
+  if(this.plugin.app.workspace.getActiveFile?.()?.path!==path)return;
+  for(const leaf of this.plugin.app.workspace.getLeavesOfType?.('tempvs-timer')||[]){if(leaf.view){leaf.view.day=date;leaf.view.update?.(true);}}
  }
  bindingId(path){return Object.keys(this.bindings).find(id=>this.bindings[id].path===path);}
  async readMarkdown(file){
@@ -87,7 +102,7 @@ export class DailyBlocks {
   try{if(context?.kind==='estimate')await this.plugin.estimates?.sync(context);else await this.plugin.estimates?.archive(path);}
   finally{this.applying=false;}
  }
- syncFile(path){return this.queue(async()=>{
+ syncFile(path,{force=false}={}){return this.queue(async()=>{
   if(this.detached.has(path))return;
   const context=await this.context(path);
   if(!context){await this.syncEstimate(null,path);return;}
@@ -97,13 +112,11 @@ export class DailyBlocks {
   const blockId=this.bindingId(path)||blockIdentity(context.block.source)||uid();
   this.validateBinding(blockId,path,context.date);
   const binding=this.bindings[blockId];
-  if(binding?.ratioVersion===1&&binding.source===context.block.source){this.errors.delete(path);this.refresh(path);return;}
-  const plan=prepareDailyPlan({source:context.block.source,date:context.date,blockId,previousSource:binding?.source,state:this.plugin.state});
+  if(!force&&binding?.agendaVersion===2&&binding.ratioVersion===1&&binding.source===context.block.source){this.errors.delete(path);this.selectDay(path,context.date);this.refresh(path);return;}
+  const plan=prepareDailyPlan({source:context.block.source,date:context.date,blockId,previousSource:binding?.source,protectedBlockIds:this.protectedBlocks(blockId),state:this.plugin.state});
   await this.commit({...context,...plan,originalSource:context.block.source,keepSource:true});
   this.errors.delete(path);
-  if(this.plugin.app.workspace.getActiveFile?.()?.path===path){
-   for(const leaf of this.plugin.app.workspace.getLeavesOfType?.('tempvs-timer')||[]){if(leaf.view){leaf.view.day=context.date;leaf.view.update?.(true);}}
-  }
+  this.selectDay(path,context.date);
   this.plugin.refresh?.(true);this.refresh(path);
  });}
  validateBinding(id,path,date){
@@ -118,7 +131,7 @@ export class DailyBlocks {
   const source=edited===undefined?context.block.source:restoreRowIds(context.block.source,edited);
   const date=explicitDay(source)||context.date;
   if(date!==context.date)throw Error('Per cambiare giorno usa una daily note diversa.');
-  const plan=prepareDailyPlan({source,date,blockId:id,previousSource:this.bindings[id]?.source,state:this.plugin.state});
+  const plan=prepareDailyPlan({source,date,blockId:id,previousSource:this.bindings[id]?.source,protectedBlockIds:this.protectedBlocks(id),state:this.plugin.state});
   return {...context,...plan,originalSource:context.block.source};
  }
  async writeSource(file,id,original,replacement,lineStart){
@@ -138,7 +151,7 @@ export class DailyBlocks {
   if(archivePlanningKey(this.plugin.state)!==prepared.planningKey)throw Error('Le sessioni sono cambiate durante la preview. Prepara nuovamente le modifiche.');
   this.validateBinding(prepared.blockId,prepared.file.path,prepared.date);
   const newIds=prepared.sessions.filter(s=>!this.plugin.state.sessions.some(current=>current.id===s.id)).map(s=>s.id);
-  const fresh=prepareDailyPlan({source:prepared.source,date:prepared.date,blockId:prepared.blockId,previousSource:prepared.previousSource,state:this.plugin.state,id:()=>newIds.shift()||uid()});
+  const fresh=prepareDailyPlan({source:prepared.source,date:prepared.date,blockId:prepared.blockId,previousSource:prepared.previousSource,protectedBlockIds:prepared.protectedBlockIds,state:this.plugin.state,id:()=>newIds.shift()||uid()});
   const body=prepared.keepSource?plain(prepared.source):serializeDailyPlan(fresh.sessions,prepared.date);
   const canonical=explicitDay(prepared.originalSource)&&!explicitDay(body)?'date: '+prepared.date+'\n'+body:body;
   const previousBinding=this.bindings[prepared.blockId];
@@ -154,10 +167,10 @@ export class DailyBlocks {
     if(archivePlanningKey(this.plugin.state)!==fresh.planningKey)throw Error('Le sessioni sono cambiate durante il salvataggio. Prepara nuovamente le modifiche.');
     await this.plugin.change(()=>{
      const available=fresh.sessions.filter(s=>!this.plugin.state.sessions.some(current=>current.id===s.id)).map(s=>s.id);
-     const checked=prepareDailyPlan({source:prepared.source,date:prepared.date,blockId:prepared.blockId,previousSource:prepared.previousSource,state:this.plugin.state,id:()=>available.shift()||uid()});
+     const checked=prepareDailyPlan({source:prepared.source,date:prepared.date,blockId:prepared.blockId,previousSource:prepared.previousSource,protectedBlockIds:prepared.protectedBlockIds,state:this.plugin.state,id:()=>available.shift()||uid()});
      applyDailyPlan(this.plugin.state,checked);
      this.plugin.state=normalizeArchive(this.plugin.state);
-     this.bindings[prepared.blockId]={path:prepared.file.path,date:prepared.date,source:canonical,ratioVersion:1,hiddenSessionIds:checked.retainedIds,unusedMinutes:fresh.unusedMinutes};
+     this.bindings[prepared.blockId]={path:prepared.file.path,date:prepared.date,source:canonical,ratioVersion:1,agendaVersion:2,hiddenSessionIds:checked.retainedIds,unusedMinutes:fresh.unusedMinutes};
     });
    }catch(error){
     if(previousBinding)this.bindings[prepared.blockId]=previousBinding;else delete this.bindings[prepared.blockId];
@@ -173,7 +186,7 @@ export class DailyBlocks {
   const context=await this.locate(child),blockId=this.bindingId(context.file.path)||blockIdentity(context.block.source)||uid();
   this.validateBinding(blockId,context.file.path,context.date);
   const source=serializeDailyPlan(daySessions(this.plugin.state,context.date,blockId),context.date,blockId);
-  return {...context,...prepareDailyPlan({source,date:context.date,blockId,state:this.plugin.state}),originalSource:context.block.source};
+  return {...context,...prepareDailyPlan({source,date:context.date,blockId,protectedBlockIds:this.protectedBlocks(blockId),state:this.plugin.state}),originalSource:context.block.source};
  }
  detach(path){return this.queue(async()=>{
   this.detached.add(path);clearTimeout(this.timers.get(path));
@@ -194,7 +207,7 @@ export class DailyBlocks {
     try{
      const context=await this.context(binding.path);if(!context)continue;
      // Edits in the note win. Never replace incomplete or unsaved user input.
-     if(context.kind==="estimate"||binding.ratioVersion!==1||context.block.source!==binding.source){this.schedule(binding.path);continue;}
+     if(context.kind==="estimate"||binding.agendaVersion!==2||binding.ratioVersion!==1||context.block.source!==binding.source){this.schedule(binding.path);continue;}
      const sessions=daySessions(this.plugin.state,binding.date,blockId).filter(s=>!binding.hiddenSessionIds?.includes(s.id));
      const body=serializeDailyPlan(sessions,binding.date);
      const source=explicitDay(binding.source)?'date: '+binding.date+'\n'+body:body;

@@ -706,11 +706,11 @@ var dayAfter = (day) => {
   d.setDate(d.getDate() + 1);
   return localDateString(d);
 };
-var planningKey = (session) => JSON.stringify([session.id, session.areaId, session.area, session.title, session.date, session.start, session.end, session.workMinutes, session.breakEnabled, session.customBreakMinutes, session.cycleMinutes, session.noteBlockId, Boolean(session.finished), session.timerStartedAt, session.timerEndsAt, session.manualRecordedAt, Boolean(session.manualSuperseded)]);
+var planningKey = (session) => JSON.stringify([session.id, session.areaId, session.area, session.title, session.date, session.start, session.end, session.workMinutes, session.breakEnabled, session.customBreakMinutes, session.cycleMinutes, session.noteBlockId, Boolean(session.finished), session.timerStartedAt, session.timerEndsAt, session.manualRecordedAt, Boolean(session.manualSuperseded), Boolean(session.dailyRetired)]);
 var archivePlanningKey = (state) => JSON.stringify({ sessions: state.sessions.map(planningKey), defaults: state.defaults });
 var isLocked = (session, now = /* @__PURE__ */ new Date()) => session.finished || session.actualSeconds > 0 || session.timerStartedAt || sessionBounds(session).start <= now;
 function daySessions(state, date, blockId) {
-  return state.sessions.filter((s) => !s.manualSuperseded && (s.date === date || blockId && s.noteBlockId === blockId)).sort((a, b) => sessionBounds(a).start - sessionBounds(b).start);
+  return state.sessions.filter((s) => !s.manualSuperseded && !s.dailyRetired && (s.date === date || blockId && s.noteBlockId === blockId)).sort((a, b) => sessionBounds(a).start - sessionBounds(b).start);
 }
 function serializeDailyPlan(sessions, date) {
   const groups = [];
@@ -742,7 +742,7 @@ function rowChanges(source, previousSource, areas, owned, date) {
   const old = before.filter((_, i) => !matched.has(i)), byRequest = /* @__PURE__ */ new Map(), changedRows = /* @__PURE__ */ new Set(), previousByRow = /* @__PURE__ */ new Map(), addedRows = new Set(remaining.map((r) => r.row));
   for (let i = 0; i < Math.min(old.length, remaining.length); i++) {
     changedRows.add(remaining[i].row);
-    const ids = old[i].requests.map((r) => owned.find((s) => !s.manualSuperseded && s.date === (r.dayOffset ? dayAfter(date) : date) && s.start === r.start && (s.areaId ? s.areaId === r.areaId : s.area === r.area) && Math.round((sessionBounds(s).end - sessionBounds(s).start) / 6e4) === r.minutes)?.id);
+    const ids = old[i].requests.map((r) => owned.find((s) => !s.manualSuperseded && !s.dailyRetired && s.date === (r.dayOffset ? dayAfter(date) : date) && s.start === r.start && (s.areaId ? s.areaId === r.areaId : s.area === r.area) && Math.round((sessionBounds(s).end - sessionBounds(s).start) / 6e4) === r.minutes)?.id);
     previousByRow.set(remaining[i].row, ids.filter(Boolean));
     remaining[i].requests.forEach((r, index) => {
       if (ids[index]) byRequest.set(r, ids[index]);
@@ -765,7 +765,7 @@ function recordedFocusSeconds(session, until = /* @__PURE__ */ new Date()) {
 }
 function manualRecord(session, now) {
   const result = { ...session, actualSeconds: recordedFocusSeconds(session, now), actualSource: "manual", manualRecordedAt: now.toISOString() };
-  if (sessionBounds(session).end <= now) result.finished = true;
+  result.finished = sessionBounds(session).end <= now;
   return result;
 }
 function originalRecord(session) {
@@ -781,11 +781,13 @@ function correctNoteWork(previous, seconds) {
   }
   return previous?.noteEstimateId ? { [previous.noteEstimateId]: seconds } : {};
 }
-function prepareDailyPlan({ source, date, blockId, state, previousSource, now = /* @__PURE__ */ new Date(), id = () => globalThis.crypto?.randomUUID?.() || Date.now().toString(36) + "-" + Math.random().toString(36).slice(2) }) {
+function prepareDailyPlan({ source, date, blockId, state, previousSource, protectedBlockIds, now = /* @__PURE__ */ new Date(), id = () => globalThis.crypto?.randomUUID?.() || Date.now().toString(36) + "-" + Math.random().toString(36).slice(2) }) {
   if (!validDay(date)) throw Error("Data non valida.");
   const areas = state.defaults.simple.areas, requests = parseDailySource(source, areas), owned = state.sessions.filter((s) => s.noteBlockId === blockId);
+  const protectedBlocks = protectedBlockIds === void 0 ? null : new Set(protectedBlockIds);
+  const foreign = (s) => s.noteBlockId && s.noteBlockId !== blockId && (protectedBlocks === null || protectedBlocks.has(s.noteBlockId));
   const changes = rowChanges(source, previousSource, areas, owned, date), positions = /* @__PURE__ */ new Map();
-  const candidates = [], claimed = /* @__PURE__ */ new Set(), correctionIds = [], correctedRows = /* @__PURE__ */ new Set(), changedIntervals = /* @__PURE__ */ new Set();
+  const candidates = [], claimed = /* @__PURE__ */ new Set(), correctionIds = [], correctedRows = /* @__PURE__ */ new Set();
   for (const request of requests) {
     const dateOf = request.dayOffset ? dayAfter(date) : date, start = dateTime(dateOf, request.start), elapsed = start <= now;
     const position = positions.get(request.sourceRow) || 0;
@@ -800,8 +802,8 @@ function prepareDailyPlan({ source, date, blockId, state, previousSource, now = 
       const matched = changes.byRequest.get(request.sourceRow + ":" + position);
       existing = owned.find((s) => s.id === matched && !claimed.has(s.id));
     }
-    if (!existing) existing = state.sessions.find((s) => !claimed.has(s.id) && !s.manualSuperseded && (!s.noteBlockId || s.noteBlockId === blockId) && exact(s));
-    if (existing?.noteBlockId && existing.noteBlockId !== blockId) throw Error("Una sessione appartiene gi\xE0 a un altro blocco TEMPVS.");
+    if (!existing) existing = state.sessions.find((s) => !claimed.has(s.id) && !s.manualSuperseded && !s.dailyRetired && !foreign(s) && exact(s));
+    if (existing && foreign(existing)) throw Error("Una sessione appartiene gi\xE0 a un altro blocco TEMPVS.");
     if (existing && claimed.has(existing.id)) throw Error("La stessa sessione compare due volte nel blocco.");
     const samePause = existing && (!request.cycleMinutes || request.rangeSession || request.cycleMinutes === existing.cycleMinutes) && (request.focusMinutes === void 0 || request.focusMinutes === existing.workMinutes) && (request.customBreakMinutes === void 0 || request.customBreakMinutes === existing.customBreakMinutes);
     const correction = elapsed && (!existing || !exact(existing) || !samePause || changes.changedRows.has(request.sourceRow) || changes.addedRows.has(request.sourceRow));
@@ -824,8 +826,8 @@ function prepareDailyPlan({ source, date, blockId, state, previousSource, now = 
         delete session.timerEndsAt;
       }
     }
+    delete session.dailyRetired;
     session.noteBlockId = blockId;
-    if (!existing || !exact(existing) || correction) changedIntervals.add(session.id);
     if (correction) {
       delete session.manualSuperseded;
       session = manualRecord(session, now);
@@ -836,16 +838,20 @@ function prepareDailyPlan({ source, date, blockId, state, previousSource, now = 
     candidates.push(session);
     claimed.add(session.id);
   }
-  const omitted = owned.filter((s) => !claimed.has(s.id));
+  if (hasSessionOverlaps(candidates)) throw Error("Le righe della nota si sovrappongono tra loro.");
+  const intersects = (s) => candidates.some((c) => sessionsOverlap(s, c));
+  const omitted = state.sessions.filter((s) => !claimed.has(s.id) && !foreign(s) && (s.noteBlockId === blockId || s.date === date || intersects(s)));
   const previousCorrected = new Set([...correctedRows].flatMap((row) => changes.previousByRow.get(row) || []));
-  const superseded = omitted.filter((s) => isLocked(s, now) && previousCorrected.has(s.id));
+  const superseded = omitted.filter((s) => isLocked(s, now) && (previousCorrected.has(s.id) || intersects(s) || s.manualSuperseded) && (!s.dailyRetired && !s.manualSuperseded || s.actualSeconds > 0 || Object.values(s.noteWork || {}).some((n) => n > 0)));
   const retainedIds = omitted.filter((s) => isLocked(s, now)).map((s) => s.id);
+  const retireIds = omitted.filter((s) => (!s.dailyRetired || !s.finished || s.paused) && isLocked(s, now)).map((s) => s.id);
   const removed = omitted.filter((s) => !isLocked(s, now));
+  const reconciled = new Set(omitted.map((s) => s.id));
   const other = state.sessions.filter((s) => !claimed.has(s.id) && !removed.some((r) => r.id === s.id) && !superseded.some((r) => r.id === s.id));
-  const occupied = [...other, ...candidates].filter((s) => !s.manualSuperseded && (!s.finished || s.actualSource === "manual" || s.actualSeconds > 0));
-  for (const session of candidates) if (changedIntervals.has(session.id) && occupied.some((s) => s.id !== session.id && sessionsOverlap(session, s))) throw Error("Le righe si sovrappongono a una sessione della giornata.");
+  const conflict = state.sessions.find((s) => !claimed.has(s.id) && !reconciled.has(s.id) && !s.dailyRetired && !s.manualSuperseded && intersects(s));
+  if (conflict) throw Error("Un intervallo appartiene a un\u2019altra nota giornaliera collegata. Correggi anche quella nota.");
   normalizeArchive({ ...state, sessions: [...other, ...candidates] });
-  return { date, blockId, sessions: candidates, correctionIds, supersededIds: superseded.map((s) => s.id), retainedIds, removeIds: removed.map((s) => s.id), unusedMinutes: requests.reduce((n, r) => n + (r.unusedMinutes || 0), 0), planningKey: archivePlanningKey(state), recordedAt: now.toISOString(), source, previousSource };
+  return { date, blockId, sessions: candidates, correctionIds, supersededIds: superseded.map((s) => s.id), retainedIds, retireIds, removeIds: removed.map((s) => s.id), unusedMinutes: requests.reduce((n, r) => n + (r.unusedMinutes || 0), 0), planningKey: archivePlanningKey(state), recordedAt: now.toISOString(), source, previousSource, protectedBlockIds };
 }
 function applyDailyPlan(state, proposal) {
   const corrected = new Set(proposal.correctionIds || []), affected = /* @__PURE__ */ new Set([...proposal.sessions.map((s) => s.id), ...proposal.removeIds]), current = new Map(state.sessions.map((s) => [s.id, s]));
@@ -854,6 +860,13 @@ function applyDailyPlan(state, proposal) {
     if (corrected.has(s.id)) return { ...s, noteWork: correctNoteWork(previous || s, s.actualSeconds), ...previous ? { manualOriginal: originalRecord(previous), paused: previous.paused } : {} };
     return { ...s, ...previous ? { actualSeconds: previous.actualSeconds || 0, ...previous.noteWork ? { noteWork: previous.noteWork } : {}, paused: previous.paused } : {} };
   }));
+  for (const session of state.sessions) if (proposal.retireIds?.includes(session.id)) {
+    const { dailyOriginal, ...snapshot } = session;
+    session.dailyOriginal = dailyOriginal || JSON.parse(JSON.stringify(snapshot));
+    session.dailyRetired = true;
+    session.finished = true;
+    session.paused = false;
+  }
   for (const session of state.sessions) if (proposal.supersededIds?.includes(session.id)) Object.assign(session, { manualOriginal: originalRecord(session), actualSeconds: 0, noteWork: {}, finished: true, manualSuperseded: true, manualRecordedAt: proposal.recordedAt, actualSource: "manual" });
   const historical = new Map(state.sessions.filter((s) => corrected.has(s.id) || proposal.supersededIds?.includes(s.id)).map((s) => [s.id, s]));
   state.history = state.history.map((h) => {
@@ -958,12 +971,39 @@ var DailyBlocks = class {
     for (const file of this.plugin.app.vault.getMarkdownFiles()) {
       if (this.destroyed) return;
       try {
-        await this.syncFile(file.path);
+        await this.syncFile(file.path, { force: true });
       } catch (error) {
         this.errors.set(file.path, error.message);
       }
     }
     await this.archiveChanged();
+  }
+  async reconcilePlans() {
+    const vault = this.plugin.app.vault;
+    const files = vault?.getMarkdownFiles?.() || Object.values(this.bindings).map((b) => vault?.getAbstractFileByPath(b.path)).filter(Boolean);
+    for (const file of files) {
+      if (this.destroyed) return;
+      try {
+        const context = await this.context(file.path);
+        if (context && !context.kind) await this.syncFile(file.path, { force: true });
+      } catch (error) {
+        this.errors.set(file.path, error.message);
+      }
+    }
+    this.plugin.refresh?.(true);
+    this.refresh();
+  }
+  protectedBlocks(id) {
+    return Object.entries(this.bindings).filter(([other, b]) => other !== id && this.plugin.app.vault.getAbstractFileByPath(b.path)).map(([other]) => other);
+  }
+  selectDay(path, date) {
+    if (this.plugin.app.workspace.getActiveFile?.()?.path !== path) return;
+    for (const leaf of this.plugin.app.workspace.getLeavesOfType?.("tempvs-timer") || []) {
+      if (leaf.view) {
+        leaf.view.day = date;
+        leaf.view.update?.(true);
+      }
+    }
   }
   bindingId(path) {
     return Object.keys(this.bindings).find((id) => this.bindings[id].path === path);
@@ -1005,7 +1045,7 @@ var DailyBlocks = class {
       this.applying = false;
     }
   }
-  syncFile(path) {
+  syncFile(path, { force = false } = {}) {
     return this.queue(async () => {
       if (this.detached.has(path)) return;
       const context = await this.context(path);
@@ -1029,22 +1069,16 @@ var DailyBlocks = class {
       const blockId = this.bindingId(path) || blockIdentity(context.block.source) || uid2();
       this.validateBinding(blockId, path, context.date);
       const binding = this.bindings[blockId];
-      if (binding?.ratioVersion === 1 && binding.source === context.block.source) {
+      if (!force && binding?.agendaVersion === 2 && binding.ratioVersion === 1 && binding.source === context.block.source) {
         this.errors.delete(path);
+        this.selectDay(path, context.date);
         this.refresh(path);
         return;
       }
-      const plan = prepareDailyPlan({ source: context.block.source, date: context.date, blockId, previousSource: binding?.source, state: this.plugin.state });
+      const plan = prepareDailyPlan({ source: context.block.source, date: context.date, blockId, previousSource: binding?.source, protectedBlockIds: this.protectedBlocks(blockId), state: this.plugin.state });
       await this.commit({ ...context, ...plan, originalSource: context.block.source, keepSource: true });
       this.errors.delete(path);
-      if (this.plugin.app.workspace.getActiveFile?.()?.path === path) {
-        for (const leaf of this.plugin.app.workspace.getLeavesOfType?.("tempvs-timer") || []) {
-          if (leaf.view) {
-            leaf.view.day = context.date;
-            leaf.view.update?.(true);
-          }
-        }
-      }
+      this.selectDay(path, context.date);
       this.plugin.refresh?.(true);
       this.refresh(path);
     });
@@ -1061,7 +1095,7 @@ var DailyBlocks = class {
     const source = edited === void 0 ? context.block.source : restoreRowIds(context.block.source, edited);
     const date = explicitDay(source) || context.date;
     if (date !== context.date) throw Error("Per cambiare giorno usa una daily note diversa.");
-    const plan = prepareDailyPlan({ source, date, blockId: id, previousSource: this.bindings[id]?.source, state: this.plugin.state });
+    const plan = prepareDailyPlan({ source, date, blockId: id, previousSource: this.bindings[id]?.source, protectedBlockIds: this.protectedBlocks(id), state: this.plugin.state });
     return { ...context, ...plan, originalSource: context.block.source };
   }
   async writeSource(file, id, original, replacement, lineStart) {
@@ -1081,7 +1115,7 @@ var DailyBlocks = class {
     if (archivePlanningKey(this.plugin.state) !== prepared.planningKey) throw Error("Le sessioni sono cambiate durante la preview. Prepara nuovamente le modifiche.");
     this.validateBinding(prepared.blockId, prepared.file.path, prepared.date);
     const newIds = prepared.sessions.filter((s) => !this.plugin.state.sessions.some((current) => current.id === s.id)).map((s) => s.id);
-    const fresh = prepareDailyPlan({ source: prepared.source, date: prepared.date, blockId: prepared.blockId, previousSource: prepared.previousSource, state: this.plugin.state, id: () => newIds.shift() || uid2() });
+    const fresh = prepareDailyPlan({ source: prepared.source, date: prepared.date, blockId: prepared.blockId, previousSource: prepared.previousSource, protectedBlockIds: prepared.protectedBlockIds, state: this.plugin.state, id: () => newIds.shift() || uid2() });
     const body = prepared.keepSource ? plain(prepared.source) : serializeDailyPlan(fresh.sessions, prepared.date);
     const canonical = explicitDay(prepared.originalSource) && !explicitDay(body) ? "date: " + prepared.date + "\n" + body : body;
     const previousBinding = this.bindings[prepared.blockId];
@@ -1097,10 +1131,10 @@ var DailyBlocks = class {
         if (archivePlanningKey(this.plugin.state) !== fresh.planningKey) throw Error("Le sessioni sono cambiate durante il salvataggio. Prepara nuovamente le modifiche.");
         await this.plugin.change(() => {
           const available = fresh.sessions.filter((s) => !this.plugin.state.sessions.some((current) => current.id === s.id)).map((s) => s.id);
-          const checked = prepareDailyPlan({ source: prepared.source, date: prepared.date, blockId: prepared.blockId, previousSource: prepared.previousSource, state: this.plugin.state, id: () => available.shift() || uid2() });
+          const checked = prepareDailyPlan({ source: prepared.source, date: prepared.date, blockId: prepared.blockId, previousSource: prepared.previousSource, protectedBlockIds: prepared.protectedBlockIds, state: this.plugin.state, id: () => available.shift() || uid2() });
           applyDailyPlan(this.plugin.state, checked);
           this.plugin.state = normalizeArchive(this.plugin.state);
-          this.bindings[prepared.blockId] = { path: prepared.file.path, date: prepared.date, source: canonical, ratioVersion: 1, hiddenSessionIds: checked.retainedIds, unusedMinutes: fresh.unusedMinutes };
+          this.bindings[prepared.blockId] = { path: prepared.file.path, date: prepared.date, source: canonical, ratioVersion: 1, agendaVersion: 2, hiddenSessionIds: checked.retainedIds, unusedMinutes: fresh.unusedMinutes };
         });
       } catch (error) {
         if (previousBinding) this.bindings[prepared.blockId] = previousBinding;
@@ -1125,7 +1159,7 @@ var DailyBlocks = class {
     const context = await this.locate(child), blockId = this.bindingId(context.file.path) || blockIdentity(context.block.source) || uid2();
     this.validateBinding(blockId, context.file.path, context.date);
     const source = serializeDailyPlan(daySessions(this.plugin.state, context.date, blockId), context.date, blockId);
-    return { ...context, ...prepareDailyPlan({ source, date: context.date, blockId, state: this.plugin.state }), originalSource: context.block.source };
+    return { ...context, ...prepareDailyPlan({ source, date: context.date, blockId, protectedBlockIds: this.protectedBlocks(blockId), state: this.plugin.state }), originalSource: context.block.source };
   }
   detach(path) {
     return this.queue(async () => {
@@ -1156,7 +1190,7 @@ var DailyBlocks = class {
         try {
           const context = await this.context(binding.path);
           if (!context) continue;
-          if (context.kind === "estimate" || binding.ratioVersion !== 1 || context.block.source !== binding.source) {
+          if (context.kind === "estimate" || binding.agendaVersion !== 2 || binding.ratioVersion !== 1 || context.block.source !== binding.source) {
             this.schedule(binding.path);
             continue;
           }
@@ -2815,15 +2849,17 @@ var TempvsView = class extends import_obsidian4.ItemView {
     const plugin = this.plugin;
     const active = plugin.active();
     const phase = active ? getPhase(active) : null;
+    const next = active ? null : getNextSession(plugin.state.sessions.filter((s) => !s.finished && !s.dailyRetired && !s.manualSuperseded));
+    const upcoming = next ? getPhase(next, sessionBounds(next).start) : null;
     root.querySelector(".tempvs-timer").dataset.state = active?.paused ? "paused" : phase?.kind || "idle";
-    root.querySelector(".tempvs-phase").textContent = active?.paused ? "Conteggio focus sospeso" : phase ? phase.label : "Pronto per concentrarti";
-    root.querySelector(".tempvs-clock").textContent = phase ? mmss(phase.remaining) : String(plugin.state.defaults.workMinutes).padStart(2, "0") + ":00";
-    root.querySelector(".tempvs-area").textContent = active ? active.area || active.title : "Scegli un\u2019area e inizia una sessione";
+    root.querySelector(".tempvs-phase").textContent = active?.paused ? "Conteggio focus sospeso" : phase ? phase.label : next ? "Prossima sessione" : "Pronto per concentrarti";
+    root.querySelector(".tempvs-clock").textContent = phase ? mmss(phase.remaining) : upcoming ? mmss(upcoming.remaining) : String(plugin.state.defaults.workMinutes).padStart(2, "0") + ":00";
+    root.querySelector(".tempvs-area").textContent = active ? active.area || active.title : next ? next.area || next.title : "Scegli un\u2019area e inizia una sessione";
     const progress = root.querySelector(".tempvs-progress");
     progress.hidden = !phase;
     progress.setAttribute("aria-valuenow", String(Math.round(phase?.progress || 0)));
     progress.firstElementChild.style.width = (phase?.progress || 0) + "%";
-    root.querySelector(".tempvs-timer-hint").textContent = phase ? "Fine sessione alle " + formatTime(phase.sessionEnd) + (active.paused ? " \xB7 L\u2019orario continua a scorrere" : "") : "Il tuo prossimo passo: Nuova sessione";
+    root.querySelector(".tempvs-timer-hint").textContent = phase ? "Fine sessione alle " + formatTime(phase.sessionEnd) + (active.paused ? " \xB7 L\u2019orario continua a scorrere" : "") : next ? "Inizio alle " + next.start + (next.date !== today() ? " \xB7 " + next.date : "") + " \xB7 fine alle " + next.end : "Il tuo prossimo passo: Nuova sessione";
     const pause = root.querySelector(".tempvs-pause-button");
     const finish = root.querySelector(".tempvs-finish-button");
     if (pause) {
@@ -2859,7 +2895,7 @@ var TempvsView = class extends import_obsidian4.ItemView {
     list.empty();
     const now = /* @__PURE__ */ new Date();
     const sessions = plugin.state.sessions.filter((s) => {
-      if (s.finished || sessionBounds(s).end <= now) return false;
+      if (s.dailyRetired || s.manualSuperseded) return false;
       return s.date === this.day || this.day === today() && sessionBounds(s).start <= now && sessionBounds(s).end > now;
     }).sort((a, b) => sessionBounds(a).start - sessionBounds(b).start);
     for (const s of sessions) {
@@ -2868,11 +2904,11 @@ var TempvsView = class extends import_obsidian4.ItemView {
       info.createEl("strong", { text: s.start + "\u2013" + s.end });
       const details = info.createDiv({ cls: "tempvs-session-details" });
       details.createSpan({ text: s.area || s.title });
-      plugin.estimates?.selector(info, s);
+      if (!s.finished && sessionBounds(s).end > now) plugin.estimates?.selector(info, s);
       const isActive = active?.id === s.id;
       item.toggleClass("is-current", isActive);
-      details.createEl("small", { cls: "tempvs-muted", text: isActive ? s.paused ? "Focus sospeso" : "In corso" : minutes((sessionBounds(s).end - sessionBounds(s).start) / 1e3) + " min \xB7 Programmata" + (s.cycleMinutes !== void 0 ? ` \xB7 ${s.workMinutes}/${s.cycleMinutes - s.workMinutes}` : "") });
-      if (sessionBounds(s).start > now)
+      details.createEl("small", { cls: "tempvs-muted", text: s.finished ? "Conclusa \xB7 " + minutes(s.actualSeconds || 0) + " min effettivi" : sessionBounds(s).end <= now ? ((s.actualSeconds || 0) > 0 ? "Svolta" : "Trascorsa") + " \xB7 " + minutes(s.actualSeconds || 0) + " min effettivi" : isActive ? s.paused ? "Focus sospeso" : "In corso" : minutes((sessionBounds(s).end - sessionBounds(s).start) / 1e3) + " min \xB7 Programmata" + (s.cycleMinutes !== void 0 ? ` \xB7 ${s.workMinutes}/${s.cycleMinutes - s.workMinutes}` : "") });
+      if (!s.finished && sessionBounds(s).start > now)
         iconButton(item, "trash-2", "Elimina sessione " + (s.area || s.title), () => plugin.removeSession(s.id));
     }
     if (!sessions.length) {
@@ -3064,7 +3100,7 @@ var TempvsPlugin = class extends import_obsidian4.Plugin {
         for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) leaf.view?.draw?.();
         this.syncAmbient();
         this.refresh(true);
-        await this.daily?.archiveChanged();
+        await this.daily?.reconcilePlans();
       },
       normalizeRemote: normalizeArchive,
       onStatus: (message, detail) => {

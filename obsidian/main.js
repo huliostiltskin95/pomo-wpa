@@ -2,7 +2,7 @@ import {NoteEstimates} from './note-estimates.js';
 import {recordNoteWork} from '../core/tempo-estimates.js';
 import {DailyBlocks} from './daily-blocks.js';
 import { Plugin, ItemView, Notice, Platform, PluginSettingTab, Setting, setIcon } from "obsidian";
-import { getActiveSession, getPhase, sessionBounds, hasSessionOverlaps, localDateString, formatTime, mmss } from "../core/tempo-core.js";
+import { getActiveSession, getNextSession, getPhase, sessionBounds, hasSessionOverlaps, localDateString, formatTime, mmss } from "../core/tempo-core.js";
 import { normalizeArchive, manualSessionEnd, measuredFocus, parseQuick, planSessions, grossCycle } from "../core/tempo-simple.js";
 import { createDropboxSync } from "../core/tempo-dropbox.js";
 import { dropboxRequest, createCloudStorage, chooseTempvsConflicts, confirmTempvs } from "./cloud-adapter.js";
@@ -328,17 +328,19 @@ class TempvsView extends ItemView {
     const plugin=this.plugin;
     const active=plugin.active();
     const phase=active?getPhase(active):null;
+    const next=active?null:getNextSession(plugin.state.sessions.filter(s=>!s.finished&&!s.dailyRetired&&!s.manualSuperseded));
+    const upcoming=next?getPhase(next,sessionBounds(next).start):null;
     root.querySelector(".tempvs-timer").dataset.state=active?.paused?"paused":phase?.kind||"idle";
-    root.querySelector(".tempvs-phase").textContent=active?.paused?"Conteggio focus sospeso":phase?phase.label:"Pronto per concentrarti";
-    root.querySelector(".tempvs-clock").textContent=phase?mmss(phase.remaining):String(plugin.state.defaults.workMinutes).padStart(2,"0")+":00";
-    root.querySelector(".tempvs-area").textContent=active?(active.area||active.title):"Scegli un’area e inizia una sessione";
+    root.querySelector(".tempvs-phase").textContent=active?.paused?"Conteggio focus sospeso":phase?phase.label:next?"Prossima sessione":"Pronto per concentrarti";
+    root.querySelector(".tempvs-clock").textContent=phase?mmss(phase.remaining):upcoming?mmss(upcoming.remaining):String(plugin.state.defaults.workMinutes).padStart(2,"0")+":00";
+    root.querySelector(".tempvs-area").textContent=active?(active.area||active.title):next?(next.area||next.title):"Scegli un’area e inizia una sessione";
     const progress=root.querySelector(".tempvs-progress");
     progress.hidden=!phase;
     progress.setAttribute("aria-valuenow",String(Math.round(phase?.progress||0)));
     progress.firstElementChild.style.width=(phase?.progress||0)+"%";
     root.querySelector(".tempvs-timer-hint").textContent=phase
       ? "Fine sessione alle "+formatTime(phase.sessionEnd)+(active.paused?" · L’orario continua a scorrere":"")
-      : "Il tuo prossimo passo: Nuova sessione";
+      : next?"Inizio alle "+next.start+(next.date!==today()?" · "+next.date:"")+" · fine alle "+next.end:"Il tuo prossimo passo: Nuova sessione";
     const pause=root.querySelector(".tempvs-pause-button");
     const finish=root.querySelector(".tempvs-finish-button");
     if(pause){pause.disabled=!active;pause.textContent=active?.paused?"Riprendi":"Pausa";}
@@ -370,7 +372,7 @@ class TempvsView extends ItemView {
     list.empty();
     const now=new Date();
     const sessions=plugin.state.sessions.filter(s=>{
-      if(s.finished || sessionBounds(s).end<=now)return false;
+      if(s.dailyRetired||s.manualSuperseded)return false;
       return s.date===this.day || (this.day===today()&&sessionBounds(s).start<=now&&sessionBounds(s).end>now);
     }).sort((a,b)=>sessionBounds(a).start-sessionBounds(b).start);
     for(const s of sessions){
@@ -379,11 +381,11 @@ class TempvsView extends ItemView {
       info.createEl("strong",{text:s.start+"–"+s.end});
       const details=info.createDiv({cls:"tempvs-session-details"});
       details.createSpan({text:s.area||s.title});
-      plugin.estimates?.selector(info,s);
+      if(!s.finished&&sessionBounds(s).end>now)plugin.estimates?.selector(info,s);
       const isActive=active?.id===s.id;
       item.toggleClass("is-current",isActive);
-      details.createEl("small",{cls:"tempvs-muted",text:isActive?(s.paused?"Focus sospeso":"In corso"):minutes((sessionBounds(s).end-sessionBounds(s).start)/1000)+" min · Programmata"+(s.cycleMinutes!==undefined?` · ${s.workMinutes}/${s.cycleMinutes-s.workMinutes}`:"")});
-      if(sessionBounds(s).start>now)
+      details.createEl("small",{cls:"tempvs-muted",text:s.finished?"Conclusa · "+minutes((s.actualSeconds||0))+" min effettivi":sessionBounds(s).end<=now?((s.actualSeconds||0)>0?"Svolta":"Trascorsa")+" · "+minutes((s.actualSeconds||0))+" min effettivi":isActive?(s.paused?"Focus sospeso":"In corso"):minutes((sessionBounds(s).end-sessionBounds(s).start)/1000)+" min · Programmata"+(s.cycleMinutes!==undefined?` · ${s.workMinutes}/${s.cycleMinutes-s.workMinutes}`:"")});
+      if(!s.finished&&sessionBounds(s).start>now)
         iconButton(item,"trash-2","Elimina sessione "+(s.area||s.title),()=>plugin.removeSession(s.id));
     }
     if(!sessions.length){
@@ -543,7 +545,7 @@ export default class TempvsPlugin extends Plugin {
         for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) leaf.view?.draw?.();
         this.syncAmbient();
         this.refresh(true);
-        await this.daily?.archiveChanged();
+        await this.daily?.reconcilePlans();
       },
       normalizeRemote: normalizeArchive,
       onStatus: (message, detail) => {

@@ -1,3 +1,27 @@
+## 0.5.14 · la nota quotidiana guida l’agenda
+
+Il blocco della daily note è il riferimento per la pianificazione di quella giornata. Al salvataggio, all’avvio e dopo un ripristino Dropbox il plugin riconcilia gli intervalli della nota con l’archivio: le vecchie prenotazioni della stessa giornata non possono bloccare un blocco valido con il messaggio «Le righe si sovrappongono a una sessione della giornata».
+
+Le prenotazioni future non presenti nel blocco vengono rimosse con i normali identificativi di cancellazione. I vecchi intervalli avviati o conclusi vengono ritirati dall’agenda e non possono continuare ad azionare il timer o essere riscritti nel codice. I dati precedenti restano nella sessione archiviata (`dailyOriginal`); se un vecchio intervallo viene sostituito da un nuovo intervallo sovrapposto, il suo credito viene azzerato per evitare il doppio conteggio. Il lavoro passato non sovrapposto continua a essere conservato nello storico. Le altre giornate non vengono alterate; un intervallo effettivamente collegato a un’altra daily note non viene sovrascritto silenziosamente.
+
+Sono sempre rifiutate le sovrapposizioni tra le righe della nota stessa. Un testo incompleto o non valido non modifica l’archivio. I file con il blocco corretto vengono riconciliati anche dopo l’aggiornamento del plugin, senza dover riscrivere le righe. Le aggiunte intenzionali dal pannello conservano l’aggiornamento bidirezionale già presente; gli archivi ricevuti da Dropbox vengono invece adattati alle note locali, senza reinserire vecchi slot nel testo.
+
+L’agenda mostra anche gli intervalli conclusi della giornata selezionata. Il timer segue la sessione in corso; in attesa mostra area, focus previsto e inizio della prossima sessione. Un intervallo concluso esteso esplicitamente fino all’ora corrente torna operativo secondo gli orari corretti; lasciare il blocco invariato non riapre sessioni concluse manualmente.
+
+Il caso dello screenshot è verificato con:
+
+```TEMPVS
+date: 2026-11-15
+Personale +01:26-01:56 -30m
+Studio +15:00-16:00 -60m
+Svago +18:30-21:00 -120m
+Studio +21:00-23:00 -60m
+```
+
+Risultato: cinque sessioni. La fascia Svago riserva 18:30–20:30 (100 minuti di focus e 20 di pausa) e lascia 30 minuti liberi, secondo la politica delle sessioni intere. Alle 20:25 il timer indica Pausa, Svago, 05:00; seguono Studio 21:00–22:00 e 22:00–23:00. I test includono vecchie sessioni sovrapposte, migrazione di collegamenti invariati, ripristino remoto, assenza di doppio credito, lettura del buffer non ancora salvato e UI del bundle con API Obsidian simulate. Non è un collaudo su un dispositivo iPad reale.
+
+---
+
 ## 0.5.13 · correzione del tempo effettivo
 
 Gli intervalli dei blocchi giornalieri si possono inserire e correggere anche dopo l'orario indicato. Le nuove righe trascorse e le righe trascorse modificate vengono registrate come lavoro svolto: il totale effettivo comprende solo il focus, al netto delle pause della sessione. Per esempio, `Studio +10:00-12:00 -30m` interamente trascorso registra 100 minuti di concentrazione con il rapporto 5:1.
