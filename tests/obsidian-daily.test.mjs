@@ -52,13 +52,14 @@ test('editing plain future rows replaces changed sessions and records deletions'
  const changed=state.sessions.find(s=>s.area==='Lavoro');assert.equal(changed.start,'14:00');
  state=apply(state,prepare('Studio +10:30-11:00 -30m',state));assert.equal(state.sessions.length,1);assert(state.syncDeleted.sessions.includes(changed.id));
 });
-test('started and completed rows stay visible and cannot be moved or removed',()=>{
+test('started and completed rows remain archived when omitted; explicit ID edits are rejected',()=>{
  for(const properties of [{actualSeconds:60},{finished:true},{timerStartedAt:'2099-11-06T10:00:13',timerEndsAt:'2099-11-06T10:30:13'}]){
   const state=apply(empty(),prepare('Studio +10:00-10:30 -30m'));Object.assign(state.sessions[0],properties);
   const source=serializeDailyPlan(state.sessions,date,blockId);
   assert.equal(prepare(source,state).sessions[0].id,state.sessions[0].id);
-  assert.throws(()=>prepare(source.replace('+10:00-10:30','+14:00-14:30'),state),/avviat[ae] o conclus[ae]/);
-  assert.throws(()=>prepare('',state),/avviata o conclusa/);
+  assert.throws(()=>prepare(source.replace('+10:00-10:30','+14:00-14:30')+` <!-- tempvs-session:${state.sessions[0].id} -->`,state),/avviat[ae] o conclus[ae]/);
+  const p=prepare('',state);assert.deepEqual(p.retainedIds,[state.sessions[0].id]);assert.equal(p.removeIds.length,0);
+  assert.equal(apply(state,p).sessions.length,1);
  }
 });
 test('rows cannot claim IDs owned by another block or silently resurrect deleted sessions',()=>{

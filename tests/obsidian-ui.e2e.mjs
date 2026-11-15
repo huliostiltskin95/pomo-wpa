@@ -31,7 +31,7 @@ try {
     ep.toggleClass=function(name,yes){this.classList.toggle(name,yes)};
     const leaves=[];
     class Plugin{
-      constructor(){this.app={workspace:{getLeavesOfType:()=>leaves,getActiveFile:()=>null}}}
+      constructor(){this.app={workspace:{getLeavesOfType:()=>leaves,getActiveFile:()=>null,on:(name,handler)=>{(window.workspaceEvents??={})[name]=handler;return {};}}}}
       async loadData(){return null} async saveData(data){this.saved=structuredClone(data)}
       registerMarkdownCodeBlockProcessor(language,processor){(this.processors??={})[language]=processor} registerEvent(){}
       registerView(type,factory){this.factory=factory}
@@ -130,6 +130,24 @@ try {
   await page.waitForFunction(()=>dailyText.includes('Personale +16:00-17:00'));
   assert(!await page.evaluate(()=>dailyText.includes('Lavoro +14:00-14:30')));
   await page.waitForFunction(()=>document.querySelector('.daily-container code')?.textContent.includes('Personale +16:00-17:00'));
+  // A completed earlier plan must not prevent live unsaved afternoon edits.
+  await page.evaluate(()=>{
+    for(const session of plugin.state.sessions.filter(s=>s.date==='2099-11-06'))session.finished=true;
+    const file={path:'Daily/2099-11-06.md',basename:'2099-11-06',extension:'md'};
+    window.liveDailyText='# Daily\n\n```TEMPVS\nStudio +18:00-20:00 -60m\n```\n\nAltre note.';
+    const oldLeaves=plugin.app.workspace.getLeavesOfType;
+    const editorView={file,editor:{getValue:()=>liveDailyText},getMode:()=> 'source'};
+    plugin.app.workspace.getLeavesOfType=type=>type==='markdown'?[{view:editorView}]:oldLeaves(type);
+    plugin.app.workspace.getActiveFile=()=>file;
+    workspaceEvents['editor-change'](editorView.editor,editorView);
+  });
+  await page.waitForFunction(()=>plugin.state.sessions.filter(s=>s.date==='2099-11-06'&&!s.finished).length===2);
+  await page.waitForFunction(()=>view.day==='2099-11-06');
+  assert.equal(await page.locator('.tempvs-session').count(),2);
+  assert.match(await page.locator('.tempvs-sessions').textContent(),/18:00/);
+  assert(await page.evaluate(()=>plugin.state.sessions.some(s=>s.date==='2099-11-06'&&s.finished)));
+  await page.evaluate(async()=>{window.dailyText=liveDailyText;await plugin.daily.archiveChanged();});
+  assert(!await page.evaluate(()=>dailyText.includes('+10:00')));
   for(const width of [280,390,768]){
     await page.setViewportSize({width,height:900});
     assert(await daily.evaluate(el=>el.scrollWidth<=el.clientWidth),'daily block overflow at '+width);

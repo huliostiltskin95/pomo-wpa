@@ -26,8 +26,8 @@ test('midnight round trip and pause configuration survive plain serialization',(
  const source=serializeDailyPlan(s.sessions,day);assert.equal(parseDailySource(source,s.defaults.simple.areas).length,3);
  apply(s,source);assert.equal(s.sessions[0].customBreakMinutes,5);
 });
-test('completed sessions cannot be deleted from the text',()=>{
- const s=state();apply(s,initial);s.sessions[0].finished=true;assert.throws(()=>apply(s,''));
+test('removing completed rows preserves the archive and accepts the new plan',()=>{
+ const s=state();apply(s,initial);s.sessions[0].finished=true;const id=s.sessions[0].id;const p=apply(s,'Studio +21:00-22:00 -60m');assert(p.retainedIds.includes(id));assert(s.sessions.some(x=>x.id===id));assert(!s.syncDeleted.sessions.includes(id));
 });
 // Exercise the controller source independently of whether a bundle was built first.
 const code=fs.readFileSync(new URL('../obsidian/daily-blocks.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'').replace(/export /g,'');
@@ -55,6 +55,7 @@ test('unsaved editor buffer prevents writeback; multiple blocks are rejected',as
  const f=fixture();await f.daily.syncFile(f.file.path);const saved=f.text;
  f.plugin.app.workspace.getLeavesOfType=()=>[{view:{file:f.file,editor:{getValue:()=>saved+'editing'}}}];
  f.plugin.state.sessions.pop();await f.daily.archiveChanged();assert.equal(f.text,saved);
+ f.plugin.app.workspace.getLeavesOfType=()=>[];
  f.text+='\n```TEMPVS\n\n```';await assert.rejects(f.daily.syncFile(f.file.path));f.daily.destroy();
 });
 test('old metadata migrates to simple text without changing session ids',async()=>{
@@ -70,4 +71,29 @@ test('sessions added from the panel can subsequently be removed from the note',a
  assert.equal(added.noteBlockId,Object.keys(f.plugin.dailyNotes)[0]);
  f.text=f.text.replace('\nLavoro +21:00-22:00 -60m','');await f.daily.syncFile(f.file.path);
  assert(!f.plugin.state.sessions.some(s=>s.id===added.id));assert(f.plugin.state.syncDeleted.sessions.includes(added.id));f.daily.destroy();
+});
+test('completed morning row no longer blocks afternoon import or returns on panel writeback',async()=>{
+ const f=fixture();f.text=f.text.replace(initial,'Studio +10:00-12:00 -120m');await f.daily.syncFile(f.file.path);
+ const morning=f.plugin.state.sessions[0];morning.finished=true;morning.actualSeconds=7.591;
+ f.text=f.text.replace('Studio +10:00-12:00 -120m','Studio +14:30-16:30 -60m');await f.daily.syncFile(f.file.path);
+ assert.equal(f.plugin.state.sessions.length,3);assert.equal(morning.finished,true);
+ assert.deepEqual(Array.from(f.plugin.state.sessions.filter(s=>!s.finished),s=>s.start),['14:30','15:30']);
+ await f.daily.archiveChanged();assert(!f.text.includes('+10:00-12:00'));assert(!f.plugin.state.syncDeleted.sessions.includes(morning.id));f.daily.destroy();
+});
+test('editor-change imports complete unsaved text and updates the active daily panel',async()=>{
+ const f=fixture();const saved=f.text;let buffer=saved.replace(initial,revised),updates=0;
+ const view={file:f.file,editor:{getValue:()=>buffer}},panel={day:'2099-11-14',update:()=>updates++},events={};
+ f.plugin.app.workspace.getActiveFile=()=>f.file;
+ f.plugin.app.workspace.getLeavesOfType=type=>type==='markdown'?[{view}]:[{view:panel}];
+ f.plugin.app.workspace.on=(name,handler)=>{events[name]=handler;return {};};
+ f.plugin.registerEvent=()=>{};f.plugin.registerMarkdownCodeBlockProcessor=()=>{};f.plugin.addCommand=()=>{};
+ f.daily.start();events['editor-change'](view.editor,view);
+ await new Promise(resolve=>setTimeout(resolve,450));await f.daily.chain;
+ assert.equal(f.plugin.state.sessions.length,4);assert.equal(panel.day,day);assert(updates>0);assert.equal(f.text,saved);
+ buffer=buffer.replace(revised,'Studio +');events['editor-change'](view.editor,view);
+ await new Promise(resolve=>setTimeout(resolve,450));await f.daily.chain.catch(()=>{});
+ assert.equal(f.plugin.state.sessions.length,4);assert(f.daily.errors.get(f.file.path));f.daily.destroy();
+});
+test('TEMPUS spelling is accepted alongside TEMPVS',()=>{
+ assert.equal(findDailyBlocks('```tempus\n'+initial+'\n```').length,1);
 });

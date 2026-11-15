@@ -127,6 +127,7 @@ class TempvsView extends ItemView {
     const dateLabel = nav.createEl("button",{cls:"tempvs-day-label",text:"Oggi",attr:{title:"Torna a oggi","aria-label":"Data selezionata: oggi. Torna a oggi"}});
     dateLabel.onclick=()=>{this.day=today();this.update(true);};
     iconButton(nav,"chevron-right","Giorno successivo",()=>{this.day=shiftDate(this.day,1);this.update(true);});
+    root.createDiv({cls:"tempvs-daily-status",attr:{role:"status"}});
     root.createDiv({cls:"tempvs-sessions"});
     const add = button(root,"+ Nuova sessione",()=>this.togglePanel("create"));
     add.addClass("mod-cta","tempvs-add-button");
@@ -347,6 +348,14 @@ class TempvsView extends ItemView {
       const status=plugin.cloudMessage||"Dropbox non collegato";
       cloud.title=status;cloud.setAttribute("aria-label",status+" — Apri impostazioni");
       cloud.toggleClass("tempvs-cloud-error",/errore|error|fallit/i.test(status));
+    }
+    const dailyStatus=root.querySelector('.tempvs-daily-status');
+    if(dailyStatus){
+      const path=plugin.app.workspace.getActiveFile?.()?.path;
+      const error=plugin.daily?.errors.get(path);
+      dailyStatus.textContent=error?'Nota giornaliera: '+error:'';
+      dailyStatus.hidden=!error;
+      dailyStatus.toggleClass('tempvs-daily-error',Boolean(error));
     }
     if(!full)return;
     const dayLabel=root.querySelector(".tempvs-day-label");
@@ -824,3 +833,4 @@ export default class TempvsPlugin extends Plugin {
     await this.writeChain.catch(() => {});
   }
 }
+

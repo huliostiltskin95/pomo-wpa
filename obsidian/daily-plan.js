@@ -36,7 +36,7 @@ export function findDailyBlocks(markdown){
   const line=lines[i].replace(/\r?\n$/,'');
   if(!fence){
    const match=line.match(/^ {0,3}(`{3,}|~{3,})([^\r\n]*)$/);
-   if(match){fence={char:match[1][0],length:match[1].length,start:offset+lines[i].length,line:i,isTempvs:match[2].trim().toLowerCase()==='tempvs'};}
+   if(match){fence={char:match[1][0],length:match[1].length,start:offset+lines[i].length,line:i,isTempvs:/^(tempvs|tempus)$/i.test(match[2].trim())};}
   }else if(new RegExp('^ {0,3}'+fence.char+'{'+fence.length+',}\\s*$').test(line)){
    if(fence.isTempvs)blocks.push({start:fence.start,end:offset,lineStart:fence.line,source:markdown.slice(fence.start,offset).replace(/\r?\n$/,'')});
    fence=null;
@@ -124,12 +124,14 @@ export function prepareDailyPlan({source,date,blockId,state,now=new Date(),id=()
   }
   session.noteBlockId=blockId;candidates.push(session);claimed.add(session.id);
  }
- const removed=owned.filter(s=>!claimed.has(s.id));
- if(removed.some(s=>isLocked(s,now)))throw Error('Non puoi rimuovere dal blocco una sessione già avviata o conclusa.');
+ const omitted=owned.filter(s=>!claimed.has(s.id));
+ // Removing a historical row hides it from the planning field, never from the archive.
+ const retainedIds=omitted.filter(s=>isLocked(s,now)).map(s=>s.id);
+ const removed=omitted.filter(s=>!isLocked(s,now));
  const other=state.sessions.filter(s=>!claimed.has(s.id)&&!removed.some(r=>r.id===s.id));
  if(hasSessionOverlaps([...other,...candidates].filter(s=>!s.finished)))throw Error('Le righe si sovrappongono a una sessione della giornata.');
  normalizeArchive({...state,sessions:[...other,...candidates]});
- return {date,blockId,sessions:candidates,removeIds:removed.map(s=>s.id),unusedMinutes:requests.reduce((n,r)=>n+(r.unusedMinutes||0),0),planningKey:archivePlanningKey(state),source};
+ return {date,blockId,sessions:candidates,retainedIds,removeIds:removed.map(s=>s.id),unusedMinutes:requests.reduce((n,r)=>n+(r.unusedMinutes||0),0),planningKey:archivePlanningKey(state),source};
 }
 export function applyDailyPlan(state,proposal){
  const affected=new Set([...proposal.sessions.map(s=>s.id),...proposal.removeIds]);
