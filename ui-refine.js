@@ -223,7 +223,7 @@ export function initRefinedUI() {
     const areaHeading=areasForm.previousElementSibling;
     if(areaHeading?.tagName==='H3')areaHeading.remove();
     areasForm.before(areaSection);
-    areaSection.append(areasForm,newArea);
+    areaSection.append(areasForm,newArea,byId('area-manager'));
     const separator=timerSection.nextElementSibling;
     if(separator?.tagName==='HR')separator.remove();
   }
