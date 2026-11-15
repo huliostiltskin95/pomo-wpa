@@ -34,9 +34,9 @@ test('removing completed rows preserves the archive and accepts the new plan',()
 const code=fs.readFileSync(new URL('../obsidian/daily-blocks.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'').replace(/export /g,'');
 const context={...dailyPlan,normalizeArchive,isEstimateSource,MarkdownRenderChild:class{},Notice:class{},moment:()=>({isValid:()=>false}),module:{exports:{}},console,setTimeout,clearTimeout,crypto:globalThis.crypto};
 vm.createContext(context);vm.runInContext(code+'\nmodule.exports.DailyBlocks=DailyBlocks;',context);
-function fixture(){
+function fixture(date=day){
  let text='# Daily\n\n```TEMPVS\n'+initial+'\n```\n\nOther text';
- const file={path:day+'.md',basename:day,extension:'md'};
+ const file={path:date+'.md',basename:date,extension:'md'};
  const plugin={state:state(),dailyNotes:{},app:{vault:{getAbstractFileByPath:()=>file,read:async()=>text,process:async(f,fn)=>{text=fn(text);}},workspace:{getLeavesOfType:()=>[]}},persist:async()=>{},change:async fn=>fn()};
  const daily=new context.module.exports.DailyBlocks(plugin);
  return {plugin,daily,file,get text(){return text;},set text(v){text=v;}};
@@ -108,4 +108,13 @@ test('unchanged pre-upgrade daily binding is recalculated once on reload',async(
  assert(f.plugin.state.sessions.every(s=>s.workMinutes===50&&s.cycleMinutes===60&&s.breakEnabled));
  assert.deepEqual(f.plugin.state.sessions.map(s=>s.id),ids);assert.equal(f.plugin.dailyNotes[key].ratioVersion,1);
  f.daily.destroy();
+});
+
+test('historical automatic edits record corrected actual time and never restore superseded credits',async()=>{
+ const f=fixture('2020-11-15');f.text=f.text.replace(initial,'Studio +10:00-12:00 -30m');await f.daily.syncFile(f.file.path);
+ const ids=f.plugin.state.sessions.map(s=>s.id);assert.equal(f.plugin.state.sessions.reduce((n,s)=>n+s.actualSeconds,0),6000);
+ f.text=f.text.replace('Studio +10:00-12:00 -30m','Studio +10:15-11:15 -30m');await f.daily.syncFile(f.file.path);
+ assert.equal(f.plugin.state.sessions.reduce((n,s)=>n+s.actualSeconds,0),3000);assert.equal(f.plugin.state.sessions.find(s=>s.start==='10:15').id,ids[0]);
+ await f.daily.archiveChanged();assert(!f.text.includes('+11:00-12:00'));await f.daily.syncFile(f.file.path);
+ assert.equal(f.plugin.state.sessions.reduce((n,s)=>n+s.actualSeconds,0),3000);assert.equal(f.plugin.state.sessions.length,4);f.daily.destroy();
 });

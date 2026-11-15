@@ -98,7 +98,7 @@ export class DailyBlocks {
   this.validateBinding(blockId,path,context.date);
   const binding=this.bindings[blockId];
   if(binding?.ratioVersion===1&&binding.source===context.block.source){this.errors.delete(path);this.refresh(path);return;}
-  const plan=prepareDailyPlan({source:context.block.source,date:context.date,blockId,state:this.plugin.state});
+  const plan=prepareDailyPlan({source:context.block.source,date:context.date,blockId,previousSource:binding?.source,state:this.plugin.state});
   await this.commit({...context,...plan,originalSource:context.block.source,keepSource:true});
   this.errors.delete(path);
   if(this.plugin.app.workspace.getActiveFile?.()?.path===path){
@@ -118,7 +118,7 @@ export class DailyBlocks {
   const source=edited===undefined?context.block.source:restoreRowIds(context.block.source,edited);
   const date=explicitDay(source)||context.date;
   if(date!==context.date)throw Error('Per cambiare giorno usa una daily note diversa.');
-  const plan=prepareDailyPlan({source,date,blockId:id,state:this.plugin.state});
+  const plan=prepareDailyPlan({source,date,blockId:id,previousSource:this.bindings[id]?.source,state:this.plugin.state});
   return {...context,...plan,originalSource:context.block.source};
  }
  async writeSource(file,id,original,replacement,lineStart){
@@ -138,7 +138,7 @@ export class DailyBlocks {
   if(archivePlanningKey(this.plugin.state)!==prepared.planningKey)throw Error('Le sessioni sono cambiate durante la preview. Prepara nuovamente le modifiche.');
   this.validateBinding(prepared.blockId,prepared.file.path,prepared.date);
   const newIds=prepared.sessions.filter(s=>!this.plugin.state.sessions.some(current=>current.id===s.id)).map(s=>s.id);
-  const fresh=prepareDailyPlan({source:prepared.source,date:prepared.date,blockId:prepared.blockId,state:this.plugin.state,id:()=>newIds.shift()||uid()});
+  const fresh=prepareDailyPlan({source:prepared.source,date:prepared.date,blockId:prepared.blockId,previousSource:prepared.previousSource,state:this.plugin.state,id:()=>newIds.shift()||uid()});
   const body=prepared.keepSource?plain(prepared.source):serializeDailyPlan(fresh.sessions,prepared.date);
   const canonical=explicitDay(prepared.originalSource)&&!explicitDay(body)?'date: '+prepared.date+'\n'+body:body;
   const previousBinding=this.bindings[prepared.blockId];
@@ -154,7 +154,7 @@ export class DailyBlocks {
     if(archivePlanningKey(this.plugin.state)!==fresh.planningKey)throw Error('Le sessioni sono cambiate durante il salvataggio. Prepara nuovamente le modifiche.');
     await this.plugin.change(()=>{
      const available=fresh.sessions.filter(s=>!this.plugin.state.sessions.some(current=>current.id===s.id)).map(s=>s.id);
-     const checked=prepareDailyPlan({source:prepared.source,date:prepared.date,blockId:prepared.blockId,state:this.plugin.state,id:()=>available.shift()||uid()});
+     const checked=prepareDailyPlan({source:prepared.source,date:prepared.date,blockId:prepared.blockId,previousSource:prepared.previousSource,state:this.plugin.state,id:()=>available.shift()||uid()});
      applyDailyPlan(this.plugin.state,checked);
      this.plugin.state=normalizeArchive(this.plugin.state);
      this.bindings[prepared.blockId]={path:prepared.file.path,date:prepared.date,source:canonical,ratioVersion:1,hiddenSessionIds:checked.retainedIds,unusedMinutes:fresh.unusedMinutes};
@@ -245,7 +245,9 @@ class DailyBlock extends MarkdownRenderChild {
    el.createEl('pre').createEl('code',{text:plain(this.source)});
    const error=this.controller.errors.get(this.ctx.sourcePath);
    const binding=this.controller.bindings[this.controller.bindingId(this.ctx.sourcePath)];
-   el.createEl('small',{text:error|| (binding?.source===this.source?'Programmazione sincronizzata'+(binding.unusedMinutes?' · '+binding.unusedMinutes+' minuti finali liberi':''):'Aggiornamento automatico…'),cls:error?'tempvs-daily-error':'tempvs-muted',attr:{role:error?'alert':'status'}});
+   const manual=daySessions(this.controller.plugin.state,context.date,this.controller.bindingId(this.ctx.sourcePath)).filter(s=>s.actualSource==='manual');
+   const actual=manual.reduce((n,s)=>n+(s.actualSeconds||0),0)/60;
+   el.createEl('small',{text:error|| (binding?.source===this.source?'Intervalli sincronizzati'+(manual.length?' · '+new Intl.NumberFormat('it-IT',{maximumFractionDigits:2}).format(actual)+' min effettivi con correzioni manuali':'')+(binding.unusedMinutes?' · '+binding.unusedMinutes+' minuti finali liberi':''):'Aggiornamento automatico…'),cls:error?'tempvs-daily-error':'tempvs-muted',attr:{role:error?'alert':'status'}});
   }catch(error){if(this.disposed||version!==this.version)return;this.containerEl.empty();this.containerEl.createEl('p',{text:error.message,cls:'tempvs-daily-error'});}
  }
 }

@@ -146,6 +146,10 @@ function mmss(seconds) {
   const minutes2 = Math.floor(total / 60), remainder = total % 60;
   return `${String(minutes2).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`;
 }
+function sessionsOverlap(a, b) {
+  const aa = sessionBounds(a), bb = sessionBounds(b);
+  return aa.start < bb.end && aa.end > bb.start;
+}
 function hasSessionOverlaps(sessions) {
   const sorted = sortSessions(sessions);
   let furthestEnd = -Infinity;
@@ -689,7 +693,7 @@ function parseDailySource(source, areas) {
         if (!row.start) throw Error("Indica una fascia +HH:MM-HH:MM oppure un inizio +HH:MM.");
         const dayOffset = (row.dayOffset || 0) + Number(nextDay ? 1 : metadata?.[2] || 0);
         if (dayOffset > 1) throw Error("La sessione deve iniziare nella giornata della nota o in quella successiva.");
-        requests.push({ ...row, ...id ? { sessionId: id } : {}, ...dayOffset ? { dayOffset } : {} });
+        requests.push({ ...row, sourceRow: index, ...id ? { sessionId: id } : {}, ...dayOffset ? { dayOffset } : {} });
       }
     } catch (error) {
       throw Error("Riga " + (index + 1) + ": " + error.message.replace(/^Riga 1: /, ""));
@@ -702,11 +706,11 @@ var dayAfter = (day) => {
   d.setDate(d.getDate() + 1);
   return localDateString(d);
 };
-var planningKey = (session) => JSON.stringify([session.id, session.areaId, session.area, session.title, session.date, session.start, session.end, session.workMinutes, session.breakEnabled, session.customBreakMinutes, session.cycleMinutes, session.noteBlockId, Boolean(session.finished), Boolean(session.timerStartedAt)]);
+var planningKey = (session) => JSON.stringify([session.id, session.areaId, session.area, session.title, session.date, session.start, session.end, session.workMinutes, session.breakEnabled, session.customBreakMinutes, session.cycleMinutes, session.noteBlockId, Boolean(session.finished), session.timerStartedAt, session.timerEndsAt, session.manualRecordedAt, Boolean(session.manualSuperseded)]);
 var archivePlanningKey = (state) => JSON.stringify({ sessions: state.sessions.map(planningKey), defaults: state.defaults });
 var isLocked = (session, now = /* @__PURE__ */ new Date()) => session.finished || session.actualSeconds > 0 || session.timerStartedAt || sessionBounds(session).start <= now;
 function daySessions(state, date, blockId) {
-  return state.sessions.filter((s) => s.date === date || blockId && s.noteBlockId === blockId).sort((a, b) => sessionBounds(a).start - sessionBounds(b).start);
+  return state.sessions.filter((s) => !s.manualSuperseded && (s.date === date || blockId && s.noteBlockId === blockId)).sort((a, b) => sessionBounds(a).start - sessionBounds(b).start);
 }
 function serializeDailyPlan(sessions, date) {
   const groups = [];
@@ -722,29 +726,91 @@ function serializeDailyPlan(sessions, date) {
   }
   return groups.map((g) => (g.gross === 1440 ? `${g.area} @1440m +${g.start}` : `${g.area} +${g.start}-${g.end} -${g.gross}m`) + (g.date !== date ? " +1d" : "")).join("\n");
 }
-function prepareDailyPlan({ source, date, blockId, state, now = /* @__PURE__ */ new Date(), id = () => globalThis.crypto?.randomUUID?.() || Date.now().toString(36) + "-" + Math.random().toString(36).slice(2) }) {
+function rowChanges(source, previousSource, areas, owned, date) {
+  if (previousSource === void 0) return { byRequest: /* @__PURE__ */ new Map(), changedRows: /* @__PURE__ */ new Set(), previousByRow: /* @__PURE__ */ new Map(), addedRows: /* @__PURE__ */ new Set() };
+  const previous = parseDailySource(previousSource, areas), next = parseDailySource(source, areas);
+  const group = (_text, requests) => [...new Set(requests.map((r) => r.sourceRow))].map((row) => {
+    const items = requests.filter((r) => r.sourceRow === row);
+    return { row, text: JSON.stringify(items.map((r) => [r.areaId || r.area, r.minutes, r.start, r.dayOffset || 0, r.cycleMinutes ?? null, r.focusMinutes ?? null, r.customBreakMinutes ?? null])), requests: items };
+  });
+  const before = group(previousSource, previous), after = group(source, next), matched = /* @__PURE__ */ new Set(), remaining = [];
+  for (const current of after) {
+    const index = before.findIndex((old2, i) => !matched.has(i) && old2.text === current.text);
+    if (index >= 0) matched.add(index);
+    else remaining.push(current);
+  }
+  const old = before.filter((_, i) => !matched.has(i)), byRequest = /* @__PURE__ */ new Map(), changedRows = /* @__PURE__ */ new Set(), previousByRow = /* @__PURE__ */ new Map(), addedRows = new Set(remaining.map((r) => r.row));
+  for (let i = 0; i < Math.min(old.length, remaining.length); i++) {
+    changedRows.add(remaining[i].row);
+    const ids = old[i].requests.map((r) => owned.find((s) => !s.manualSuperseded && s.date === (r.dayOffset ? dayAfter(date) : date) && s.start === r.start && (s.areaId ? s.areaId === r.areaId : s.area === r.area) && Math.round((sessionBounds(s).end - sessionBounds(s).start) / 6e4) === r.minutes)?.id);
+    previousByRow.set(remaining[i].row, ids.filter(Boolean));
+    remaining[i].requests.forEach((r, index) => {
+      if (ids[index]) byRequest.set(r, ids[index]);
+    });
+  }
+  const indexed = /* @__PURE__ */ new Map();
+  for (const [request, id] of byRequest) indexed.set(request.sourceRow + ":" + next.filter((r) => r.sourceRow === request.sourceRow).indexOf(request), id);
+  return { byRequest: indexed, changedRows, previousByRow, addedRows };
+}
+function recordedFocusSeconds(session, until = /* @__PURE__ */ new Date()) {
+  const bounds = sessionBounds(session);
+  let at = +bounds.start, total = 0, end = Math.min(+bounds.end, +until);
+  while (at < end) {
+    const phase = getPhase(session, new Date(at)), next = Math.min(end, +phase.end);
+    if (next <= at) break;
+    if (phase.kind === "work") total += (next - at) / 1e3;
+    at = next;
+  }
+  return total;
+}
+function manualRecord(session, now) {
+  const result = { ...session, actualSeconds: recordedFocusSeconds(session, now), actualSource: "manual", manualRecordedAt: now.toISOString() };
+  if (sessionBounds(session).end <= now) result.finished = true;
+  return result;
+}
+function originalRecord(session) {
+  if (session.manualOriginal) return session.manualOriginal;
+  const { manualOriginal, ...original } = session;
+  return JSON.parse(JSON.stringify(original));
+}
+function correctNoteWork(previous, seconds) {
+  const work = previous?.noteWork || {}, total = Object.values(work).reduce((n, s) => n + s, 0);
+  if (total > 0) {
+    const baseline = Math.max(previous.actualSeconds || 0, total);
+    return Object.fromEntries(Object.entries(work).map(([id, s]) => [id, s * seconds / baseline]));
+  }
+  return previous?.noteEstimateId ? { [previous.noteEstimateId]: seconds } : {};
+}
+function prepareDailyPlan({ source, date, blockId, state, previousSource, now = /* @__PURE__ */ new Date(), id = () => globalThis.crypto?.randomUUID?.() || Date.now().toString(36) + "-" + Math.random().toString(36).slice(2) }) {
   if (!validDay(date)) throw Error("Data non valida.");
-  const requests = parseDailySource(source, state.defaults.simple.areas), owned = state.sessions.filter((s) => s.noteBlockId === blockId);
-  const candidates = [], claimed = /* @__PURE__ */ new Set();
+  const areas = state.defaults.simple.areas, requests = parseDailySource(source, areas), owned = state.sessions.filter((s) => s.noteBlockId === blockId);
+  const changes = rowChanges(source, previousSource, areas, owned, date), positions = /* @__PURE__ */ new Map();
+  const candidates = [], claimed = /* @__PURE__ */ new Set(), correctionIds = [], correctedRows = /* @__PURE__ */ new Set(), changedIntervals = /* @__PURE__ */ new Set();
   for (const request of requests) {
-    const dateOf = request.dayOffset ? dayAfter(date) : date;
+    const dateOf = request.dayOffset ? dayAfter(date) : date, start = dateTime(dateOf, request.start), elapsed = start <= now;
+    const position = positions.get(request.sourceRow) || 0;
+    positions.set(request.sourceRow, position + 1);
     let existing = request.sessionId ? state.sessions.find((s) => s.id === request.sessionId) : null;
     if (request.sessionId && !existing) {
       if (state.syncDeleted?.sessions?.includes(request.sessionId)) throw Error("La nota contiene una sessione eliminata dal plugin. Aggiorna prima il blocco dalle sessioni.");
       throw Error("Identificativo sessione non presente nel plugin. Rimuovi il commento identificativo per creare una nuova sessione.");
     }
     const exact = (s) => s.date === dateOf && s.start === request.start && (s.areaId ? s.areaId === request.areaId : s.area === request.area) && Math.round((sessionBounds(s).end - sessionBounds(s).start) / 6e4) === request.minutes;
-    if (!existing) existing = state.sessions.find((s) => !claimed.has(s.id) && (!s.noteBlockId || s.noteBlockId === blockId) && exact(s));
+    if (!existing && elapsed) {
+      const matched = changes.byRequest.get(request.sourceRow + ":" + position);
+      existing = owned.find((s) => s.id === matched && !claimed.has(s.id));
+    }
+    if (!existing) existing = state.sessions.find((s) => !claimed.has(s.id) && !s.manualSuperseded && (!s.noteBlockId || s.noteBlockId === blockId) && exact(s));
     if (existing?.noteBlockId && existing.noteBlockId !== blockId) throw Error("Una sessione appartiene gi\xE0 a un altro blocco TEMPVS.");
     if (existing && claimed.has(existing.id)) throw Error("La stessa sessione compare due volte nel blocco.");
-    if (existing && isLocked(existing, now)) {
-      if (!exact(existing) || !request.rangeSession && request.cycleMinutes !== void 0 && request.cycleMinutes !== existing.cycleMinutes || request.focusMinutes !== void 0 && request.focusMinutes !== existing.workMinutes || request.customBreakMinutes !== void 0 && request.customBreakMinutes !== existing.customBreakMinutes)
-        throw Error("Le sessioni gi\xE0 avviate o concluse non possono essere riprogrammate dalla nota.");
+    const samePause = existing && (!request.cycleMinutes || request.rangeSession || request.cycleMinutes === existing.cycleMinutes) && (request.focusMinutes === void 0 || request.focusMinutes === existing.workMinutes) && (request.customBreakMinutes === void 0 || request.customBreakMinutes === existing.customBreakMinutes);
+    const correction = elapsed && (!existing || !exact(existing) || !samePause || changes.changedRows.has(request.sourceRow) || changes.addedRows.has(request.sourceRow));
+    if (existing && isLocked(existing, now) && !correction && exact(existing) && samePause) {
       candidates.push({ ...existing, noteBlockId: blockId });
       claimed.add(existing.id);
       continue;
     }
-    const result = planSessions([request], [], [], state.defaults, now, () => existing?.id || id(), date);
+    const result = planSessions([request], [], [], state.defaults, new Date(Math.min(+now, +start)), () => existing?.id || id(), date);
     let session = result.sessions[0];
     if (existing) {
       session = { ...existing, ...session };
@@ -753,23 +819,47 @@ function prepareDailyPlan({ source, date, blockId, state, now = /* @__PURE__ */ 
       if (request.cycleMinutes === void 0 && request.focusMinutes === void 0 && request.customBreakMinutes === void 0) {
         for (const key2 of ["workMinutes", "breakEnabled", "cycleMinutes", "customBreakMinutes"]) if (existing[key2] !== void 0) session[key2] = existing[key2];
       }
+      if (!exact(existing) || correction) {
+        delete session.timerStartedAt;
+        delete session.timerEndsAt;
+      }
     }
     session.noteBlockId = blockId;
+    if (!existing || !exact(existing) || correction) changedIntervals.add(session.id);
+    if (correction) {
+      delete session.manualSuperseded;
+      session = manualRecord(session, now);
+      if (existing) session.manualOriginal = originalRecord(existing);
+      correctionIds.push(session.id);
+      correctedRows.add(request.sourceRow);
+    }
     candidates.push(session);
     claimed.add(session.id);
   }
   const omitted = owned.filter((s) => !claimed.has(s.id));
+  const previousCorrected = new Set([...correctedRows].flatMap((row) => changes.previousByRow.get(row) || []));
+  const superseded = omitted.filter((s) => isLocked(s, now) && previousCorrected.has(s.id));
   const retainedIds = omitted.filter((s) => isLocked(s, now)).map((s) => s.id);
   const removed = omitted.filter((s) => !isLocked(s, now));
-  const other = state.sessions.filter((s) => !claimed.has(s.id) && !removed.some((r) => r.id === s.id));
-  if (hasSessionOverlaps([...other, ...candidates].filter((s) => !s.finished))) throw Error("Le righe si sovrappongono a una sessione della giornata.");
+  const other = state.sessions.filter((s) => !claimed.has(s.id) && !removed.some((r) => r.id === s.id) && !superseded.some((r) => r.id === s.id));
+  const occupied = [...other, ...candidates].filter((s) => !s.manualSuperseded && (!s.finished || s.actualSource === "manual" || s.actualSeconds > 0));
+  for (const session of candidates) if (changedIntervals.has(session.id) && occupied.some((s) => s.id !== session.id && sessionsOverlap(session, s))) throw Error("Le righe si sovrappongono a una sessione della giornata.");
   normalizeArchive({ ...state, sessions: [...other, ...candidates] });
-  return { date, blockId, sessions: candidates, retainedIds, removeIds: removed.map((s) => s.id), unusedMinutes: requests.reduce((n, r) => n + (r.unusedMinutes || 0), 0), planningKey: archivePlanningKey(state), source };
+  return { date, blockId, sessions: candidates, correctionIds, supersededIds: superseded.map((s) => s.id), retainedIds, removeIds: removed.map((s) => s.id), unusedMinutes: requests.reduce((n, r) => n + (r.unusedMinutes || 0), 0), planningKey: archivePlanningKey(state), recordedAt: now.toISOString(), source, previousSource };
 }
 function applyDailyPlan(state, proposal) {
-  const affected = /* @__PURE__ */ new Set([...proposal.sessions.map((s) => s.id), ...proposal.removeIds]);
-  const current = new Map(state.sessions.map((s) => [s.id, s]));
-  state.sessions = state.sessions.filter((s) => !affected.has(s.id)).concat(proposal.sessions.map((s) => ({ ...s, ...current.has(s.id) ? { actualSeconds: current.get(s.id).actualSeconds || 0, ...current.get(s.id).noteWork ? { noteWork: current.get(s.id).noteWork } : {}, paused: current.get(s.id).paused } : {} })));
+  const corrected = new Set(proposal.correctionIds || []), affected = /* @__PURE__ */ new Set([...proposal.sessions.map((s) => s.id), ...proposal.removeIds]), current = new Map(state.sessions.map((s) => [s.id, s]));
+  state.sessions = state.sessions.filter((s) => !affected.has(s.id)).concat(proposal.sessions.map((s) => {
+    const previous = current.get(s.id);
+    if (corrected.has(s.id)) return { ...s, noteWork: correctNoteWork(previous || s, s.actualSeconds), ...previous ? { manualOriginal: originalRecord(previous), paused: previous.paused } : {} };
+    return { ...s, ...previous ? { actualSeconds: previous.actualSeconds || 0, ...previous.noteWork ? { noteWork: previous.noteWork } : {}, paused: previous.paused } : {} };
+  }));
+  for (const session of state.sessions) if (proposal.supersededIds?.includes(session.id)) Object.assign(session, { manualOriginal: originalRecord(session), actualSeconds: 0, noteWork: {}, finished: true, manualSuperseded: true, manualRecordedAt: proposal.recordedAt, actualSource: "manual" });
+  const historical = new Map(state.sessions.filter((s) => corrected.has(s.id) || proposal.supersededIds?.includes(s.id)).map((s) => [s.id, s]));
+  state.history = state.history.map((h) => {
+    const s = historical.get(h.sessionId);
+    return s ? { ...h, title: s.title, date: s.date, area: s.area, areaId: s.areaId, minutes: s.actualSeconds / 60, measured: true, actualSource: "manual", noteWork: s.noteWork } : h;
+  });
   state.syncDeleted.sessions = [.../* @__PURE__ */ new Set([...state.syncDeleted.sessions, ...proposal.removeIds])];
 }
 
@@ -944,7 +1034,7 @@ var DailyBlocks = class {
         this.refresh(path);
         return;
       }
-      const plan = prepareDailyPlan({ source: context.block.source, date: context.date, blockId, state: this.plugin.state });
+      const plan = prepareDailyPlan({ source: context.block.source, date: context.date, blockId, previousSource: binding?.source, state: this.plugin.state });
       await this.commit({ ...context, ...plan, originalSource: context.block.source, keepSource: true });
       this.errors.delete(path);
       if (this.plugin.app.workspace.getActiveFile?.()?.path === path) {
@@ -971,7 +1061,7 @@ var DailyBlocks = class {
     const source = edited === void 0 ? context.block.source : restoreRowIds(context.block.source, edited);
     const date = explicitDay(source) || context.date;
     if (date !== context.date) throw Error("Per cambiare giorno usa una daily note diversa.");
-    const plan = prepareDailyPlan({ source, date, blockId: id, state: this.plugin.state });
+    const plan = prepareDailyPlan({ source, date, blockId: id, previousSource: this.bindings[id]?.source, state: this.plugin.state });
     return { ...context, ...plan, originalSource: context.block.source };
   }
   async writeSource(file, id, original, replacement, lineStart) {
@@ -991,7 +1081,7 @@ var DailyBlocks = class {
     if (archivePlanningKey(this.plugin.state) !== prepared.planningKey) throw Error("Le sessioni sono cambiate durante la preview. Prepara nuovamente le modifiche.");
     this.validateBinding(prepared.blockId, prepared.file.path, prepared.date);
     const newIds = prepared.sessions.filter((s) => !this.plugin.state.sessions.some((current) => current.id === s.id)).map((s) => s.id);
-    const fresh = prepareDailyPlan({ source: prepared.source, date: prepared.date, blockId: prepared.blockId, state: this.plugin.state, id: () => newIds.shift() || uid2() });
+    const fresh = prepareDailyPlan({ source: prepared.source, date: prepared.date, blockId: prepared.blockId, previousSource: prepared.previousSource, state: this.plugin.state, id: () => newIds.shift() || uid2() });
     const body = prepared.keepSource ? plain(prepared.source) : serializeDailyPlan(fresh.sessions, prepared.date);
     const canonical = explicitDay(prepared.originalSource) && !explicitDay(body) ? "date: " + prepared.date + "\n" + body : body;
     const previousBinding = this.bindings[prepared.blockId];
@@ -1007,7 +1097,7 @@ var DailyBlocks = class {
         if (archivePlanningKey(this.plugin.state) !== fresh.planningKey) throw Error("Le sessioni sono cambiate durante il salvataggio. Prepara nuovamente le modifiche.");
         await this.plugin.change(() => {
           const available = fresh.sessions.filter((s) => !this.plugin.state.sessions.some((current) => current.id === s.id)).map((s) => s.id);
-          const checked = prepareDailyPlan({ source: prepared.source, date: prepared.date, blockId: prepared.blockId, state: this.plugin.state, id: () => available.shift() || uid2() });
+          const checked = prepareDailyPlan({ source: prepared.source, date: prepared.date, blockId: prepared.blockId, previousSource: prepared.previousSource, state: this.plugin.state, id: () => available.shift() || uid2() });
           applyDailyPlan(this.plugin.state, checked);
           this.plugin.state = normalizeArchive(this.plugin.state);
           this.bindings[prepared.blockId] = { path: prepared.file.path, date: prepared.date, source: canonical, ratioVersion: 1, hiddenSessionIds: checked.retainedIds, unusedMinutes: fresh.unusedMinutes };
@@ -1148,7 +1238,9 @@ var DailyBlock = class extends import_obsidian2.MarkdownRenderChild {
       el.createEl("pre").createEl("code", { text: plain(this.source) });
       const error = this.controller.errors.get(this.ctx.sourcePath);
       const binding = this.controller.bindings[this.controller.bindingId(this.ctx.sourcePath)];
-      el.createEl("small", { text: error || (binding?.source === this.source ? "Programmazione sincronizzata" + (binding.unusedMinutes ? " \xB7 " + binding.unusedMinutes + " minuti finali liberi" : "") : "Aggiornamento automatico\u2026"), cls: error ? "tempvs-daily-error" : "tempvs-muted", attr: { role: error ? "alert" : "status" } });
+      const manual = daySessions(this.controller.plugin.state, context.date, this.controller.bindingId(this.ctx.sourcePath)).filter((s) => s.actualSource === "manual");
+      const actual = manual.reduce((n, s) => n + (s.actualSeconds || 0), 0) / 60;
+      el.createEl("small", { text: error || (binding?.source === this.source ? "Intervalli sincronizzati" + (manual.length ? " \xB7 " + new Intl.NumberFormat("it-IT", { maximumFractionDigits: 2 }).format(actual) + " min effettivi con correzioni manuali" : "") + (binding.unusedMinutes ? " \xB7 " + binding.unusedMinutes + " minuti finali liberi" : "") : "Aggiornamento automatico\u2026"), cls: error ? "tempvs-daily-error" : "tempvs-muted", attr: { role: error ? "alert" : "status" } });
     } catch (error) {
       if (this.disposed || version !== this.version) return;
       this.containerEl.empty();

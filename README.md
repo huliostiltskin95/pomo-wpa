@@ -1,3 +1,7 @@
+## Obsidian 0.5.13 · intervalli trascorsi modificabili
+
+I blocchi giornalieri TEMPVS/TEMPUS consentono di correggere gli orari anche a posteriori e registrare il tempo corretto come lavoro svolto, al netto delle pause. Le vecchie righe lasciate invariate conservano le misurazioni esistenti. [Funzionamento e conservazione dei dati](obsidian/DAILY-PLAN.md).
+
 ## Plugin Obsidian 0.5.8 · pianificazione nelle daily note
 
 Inserisci un blocco `TEMPVS` con `Studio +10:00-12:00 -30m`, poi usa **Prepara modifiche → Applica alla nota e al plugin**. Il blocco mostra le sessioni del giorno e permette di modificarle riga per riga; dopo il collegamento le modifiche dal pannello aggiornano la nota senza sovrascrivere bozze non confermate. [Guida completa, date e protezioni dei dati](docs/OBSIDIAN_DAILY_TEMPVS.md).

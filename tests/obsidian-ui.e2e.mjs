@@ -182,6 +182,24 @@ try {
   assert.equal(await page.evaluate(()=>plugin.estimates.notes.length),1);
   console.log('Note estimates: ordinary note, exact totals, daily assignment, progress and manual completion passed.');
   console.log('Daily block: uppercase fence, source edits, stable IDs, panel-to-note updates and mobile layout passed.');
+  // Edit an elapsed interval through the same automatic Markdown workflow.
+  await page.evaluate(async()=>{
+   const oldGet=plugin.app.vault.getAbstractFileByPath,oldRead=plugin.app.vault.read,oldProcess=plugin.app.vault.process;
+   const file={path:'Daily/2020-11-10.md',basename:'2020-11-10',extension:'md'};
+   window.pastText='```TEMPVS\nStudio +10:00-12:00 -30m\n```';
+   plugin.app.vault.getAbstractFileByPath=path=>path===file.path?file:oldGet(path);
+   plugin.app.vault.read=file=>file.path==='Daily/2020-11-10.md'?Promise.resolve(pastText):oldRead(file);
+   plugin.app.vault.process=async(file,change)=>{if(file.path==='Daily/2020-11-10.md')window.pastText=change(pastText);else await oldProcess(file,change);};
+   const root=document.body.createDiv({cls:'past-container'});
+   plugin.processors.TEMPVS('Studio +10:00-12:00 -30m\n',root,{sourcePath:file.path,getSectionInfo:()=>({lineStart:0}),addChild:child=>child.onload()});
+   await plugin.daily.syncFile(file.path);
+  });
+  assert.equal(await page.evaluate(()=>plugin.state.sessions.filter(s=>s.date==='2020-11-10').reduce((n,s)=>n+s.actualSeconds,0)),6000);
+  await page.evaluate(async()=>{window.pastText=pastText.replace('+10:00-12:00','+10:15-11:15');await plugin.daily.syncFile('Daily/2020-11-10.md');});
+  await page.waitForFunction(()=>document.querySelector('.past-container small')?.textContent.includes('50 min effettivi'));
+  assert.equal(await page.evaluate(()=>plugin.state.sessions.filter(s=>s.date==='2020-11-10').reduce((n,s)=>n+s.actualSeconds,0)),3000);
+  assert.match(await page.locator('.past-container code').textContent(),/10:15-11:15/);
+  console.log('Retrospective blocks: corrected intervals, manual net totals and no duplicate historical credits passed.');
   assert.deepEqual(errors,[]);
   assert.deepEqual(await page.evaluate(()=>notices.filter(n=>/errore|invalid|sovrappost/i.test(n))),[]);
   console.log('Obsidian UI: creation, planning, pause/resume, finish, volume, Escape, drafts and responsive layouts passed.');

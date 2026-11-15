@@ -1,3 +1,19 @@
+## 0.5.13 · correzione del tempo effettivo
+
+Gli intervalli dei blocchi giornalieri si possono inserire e correggere anche dopo l'orario indicato. Le nuove righe trascorse e le righe trascorse modificate vengono registrate come lavoro svolto: il totale effettivo comprende solo il focus, al netto delle pause della sessione. Per esempio, `Studio +10:00-12:00 -30m` interamente trascorso registra 100 minuti di concentrazione con il rapporto 5:1.
+
+Una fascia già presente e lasciata invariata conserva il tempo registrato dal timer: riaprire una nota non completa automaticamente tutta la pianificazione passata. Le righe future restano programmazione, con zero lavoro attribuito automaticamente. Per intervalli ancora in corso viene registrata solo la parte già trascorsa; il timer prosegue dal nuovo orario e una sospensione esistente resta attiva.
+
+Le correzioni delle righe semplici conservano gli ID tramite il confronto con l'ultima versione del blocco. Se una fascia viene accorciata o cambia il numero di sessioni, gli slot sostituiti non sommano altro lavoro al totale: restano nell'archivio con credito azzerato e copia dei dati precedenti (`manualOriginal`). Le correzioni sono riconoscibili da `actualSource: manual` e dalla data `manualRecordedAt`; i campi sono preservati nei backup e in Dropbox. Eliminare del tutto una riga storica continua invece a nasconderla dal pianificatore, conservandone il lavoro registrato.
+
+Lo storico associato viene aggiornato senza duplicare il credito. Se la sessione aveva lavoro assegnato a più note, i crediti vengono ridimensionati proporzionalmente mantenendo la quota non assegnata; se non aveva crediti e ha una nota assegnata, la correzione viene attribuita a quella nota. Il completamento delle note resta manuale. Le sovrapposizioni con altre prenotazioni o con lavoro registrato sono rifiutate, senza modificare l'archivio.
+
+La sincronizzazione mantiene il comportamento automatico delle versioni recenti: modifica le righe nel codice Markdown e attendi il salvataggio. Il riquadro mostra i minuti effettivi degli intervalli con correzioni manuali. Le sintassi delle stime `@Studio 20 -30m` restano separate e non creano registrazioni di lavoro soltanto modificando una stima.
+
+Verifiche: test unitari per correzioni retroattive, intervalli in corso, pause, mezzanotte, riduzione/estensione delle fasce, ID, storico, progresso delle note, duplicati e importazione invariata; test del controller automatico e del bundle UI con API Obsidian simulate. Il collaudo su un'installazione Obsidian/iPad reale resta da fare.
+
+---
+
 # Pianificazione automatica nella nota giornaliera
 
 Da TEMPVS 0.5.9 è sufficiente un solo blocco per nota:
@@ -8,7 +24,7 @@ Personale +16:00-17:00 -60m
 Studio +18:00-20:00 -60m
 ```
 
-`-60m` è la durata lorda di ogni sessione, pause comprese. La prima riga crea due sessioni. Ogni sessione ha una fase di concentrazione e una pausa finale, calcolate automaticamente in rapporto esatto 5:1: -60m → 50 + 10, -30m → 25 + 5, -45m → 37 min 30 s + 7 min 30 s. Le impostazioni generali non cambiano questo rapporto. Le sessioni future già importate vengono corrette; quelle avviate o concluse mantengono i dati originali. Gli eventuali minuti insufficienti per un'altra sessione intera restano liberi e sono segnalati.
+`-60m` è la durata lorda di ogni sessione, pause comprese. La prima riga crea due sessioni. Ogni sessione ha una fase di concentrazione e una pausa finale, calcolate automaticamente in rapporto esatto 5:1: -60m → 50 + 10, -30m → 25 + 5, -45m → 37 min 30 s + 7 min 30 s. Le impostazioni generali non cambiano questo rapporto. Le sessioni future già importate vengono corrette; quelle avviate o concluse lasciate invariate mantengono i dati originali. Una correzione esplicita aggiorna il tempo effettivo (0.5.13). Gli eventuali minuti insufficienti per un'altra sessione intera restano liberi e sono segnalati.
 
 Modifica direttamente il blocco nell'editor della nota. Dopo circa 350 ms di quiete, anche prima del salvataggio automatico, le sessioni vengono aggiornate senza anteprima o conferma. Aggiunte, rimozioni e modifiche dal pannello del plugin si riflettono nello stesso blocco. Le fasce contigue equivalenti sono raggruppate. Il resto della nota non viene modificato.
 
@@ -37,7 +53,7 @@ La nota e il pannello «Note e stime» mostrano il lavoro registrato, il residuo
 
 Per attribuire il lavoro, scegli la nota nel menu della sessione giornaliera, usa «Assegna alle sessioni libere del giorno» nel pannello (giorno selezionato), oppure avvia una sessione dalla stima. L’assegnazione giornaliera interessa solo sessioni future, libere e della stessa area; non sostituisce assegnazioni ad altre note. Il numero stimato non crea automaticamente prenotazioni in calendario.
 
-L’avanzamento misura solo la concentrazione effettivamente registrata mentre l’app è attiva. Pause, sospensione, sonno del dispositivo, sessioni saltate e semplice programmazione non contano. Cambiare la nota di una sessione attribuisce soltanto il lavoro successivo alla nuova nota: quello già registrato resta alla precedente. «Segna completata» è una decisione manuale e non conclude le sessioni in calendario.
+L’avanzamento comprende la concentrazione registrata dal timer e, da 0.5.13, le correzioni manuali degli intervalli con lavoro assegnato alla nota. Pause, sospensione, sonno del dispositivo, sessioni saltate e semplice programmazione non contano. Cambiare la nota di una sessione attribuisce soltanto il lavoro successivo alla nuova nota: quello già registrato resta alla precedente. «Segna completata» è una decisione manuale e non conclude le sessioni in calendario.
 
 La proiezione giornaliera considera tutto il focus ancora disponibile nelle sessioni programmate per le aree della nota nel giorno visualizzato, anche se assegnate ad altre note: è l’ipotesi «se dedicassi tutti questi slot a questa attività», non una modifica della programmazione. Non assume una giornata lavorativa di durata arbitraria. In mancanza di slot, la proiezione non viene calcolata.
 

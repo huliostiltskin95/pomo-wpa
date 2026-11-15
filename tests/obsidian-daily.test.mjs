@@ -52,12 +52,12 @@ test('editing plain future rows replaces changed sessions and records deletions'
  const changed=state.sessions.find(s=>s.area==='Lavoro');assert.equal(changed.start,'14:00');
  state=apply(state,prepare('Studio +10:30-11:00 -30m',state));assert.equal(state.sessions.length,1);assert(state.syncDeleted.sessions.includes(changed.id));
 });
-test('started and completed rows remain archived when omitted; explicit ID edits are rejected',()=>{
+test('started and completed rows remain archived when omitted; their intervals can be edited',()=>{
  for(const properties of [{actualSeconds:60},{finished:true},{timerStartedAt:'2099-11-06T10:00:13',timerEndsAt:'2099-11-06T10:30:13'}]){
   const state=apply(empty(),prepare('Studio +10:00-10:30 -30m'));Object.assign(state.sessions[0],properties);
   const source=serializeDailyPlan(state.sessions,date,blockId);
   assert.equal(prepare(source,state).sessions[0].id,state.sessions[0].id);
-  assert.throws(()=>prepare(source.replace('+10:00-10:30','+14:00-14:30')+` <!-- tempvs-session:${state.sessions[0].id} -->`,state),/avviat[ae] o conclus[ae]/);
+  const edited=prepare(source.replace('+10:00-10:30','+14:00-14:30')+` <!-- tempvs-session:${state.sessions[0].id} -->`,state);assert.equal(edited.sessions[0].id,state.sessions[0].id);assert.equal(edited.sessions[0].start,'14:00');
   const p=prepare('',state);assert.deepEqual(p.retainedIds,[state.sessions[0].id]);assert.equal(p.removeIds.length,0);
   assert.equal(apply(state,p).sessions.length,1);
  }
@@ -69,14 +69,14 @@ test('rows cannot claim IDs owned by another block or silently resurrect deleted
  state.syncDeleted.sessions.push(state.sessions[0].id);state.sessions=[];
  assert.throws(()=>prepare(source,state),/eliminata/);
 });
-test('invalid later rows, duplicate IDs, overlaps and past new sessions are rejected atomically',()=>{
+test('invalid later rows, duplicate IDs and overlaps are rejected atomically; past rows record actual focus',()=>{
  const state=empty(),before=JSON.stringify(state);
  for(const source of ['Studio +10:00-12:00 -30m\nSconosciuta +14:00-15:00 -30m','Studio +10:00-11:00 -30m\nLavoro +10:15-11:15 -30m'])assert.throws(()=>prepare(source,state));
  assert.equal(JSON.stringify(state),before);
  const saved=apply(empty(),prepare('Studio +10:00-10:30 -30m'));
  const source=`Studio +10:00-10:30 -30m <!-- tempvs-session:${saved.sessions[0].id} -->`,line=source;
  assert.throws(()=>prepare(source+'\n'+line,saved),/duplicati/);
- assert.throws(()=>prepare('Studio +10:00-10:30 -30m',empty(),{now:new Date('2099-11-07')}),/passato/);
+ const past=prepare('Studio +10:00-10:30 -30m',empty(),{now:new Date('2099-11-07')}).sessions[0];assert.equal(past.actualSeconds,25*60);assert.equal(past.finished,true);assert.equal(past.actualSource,'manual');
 });
 test('range and legacy modifiers replace conflicting pause settings',()=>{
  let state=apply(empty(),prepare('Studio @1h +10:00 -60m'));
