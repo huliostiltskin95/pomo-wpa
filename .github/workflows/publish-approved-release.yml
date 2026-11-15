@@ -1,4 +1,4 @@
-name: Publish TEMPVS 0.4.0 after release gate
+name: Publish TEMPVS 0.5.7 after release gate
 on:
   pull_request:
   push:
@@ -103,9 +103,9 @@ jobs:
           REPOSITORY: ${{ github.repository }}
           COMMIT_SHA: ${{ github.sha }}
         run: |
-          gh release create v0.4.0 \
+          gh release create v0.5.7 \
             release/main.js release/manifest.json release/styles.css release/versions.json \
             --repo "$REPOSITORY" \
             --target "$COMMIT_SHA" \
-            --title "TEMPVS 0.4.0" \
+            --title "TEMPVS 0.5.7" \
             --notes "PWA e plugin Obsidian dal medesimo core: timer, aree, pianificazione, Dropbox e collegamenti alle note." 
