@@ -23,7 +23,7 @@ test("detects nested and adjacent session overlaps correctly", () => {
 test("computes the expected work/break ratio", () => {
   assert.equal(pauseMinutes(25), 5);
   assert.equal(pauseMinutes(10), 2);
-  assert.equal(pauseMinutes(1), 1);
+  assert.equal(pauseMinutes(1), 0.2);
 });
 
 test("calculates a Pomodoro phase from absolute time", () => {

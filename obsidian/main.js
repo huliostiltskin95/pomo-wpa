@@ -190,7 +190,7 @@ class TempvsView extends ItemView {
     const planFields=plan.createDiv({cls:"tempvs-plan-fields"});
     const startTime=field(planFields,"Ora di inizio").createEl("input",{attr:{type:"time",required:"",value:"09:00"}});
     const duration=field(planFields,"Durata · minuti").createEl("input",{attr:{type:"number",min:"1",max:"1439",value:"30",required:""}});
-    const cycleInput=field(plan,"Pomodoro lordo · minuti (facoltativo)").createEl("input",{attr:{type:"number",min:"2",max:"288",placeholder:"Es. 60 → 50 focus + 10 pausa","aria-label":"Durata lorda del pomodoro"}});
+    const cycleInput=field(plan,"Pomodoro lordo · minuti (facoltativo)").createEl("input",{attr:{type:"number",min:"1",max:"1439",placeholder:"Es. 60 → 50 focus + 10 pausa","aria-label":"Durata lorda del pomodoro"}});
     const cycleHint=plan.createEl("p",{cls:"tempvs-help",text:"Lascia vuoto per usare il focus predefinito. La durata totale della sessione comprende tutte le pause."});
     cycleInput.addEventListener("input",()=>{
       try{const c=grossCycle(Number(cycleInput.value));cycleHint.textContent=`Ogni pomodoro: ${c.focusMinutes} min focus + ${c.breakMinutes} min pausa. L’ultimo ciclo si ferma alla fine della sessione.`;}
@@ -198,7 +198,7 @@ class TempvsView extends ItemView {
     });
     const batch=plan.createEl("details",{cls:"tempvs-batch"});
     batch.createEl("summary",{text:"Inserisci più sessioni con il testo"});
-    batch.createEl("p",{cls:"tempvs-help",text:"Nuovo formato: Studio +14:00-16:00 -30m → quattro sessioni da 30 minuti lordi. Si può oltrepassare mezzanotte. È ancora supportato Studio @2h +14:00 -60m: una sessione di due ore con cicli da 60 minuti lordi. Se compili questo campo, verranno usate queste righe."});
+    batch.createEl("p",{cls:"tempvs-help",text:"Nuovo formato: Studio +14:00-16:00 -30m → quattro sessioni da 25 minuti di concentrazione + 5 di pausa. Il rapporto è sempre 5:1: -60m dà 50 + 10. Si può oltrepassare mezzanotte. È ancora supportato Studio @2h +14:00 -60m: una sessione di due ore con cicli da 60 minuti lordi. Se compili questo campo, verranno usate queste righe."});
     const lines=field(batch,"Sessioni in formato rapido").createEl("textarea",{attr:{"aria-label":"Sessioni",placeholder:"Studio +14:00-16:00 -30m\nLavoro +18:00-19:30 -45m",rows:"3"}});
     const updatePlanMode=()=>{
       const textMode=Boolean(lines.value.trim());

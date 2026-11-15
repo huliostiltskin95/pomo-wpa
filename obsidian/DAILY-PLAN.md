@@ -8,7 +8,7 @@ Personale +16:00-17:00 -60m
 Studio +18:00-20:00 -60m
 ```
 
-`-60m` è la durata lorda di ogni sessione, pause comprese. La prima riga crea due sessioni. Le impostazioni delle pause restano quelle del plugin; per le sessioni già riconosciute vengono conservate. Gli eventuali minuti insufficienti per un'altra sessione intera restano liberi e sono segnalati.
+`-60m` è la durata lorda di ogni sessione, pause comprese. La prima riga crea due sessioni. Ogni sessione ha una fase di concentrazione e una pausa finale, calcolate automaticamente in rapporto esatto 5:1: -60m → 50 + 10, -30m → 25 + 5, -45m → 37 min 30 s + 7 min 30 s. Le impostazioni generali non cambiano questo rapporto. Le sessioni future già importate vengono corrette; quelle avviate o concluse mantengono i dati originali. Gli eventuali minuti insufficienti per un'altra sessione intera restano liberi e sono segnalati.
 
 Modifica direttamente il blocco nell'editor della nota. Dopo circa 350 ms di quiete, anche prima del salvataggio automatico, le sessioni vengono aggiornate senza anteprima o conferma. Aggiunte, rimozioni e modifiche dal pannello del plugin si riflettono nello stesso blocco. Le fasce contigue equivalenti sono raggruppate. Il resto della nota non viene modificato.
 

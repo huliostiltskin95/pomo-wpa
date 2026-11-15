@@ -21,10 +21,10 @@ test('invalid and overlapping input leaves the archive unchanged',()=>{
  for(const source of ['Studio +14:00-',initial+'\nStudio +14:00-15:00 -60m'])assert.throws(()=>apply(s,source));
  assert.equal(JSON.stringify(s),before);
 });
-test('midnight round trip and pause configuration survive plain serialization',()=>{
+test('midnight round trip restores exact ratio for future sessions',()=>{
  const s=state();apply(s,'Studio +23:00-02:00 -60m');s.sessions[0].customBreakMinutes=5;
  const source=serializeDailyPlan(s.sessions,day);assert.equal(parseDailySource(source,s.defaults.simple.areas).length,3);
- apply(s,source);assert.equal(s.sessions[0].customBreakMinutes,5);
+ apply(s,source);assert.equal(s.sessions[0].customBreakMinutes,undefined);assert.equal(s.sessions[0].workMinutes,50);
 });
 test('removing completed rows preserves the archive and accepts the new plan',()=>{
  const s=state();apply(s,initial);s.sessions[0].finished=true;const id=s.sessions[0].id;const p=apply(s,'Studio +21:00-22:00 -60m');assert(p.retainedIds.includes(id));assert(s.sessions.some(x=>x.id===id));assert(!s.syncDeleted.sessions.includes(id));
@@ -96,4 +96,15 @@ test('editor-change imports complete unsaved text and updates the active daily p
 });
 test('TEMPUS spelling is accepted alongside TEMPVS',()=>{
  assert.equal(findDailyBlocks('```tempus\n'+initial+'\n```').length,1);
+});
+
+test('unchanged pre-upgrade daily binding is recalculated once on reload',async()=>{
+ const f=fixture();await f.daily.syncFile(f.file.path);
+ const key=Object.keys(f.plugin.dailyNotes)[0];delete f.plugin.dailyNotes[key].ratioVersion;
+ const ids=f.plugin.state.sessions.map(s=>s.id);
+ for(const s of f.plugin.state.sessions){delete s.cycleMinutes;s.workMinutes=25;s.breakEnabled=false;}
+ await f.daily.syncFile(f.file.path);
+ assert(f.plugin.state.sessions.every(s=>s.workMinutes===50&&s.cycleMinutes===60&&s.breakEnabled));
+ assert.deepEqual(f.plugin.state.sessions.map(s=>s.id),ids);assert.equal(f.plugin.dailyNotes[key].ratioVersion,1);
+ f.daily.destroy();
 });

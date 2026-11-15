@@ -82,7 +82,7 @@ export class DailyBlocks {
   const blockId=this.bindingId(path)||blockIdentity(context.block.source)||uid();
   this.validateBinding(blockId,path,context.date);
   const binding=this.bindings[blockId];
-  if(binding?.source===context.block.source){this.errors.delete(path);this.refresh(path);return;}
+  if(binding?.ratioVersion===1&&binding.source===context.block.source){this.errors.delete(path);this.refresh(path);return;}
   const plan=prepareDailyPlan({source:context.block.source,date:context.date,blockId,state:this.plugin.state});
   await this.commit({...context,...plan,originalSource:context.block.source,keepSource:true});
   this.errors.delete(path);
@@ -142,7 +142,7 @@ export class DailyBlocks {
      const checked=prepareDailyPlan({source:prepared.source,date:prepared.date,blockId:prepared.blockId,state:this.plugin.state,id:()=>available.shift()||uid()});
      applyDailyPlan(this.plugin.state,checked);
      this.plugin.state=normalizeArchive(this.plugin.state);
-     this.bindings[prepared.blockId]={path:prepared.file.path,date:prepared.date,source:canonical,hiddenSessionIds:checked.retainedIds,unusedMinutes:fresh.unusedMinutes};
+     this.bindings[prepared.blockId]={path:prepared.file.path,date:prepared.date,source:canonical,ratioVersion:1,hiddenSessionIds:checked.retainedIds,unusedMinutes:fresh.unusedMinutes};
     });
    }catch(error){
     if(previousBinding)this.bindings[prepared.blockId]=previousBinding;else delete this.bindings[prepared.blockId];
@@ -179,7 +179,7 @@ export class DailyBlocks {
     try{
      const context=await this.context(binding.path);if(!context)continue;
      // Edits in the note win. Never replace incomplete or unsaved user input.
-     if(context.block.source!==binding.source){this.schedule(binding.path);continue;}
+     if(binding.ratioVersion!==1||context.block.source!==binding.source){this.schedule(binding.path);continue;}
      const sessions=daySessions(this.plugin.state,binding.date,blockId).filter(s=>!binding.hiddenSessionIds?.includes(s.id));
      const body=serializeDailyPlan(sessions,binding.date);
      const source=explicitDay(binding.source)?'date: '+binding.date+'\n'+body:body;

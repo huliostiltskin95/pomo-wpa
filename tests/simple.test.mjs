@@ -185,11 +185,11 @@ test('gross pomodoro syntax schedules exactly 50:10-50:10 within two hours',asyn
  assert.equal(mergeSnapshots(restored,restored,restored).merged.sessions[0].cycleMinutes,60);
  assert.equal(measuredFocus(s,+new Date('2026-11-06T14:49:55'),+new Date('2026-11-06T14:50:05')),5);
 });
-test('gross cycles round to whole minutes, retain exact total and truncate at session end',async()=>{
+test('gross cycles keep exact 5:1 down to seconds, retain exact total and truncate at session end',async()=>{
  const {getPhase}=await import('../core/tempo-core.js');
  const req=parseQuick('Studio @70m -45m +09:00',[{name:'Studio'}]);
  const {sessions:[s]}=planSessions(req,[],[],defaults,now,id,'2026-11-06');
- assert.equal(s.workMinutes,38);
+ assert.equal(s.workMinutes,37.5);
  assert.equal(getPhase(s,new Date('2026-11-06T09:38:00')).remaining,7*60);
  assert.equal(getPhase(s,new Date('2026-11-06T09:45:00')).kind,'work');
  assert.equal(+getPhase(s,new Date('2026-11-06T09:45:00')).end,+new Date('2026-11-06T10:10:00'));
@@ -197,7 +197,7 @@ test('gross cycles round to whole minutes, retain exact total and truncate at se
  assert.deepEqual(split.sessions.map(s=>s.cycleMinutes),[45,45]);
 });
 test('invalid, duplicate and conflicting gross cycles are rejected before scheduling',()=>{
- for(const suffix of ['-0m','-1m','-289m','-1.5m','--60m','-60m -30m','-60m ~50m','~50m -60m','-60m !5m','!0m -60m'])
+ for(const suffix of ['-0m','-1440m','-1.5m','--60m','-60m -30m','-60m ~50m','~50m -60m','-60m !5m','!0m -60m'])
    assert.throws(()=>parseQuick('Studio @2h +14:00 '+suffix,[{name:'Studio'}]));
  for(const patch of [{cycleMinutes:NaN},{cycleMinutes:60,focusMinutes:50},{cycleMinutes:60,customBreakMinutes:5}])
    assert.throws(()=>planSessions([{area:'Studio',minutes:120,...patch}],[],[],defaults,now,id));

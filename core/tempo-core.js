@@ -30,7 +30,11 @@ export function clampInt(value, min, max, fallback) {
   const n = Number(value);
   return Number.isInteger(n) && n >= min && n <= max ? n : fallback;
 }
-export function pauseMinutes(work) { return Math.max(1, Math.round(work / 5)); }
+export function durationLabel(minutes) {
+  const seconds = Math.round(minutes*60), whole = Math.floor(seconds/60), rest = seconds%60;
+  return whole+' min'+(rest?' '+rest+' s':'');
+}
+export function pauseMinutes(work) { return work / 5; }
 export function normalizeSession(session) {
   if (!session || typeof session !== "object" || Array.isArray(session)) return session;
   return { ...session, breakEnabled: session.breakEnabled !== undefined ? Boolean(session.breakEnabled) : true };
@@ -39,9 +43,10 @@ export function validSession(session) {
   if (!session || typeof session.id !== "string" || !session.id.trim() ||
       typeof session.title !== "string" || !session.title.trim() ||
       typeof session.date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(session.date) ||
-      !Number.isInteger(session.workMinutes) || session.workMinutes < 1 || session.workMinutes > 240) return false;
+      !(session.cycleMinutes !== undefined && session.workMinutes === session.cycleMinutes*5/6) &&
+      (!Number.isInteger(session.workMinutes) || session.workMinutes < 1 || session.workMinutes > 240)) return false;
   if (session.cycleMinutes !== undefined &&
-      (!Number.isInteger(session.cycleMinutes) || session.cycleMinutes < 2 || session.cycleMinutes > 288 ||
+      (!Number.isInteger(session.cycleMinutes) || session.cycleMinutes < 1 || session.cycleMinutes > 1439 ||
        session.cycleMinutes <= session.workMinutes || session.customBreakMinutes !== undefined)) return false;
   const [year, month, day] = session.date.split("-").map(Number);
   const date = new Date(year, month - 1, day);
@@ -95,7 +100,7 @@ export function getPhase(session, now = new Date()) {
       progress:Math.min(100,Math.max(0,(now-phaseStart)/Math.max(1,phaseEnd-phaseStart)*100)),
       sessionEnd:end,totalRemaining:Math.max(0,Math.ceil((end-now)/1000))};
   }
-  const workMs = session.workMinutes * 60000;
+  const workMs = Math.round(session.workMinutes * 60000);
   const elapsed = Math.max(0, now - start);
   const remainingSession = Math.max(0, end - now);
   if (!session.breakEnabled) {
@@ -104,7 +109,7 @@ export function getPhase(session, now = new Date()) {
       progress: Math.min(100, elapsed / Math.max(1, end - start) * 100),
       sessionEnd: end, totalRemaining: Math.ceil(remainingSession / 1000) };
   }
-  const breakMs = (session.cycleMinutes!==undefined?session.cycleMinutes-session.workMinutes:pauseMinutes(session.workMinutes)) * 60000;
+  const breakMs = Math.round((session.cycleMinutes!==undefined?session.cycleMinutes-session.workMinutes:pauseMinutes(session.workMinutes)) * 60000);
   const cycleMs = workMs + breakMs;
   const cycleIndex = Math.floor(elapsed / cycleMs);
   const within = elapsed % cycleMs;

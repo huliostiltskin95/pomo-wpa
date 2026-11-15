@@ -1,4 +1,4 @@
-name: Publish TEMPVS Obsidian for BRAT
+name: Publish TEMPVS PWA and BRAT
 
 on:
   push:
@@ -15,8 +15,10 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release:
+  verify:
     runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - name: Check out Obsidian plugin sources
         uses: actions/checkout@v4
@@ -25,8 +27,8 @@ jobs:
           node-version: '22'
       - name: Install build dependencies
         run: npm install --no-audit --no-fund
-      - name: Build Obsidian only
-        run: npm run build:obsidian
+      - name: Build PWA and plugin from the same core
+        run: npm run build:all
       - name: Test plugin and shared core
         run: |
           npm test
@@ -36,6 +38,10 @@ jobs:
           npm install --no-save --no-package-lock playwright
           npx playwright install --with-deps chromium
           node tests/obsidian-ui.e2e.mjs
+          python3 -m http.server 8123 --bind 127.0.0.1 --directory dist/pwa >/tmp/tempvs-http.log 2>&1 &
+          node tests/simple.e2e.mjs
+          node tests/pwa-consolidation.e2e.mjs
+          node tests/timer-pip.e2e.mjs
       - name: Validate packaged files and version
         id: version
         shell: bash
@@ -53,10 +59,48 @@ jobs:
           }
           fs.appendFileSync(process.env.GITHUB_OUTPUT,'version='+plugin.version+'\n');
           NODE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ratio-pwa
+          path: dist/pwa/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ratio-plugin
+          path: obsidian/dist/
+  deploy-pwa:
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ratio-pwa
+          path: dist/pwa
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist/pwa
+      - id: deploy
+        uses: actions/deploy-pages@v4
+  publish-plugin:
+    needs: [verify, deploy-pwa]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: ratio-plugin
+          path: obsidian/dist
       - name: Publish BRAT-compatible release
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.verify.outputs.version }}
         shell: bash
         run: |
           if gh release view "$VERSION" >/dev/null 2>&1; then
@@ -65,8 +109,8 @@ jobs:
           fi
           gh release create "$VERSION" \
             obsidian/dist/main.js#main.js \
-            obsidian/manifest.json#manifest.json \
-            obsidian/styles.css#styles.css \
+            obsidian/dist/manifest.json#manifest.json \
+            obsidian/dist/styles.css#styles.css \
             --target "${{ github.sha }}" \
             --title "TEMPVS $VERSION" \
-            --notes "TEMPVS $VERSION: blocco giornaliero in testo semplice, fasce compatte, aggiornamento automatico dalla nota al plugin e dal plugin alla nota, senza preview o conferme. Protezione delle modifiche in corso e dello storico. Aggiornamento tramite BRAT."
+            --notes "Sessioni da fascia oraria con rapporto automatico esatto 5:1: -60m = 50+10, -30m = 25+5. Precisione al secondo, correzione delle sessioni future nelle note giornaliere, storico preservato. PWA e plugin pubblicati dallo stesso codice verificato."

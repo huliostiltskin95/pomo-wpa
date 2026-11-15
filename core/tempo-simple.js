@@ -1,5 +1,5 @@
 import {normalizeAreaLinks} from './tempo-areas.js';
-import {sessionBounds, localDateString, formatTime, validSession, hasSessionOverlaps, getPhase, normalizeSession, dateTime, pauseMinutes} from './tempo-core.js';
+import {sessionBounds, localDateString, formatTime, validSession, hasSessionOverlaps, getPhase, normalizeSession, dateTime, pauseMinutes, durationLabel} from './tempo-core.js';
 
 // Color values are stored with areas and survive JSON backup and Dropbox merge.
 export const DEFAULT_AREA_COLORS = Object.freeze({
@@ -14,11 +14,11 @@ export function focusCycle(focusMinutes, breakEnabled = true) {
     throw Error('La concentrazione per ciclo deve durare da 1 a 240 minuti.');
   return {focusMinutes, breakMinutes: breakEnabled ? pauseMinutes(focusMinutes) : 0};
 }
-// Gross cycle length includes both focus and its following pause (5:1, rounded to minutes).
+// Gross cycle length includes both focus and its following pause (exact 5:1; integer gross minutes give whole-second phases).
 export function grossCycle(cycleMinutes) {
-  if (!Number.isInteger(cycleMinutes) || cycleMinutes < 2 || cycleMinutes > 288)
-    throw Error('Il pomodoro lordo deve durare da 2 a 288 minuti interi.');
-  const focusMinutes=Math.min(cycleMinutes-1,Math.round(cycleMinutes*5/6));
+  if (!Number.isInteger(cycleMinutes) || cycleMinutes < 1 || cycleMinutes > 1439)
+    throw Error('Il pomodoro lordo deve durare da 1 a 1439 minuti interi.');
+  const focusMinutes=cycleMinutes*5/6;
   return {focusMinutes,breakMinutes:cycleMinutes-focusMinutes};
 }
 // A custom pause is a total budget inside the gross duration, never an extra cycle.
@@ -32,7 +32,7 @@ export function sessionPauseLabel(session) {
     const gross = Math.round((sessionBounds(session).end-sessionBounds(session).start)/60000);
     return (gross-session.customBreakMinutes)+' min focus + '+session.customBreakMinutes+' min pausa finale · '+gross+' min lordi';
   }
-  return session.workMinutes+' min focus'+(session.breakEnabled?' / '+(session.cycleMinutes!==undefined?session.cycleMinutes-session.workMinutes:pauseMinutes(session.workMinutes))+' min pausa automatica':' · senza pause');
+  return durationLabel(session.workMinutes)+' focus'+(session.breakEnabled?' / '+durationLabel(session.cycleMinutes!==undefined?session.cycleMinutes-session.workMinutes:pauseMinutes(session.workMinutes))+' pausa automatica':' · senza pause');
 }
 /**
  * The manual timer reserves gross minutes from the exact instant the user starts it.
@@ -155,7 +155,7 @@ export function parseQuick(text,areas) {
       if(each>total)throw Error('La fascia è più breve di una sessione lorda da '+each+' minuti.');
       for(let consumed=0;consumed+each<=total;consumed+=each){
         const at=from+consumed;
-        sessions.push({area:area.name,...(area.id?{areaId:area.id}:{}),minutes:each,start:timeOf(at),...(at>=1440?{dayOffset:1}:{})});
+        sessions.push({area:area.name,...(area.id?{areaId:area.id}:{}),minutes:each,cycleMinutes:each,rangeSession:true,start:timeOf(at),...(at>=1440?{dayOffset:1}:{})});
       }
       if(total%each)sessions[sessions.length-1].unusedMinutes=total%each;
       return sessions;

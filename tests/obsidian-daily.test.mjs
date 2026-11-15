@@ -37,11 +37,11 @@ test('overnight rows retain the next-day offset and leave unused minutes explici
  assert.deepEqual(next.sessions.map(s=>[s.date,s.start,s.end]),[[date,'23:50','00:20'],['2099-11-07','00:20','00:50']]);
  const added=prepare(source+'\nStudio +00:50-01:20 -30m +1d',state);assert.equal(added.sessions.at(-1).date,'2099-11-07');
 });
-test('matching existing plugin sessions adopts stable IDs and preserves custom pauses',()=>{
+test('matching future sessions adopts stable IDs and corrects pause ratio',()=>{
  let state=apply(empty(),prepare('Studio @45m +10:00 !5m'));
  delete state.sessions[0].noteBlockId;const id=state.sessions[0].id;
  const plan=prepare('Studio +10:00-10:45 -45m',state);
- assert.equal(plan.sessions[0].id,id);assert.equal(plan.sessions[0].customBreakMinutes,5);
+ assert.equal(plan.sessions[0].id,id);assert.equal(plan.sessions[0].customBreakMinutes,undefined);assert.equal(plan.sessions[0].workMinutes,37.5);
  assert.equal(plan.sessions[0].noteBlockId,blockId);
 });
 test('editing plain future rows replaces changed sessions and records deletions',()=>{
@@ -78,13 +78,13 @@ test('invalid later rows, duplicate IDs, overlaps and past new sessions are reje
  assert.throws(()=>prepare(source+'\n'+line,saved),/duplicati/);
  assert.throws(()=>prepare('Studio +10:00-10:30 -30m',empty(),{now:new Date('2099-11-07')}),/passato/);
 });
-test('range edits preserve pause settings, explicit legacy modifiers replace conflicting settings',()=>{
+test('range and legacy modifiers replace conflicting pause settings',()=>{
  let state=apply(empty(),prepare('Studio @1h +10:00 -60m'));
  const id=state.sessions[0].id;
  const plan=prepare(`Studio @45m +14:00 !5m <!-- tempvs-session:${id} -->`,state);
  assert.equal(plan.sessions[0].customBreakMinutes,5);assert.equal(plan.sessions[0].cycleMinutes,undefined);
  state=apply(state,plan);
- assert.throws(()=>prepare(`Studio +14:00-14:03 -3m <!-- tempvs-session:${id} -->`,state),/sessioni non valido/);
+ const short=prepare(`Studio +14:00-14:03 -3m <!-- tempvs-session:${id} -->`,state).sessions[0];assert.equal(short.workMinutes,2.5);assert.equal(short.customBreakMinutes,undefined);
 });
 test('timer observations do not invalidate previews and measured focus is never overwritten',()=>{
  const state=apply(empty(),prepare('Studio +10:00-10:30 -30m'));

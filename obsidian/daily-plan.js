@@ -107,7 +107,7 @@ export function prepareDailyPlan({source,date,blockId,state,now=new Date(),id=()
   if(existing?.noteBlockId&&existing.noteBlockId!==blockId)throw Error('Una sessione appartiene già a un altro blocco TEMPVS.');
   if(existing&&claimed.has(existing.id))throw Error('La stessa sessione compare due volte nel blocco.');
   if(existing&&isLocked(existing,now)){
-   if(!exact(existing)||request.cycleMinutes!==undefined&&request.cycleMinutes!==existing.cycleMinutes||request.focusMinutes!==undefined&&request.focusMinutes!==existing.workMinutes||request.customBreakMinutes!==undefined&&request.customBreakMinutes!==existing.customBreakMinutes)
+   if(!exact(existing)||!request.rangeSession&&request.cycleMinutes!==undefined&&request.cycleMinutes!==existing.cycleMinutes||request.focusMinutes!==undefined&&request.focusMinutes!==existing.workMinutes||request.customBreakMinutes!==undefined&&request.customBreakMinutes!==existing.customBreakMinutes)
     throw Error('Le sessioni già avviate o concluse non possono essere riprogrammate dalla nota.');
    candidates.push({...existing,noteBlockId:blockId});claimed.add(existing.id);continue;
   }
@@ -117,7 +117,7 @@ export function prepareDailyPlan({source,date,blockId,state,now=new Date(),id=()
    session={...existing,...session};
    if(request.cycleMinutes!==undefined)delete session.customBreakMinutes;
    if(request.focusMinutes!==undefined||request.customBreakMinutes!==undefined)delete session.cycleMinutes;
-   // Range shorthand changes the reservation; existing pause settings remain intact.
+   // Only legacy rows without a pause modifier inherit existing settings.
    if(request.cycleMinutes===undefined&&request.focusMinutes===undefined&&request.customBreakMinutes===undefined){
     for(const key of ['workMinutes','breakEnabled','cycleMinutes','customBreakMinutes'])if(existing[key]!==undefined)session[key]=existing[key];
    }
