@@ -425,11 +425,12 @@ class TempvsSettings extends PluginSettingTab {
         try{
           const next=nameInput.value.trim();
           if(!next||next.length>80||this.plugin.config.areas.some(a=>a.name!==area.name&&a.name.toLocaleLowerCase()===next.toLocaleLowerCase()))throw Error("Nome area non valido o già presente.");
+          const previous=area.name;
           await this.plugin.change(()=>{
-            const stored=this.plugin.config.areas.find(a=>a.name===area.name);
+            const stored=this.plugin.config.areas.find(a=>a.name===previous);
             if(!stored)throw Error("Area non disponibile.");
             stored.name=next;stored.color=colorInput.value;stored.description=description.value;
-            if(next!==area.name)this.plugin.remapArea(area.name,next);
+            if(next!==previous)this.plugin.remapArea(previous,next);
           });
           this.display();
           new Notice("Area aggiornata.");
