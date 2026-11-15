@@ -446,7 +446,7 @@ function findDailyBlocks(markdown2) {
     if (!fence) {
       const match = line.match(/^ {0,3}(`{3,}|~{3,})([^\r\n]*)$/);
       if (match) {
-        fence = { char: match[1][0], length: match[1].length, start: offset + lines[i].length, line: i, isTempvs: match[2].trim().toLowerCase() === "tempvs" };
+        fence = { char: match[1][0], length: match[1].length, start: offset + lines[i].length, line: i, isTempvs: /^(tempvs|tempus)$/i.test(match[2].trim()) };
       }
     } else if (new RegExp("^ {0,3}" + fence.char + "{" + fence.length + ",}\\s*$").test(line)) {
       if (fence.isTempvs) blocks.push({ start: fence.start, end: offset, lineStart: fence.line, source: markdown2.slice(fence.start, offset).replace(/\r?\n$/, "") });
@@ -547,12 +547,13 @@ function prepareDailyPlan({ source, date, blockId, state, now = /* @__PURE__ */ 
     candidates.push(session);
     claimed.add(session.id);
   }
-  const removed = owned.filter((s) => !claimed.has(s.id));
-  if (removed.some((s) => isLocked(s, now))) throw Error("Non puoi rimuovere dal blocco una sessione gi\xE0 avviata o conclusa.");
+  const omitted = owned.filter((s) => !claimed.has(s.id));
+  const retainedIds = omitted.filter((s) => isLocked(s, now)).map((s) => s.id);
+  const removed = omitted.filter((s) => !isLocked(s, now));
   const other = state.sessions.filter((s) => !claimed.has(s.id) && !removed.some((r) => r.id === s.id));
   if (hasSessionOverlaps([...other, ...candidates].filter((s) => !s.finished))) throw Error("Le righe si sovrappongono a una sessione della giornata.");
   normalizeArchive({ ...state, sessions: [...other, ...candidates] });
-  return { date, blockId, sessions: candidates, removeIds: removed.map((s) => s.id), unusedMinutes: requests.reduce((n, r) => n + (r.unusedMinutes || 0), 0), planningKey: archivePlanningKey(state), source };
+  return { date, blockId, sessions: candidates, retainedIds, removeIds: removed.map((s) => s.id), unusedMinutes: requests.reduce((n, r) => n + (r.unusedMinutes || 0), 0), planningKey: archivePlanningKey(state), source };
 }
 function applyDailyPlan(state, proposal) {
   const affected = /* @__PURE__ */ new Set([...proposal.sessions.map((s) => s.id), ...proposal.removeIds]);
@@ -595,8 +596,11 @@ var DailyBlocks = class {
     return this.plugin.dailyNotes;
   }
   start() {
-    for (const language of ["TEMPVS", "tempvs"]) this.plugin.registerMarkdownCodeBlockProcessor(language, (source, el, ctx) => ctx.addChild(new DailyBlock(el, this, ctx, source)));
+    for (const language of ["TEMPVS", "tempvs", "TEMPUS", "tempus"]) this.plugin.registerMarkdownCodeBlockProcessor(language, (source, el, ctx) => ctx.addChild(new DailyBlock(el, this, ctx, source)));
     const vault = this.plugin.app.vault;
+    if (this.plugin.app.workspace.on) this.plugin.registerEvent(this.plugin.app.workspace.on("editor-change", (_editor, view) => {
+      if (view?.file?.extension === "md") this.schedule(view.file.path);
+    }));
     if (vault?.on) {
       this.plugin.registerEvent(vault.on("modify", (file) => {
         if (file.extension === "md") this.schedule(file.path);
@@ -640,9 +644,10 @@ var DailyBlocks = class {
       this.timers.delete(path);
       this.syncFile(path).catch((error) => {
         this.errors.set(path, error.message);
+        this.plugin.refresh?.(true);
         this.refresh(path);
       });
-    }, 800));
+    }, 350));
   }
   async initialize() {
     for (const file of this.plugin.app.vault.getMarkdownFiles()) {
@@ -658,10 +663,17 @@ var DailyBlocks = class {
   bindingId(path) {
     return Object.keys(this.bindings).find((id) => this.bindings[id].path === path);
   }
+  async readMarkdown(file) {
+    for (const leaf of this.plugin.app.workspace.getLeavesOfType?.("markdown") || []) {
+      const view = leaf.view;
+      if (view?.file?.path === file.path && view.editor && view.getMode?.() !== "preview") return view.editor.getValue();
+    }
+    return this.plugin.app.vault.read(file);
+  }
   async context(path) {
     const file = this.plugin.app.vault.getAbstractFileByPath(path);
     if (!file || file.extension !== "md") throw Error("La nota Markdown non \xE8 pi\xF9 disponibile.");
-    const markdown2 = await this.plugin.app.vault.read(file), blocks = findDailyBlocks(markdown2);
+    const markdown2 = await this.readMarkdown(file), blocks = findDailyBlocks(markdown2);
     if (!blocks.length) return null;
     if (blocks.length !== 1) throw Error("Usa un solo blocco TEMPVS per nota giornaliera.");
     const block = blocks[0], date = resolveDailyDate(block.source, file, {
@@ -692,6 +704,15 @@ var DailyBlocks = class {
       const plan = prepareDailyPlan({ source: context.block.source, date: context.date, blockId, state: this.plugin.state });
       await this.commit({ ...context, ...plan, originalSource: context.block.source, keepSource: true });
       this.errors.delete(path);
+      if (this.plugin.app.workspace.getActiveFile?.()?.path === path) {
+        for (const leaf of this.plugin.app.workspace.getLeavesOfType?.("tempvs-timer") || []) {
+          if (leaf.view) {
+            leaf.view.day = context.date;
+            leaf.view.update?.(true);
+          }
+        }
+      }
+      this.plugin.refresh?.(true);
       this.refresh(path);
     });
   }
@@ -732,8 +753,13 @@ var DailyBlocks = class {
     const canonical = explicitDay(prepared.originalSource) && !explicitDay(body) ? "date: " + prepared.date + "\n" + body : body;
     const previousBinding = this.bindings[prepared.blockId];
     this.applying = true;
+    const writesNote = !prepared.keepSource || canonical !== prepared.originalSource;
     try {
-      await this.writeSource(prepared.file, prepared.blockId, prepared.originalSource, canonical, prepared.block.lineStart);
+      if (writesNote) await this.writeSource(prepared.file, prepared.blockId, prepared.originalSource, canonical, prepared.block.lineStart);
+      else {
+        const current = await this.context(prepared.file.path);
+        if (!current || current.block.source !== prepared.originalSource || current.date !== prepared.date) throw Error("La nota \xE8 cambiata durante la sincronizzazione.");
+      }
       try {
         if (archivePlanningKey(this.plugin.state) !== fresh.planningKey) throw Error("Le sessioni sono cambiate durante il salvataggio. Prepara nuovamente le modifiche.");
         await this.plugin.change(() => {
@@ -741,13 +767,13 @@ var DailyBlocks = class {
           const checked = prepareDailyPlan({ source: prepared.source, date: prepared.date, blockId: prepared.blockId, state: this.plugin.state, id: () => available.shift() || uid() });
           applyDailyPlan(this.plugin.state, checked);
           this.plugin.state = normalizeArchive(this.plugin.state);
-          this.bindings[prepared.blockId] = { path: prepared.file.path, date: prepared.date, source: canonical, unusedMinutes: fresh.unusedMinutes };
+          this.bindings[prepared.blockId] = { path: prepared.file.path, date: prepared.date, source: canonical, hiddenSessionIds: checked.retainedIds, unusedMinutes: fresh.unusedMinutes };
         });
       } catch (error) {
         if (previousBinding) this.bindings[prepared.blockId] = previousBinding;
         else delete this.bindings[prepared.blockId];
         try {
-          await this.writeSource(prepared.file, prepared.blockId, canonical, prepared.originalSource);
+          if (writesNote) await this.writeSource(prepared.file, prepared.blockId, canonical, prepared.originalSource);
         } catch {
           throw Error("Salvataggio sessioni fallito e nota modificata nel frattempo. Le righe restano nella nota: verifica e riprepara la preview. " + error.message);
         }
@@ -801,7 +827,7 @@ var DailyBlocks = class {
             this.schedule(binding.path);
             continue;
           }
-          const sessions = daySessions(this.plugin.state, binding.date, blockId);
+          const sessions = daySessions(this.plugin.state, binding.date, blockId).filter((s) => !binding.hiddenSessionIds?.includes(s.id));
           const body = serializeDailyPlan(sessions, binding.date);
           const source = explicitDay(binding.source) ? "date: " + binding.date + "\n" + body : body;
           if (source === binding.source) continue;
@@ -2198,6 +2224,7 @@ var TempvsView = class extends import_obsidian3.ItemView {
       this.day = shiftDate(this.day, 1);
       this.update(true);
     });
+    root.createDiv({ cls: "tempvs-daily-status", attr: { role: "status" } });
     root.createDiv({ cls: "tempvs-sessions" });
     const add = button(root, "+ Nuova sessione", () => this.togglePanel("create"));
     add.addClass("mod-cta", "tempvs-add-button");
@@ -2466,6 +2493,14 @@ var TempvsView = class extends import_obsidian3.ItemView {
       cloud.title = status;
       cloud.setAttribute("aria-label", status + " \u2014 Apri impostazioni");
       cloud.toggleClass("tempvs-cloud-error", /errore|error|fallit/i.test(status));
+    }
+    const dailyStatus = root.querySelector(".tempvs-daily-status");
+    if (dailyStatus) {
+      const path = plugin.app.workspace.getActiveFile?.()?.path;
+      const error = plugin.daily?.errors.get(path);
+      dailyStatus.textContent = error ? "Nota giornaliera: " + error : "";
+      dailyStatus.hidden = !error;
+      dailyStatus.toggleClass("tempvs-daily-error", Boolean(error));
     }
     if (!full) return;
     const dayLabel = root.querySelector(".tempvs-day-label");
