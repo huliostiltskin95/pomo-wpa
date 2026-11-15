@@ -9,9 +9,9 @@ var __export = (target, all) => {
 };
 var __copyProps = (to, from, except, desc) => {
   if (from && typeof from === "object" || typeof from === "function") {
-    for (let key of __getOwnPropNames(from))
-      if (!__hasOwnProp.call(to, key) && key !== except)
-        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+    for (let key2 of __getOwnPropNames(from))
+      if (!__hasOwnProp.call(to, key2) && key2 !== except)
+        __defProp(to, key2, { get: () => from[key2], enumerable: !(desc = __getOwnPropDesc(from, key2)) || desc.enumerable });
   }
   return to;
 };
@@ -164,6 +164,46 @@ function getAmbientFocusMode(sessions, now = /* @__PURE__ */ new Date()) {
   return getNextSession(sessions, now) ? "waiting" : "finished";
 }
 
+// core/tempo-areas.js
+var key = (name) => name.trim().replace(/\s+/g, " ").toLocaleLowerCase();
+var legacyId = (name) => "area:" + encodeURIComponent(key(name));
+function normalizeAreaLinks(data, areas) {
+  const names = /* @__PURE__ */ new Set(), ids = /* @__PURE__ */ new Set();
+  const normalized = areas.map((area) => {
+    const name = area.name.trim(), id = area.id ?? legacyId(name);
+    if (!name || name.length > 80 || names.has(key(name)) || typeof id !== "string" || !id || ids.has(id))
+      throw Error("Aree con nomi o identificativi duplicati/non validi.");
+    names.add(key(name));
+    ids.add(id);
+    return { ...area, id, name };
+  });
+  const collections = { sessions: data.sessions || [], tasks: data.tasks || [], history: data.history || [] };
+  const linked = {}, sessionById = new Map((data.sessions || []).map((s) => [s.id, s]));
+  for (const [collection, items] of Object.entries(collections)) {
+    linked[collection] = items.map((item) => {
+      let area = item.areaId ? normalized.find((a) => a.id === item.areaId) : null;
+      if (item.areaId && !area) area = normalized.find((a) => a.name === item.area);
+      if (item.areaId && !area) throw Error("Associazione area mancante: " + item.areaId + ". Ripristina o risolvi il conflitto tra le aree.");
+      const name = item.area || (collection === "sessions" ? item.title : collection === "history" ? sessionById.get(item.sessionId)?.area || (normalized.some((a) => a.name === item.title) ? item.title : "") : "");
+      if (!area && name) {
+        area = normalized.find((a) => key(a.name) === key(name));
+        if (!area) {
+          area = { id: legacyId(name), name: name.trim(), description: "" };
+          normalized.push(area);
+        }
+      }
+      if (!area) return { ...item };
+      return {
+        ...item,
+        areaId: area.id,
+        area: area.name,
+        ...item.title === item.area && item.area !== area.name ? { title: area.name } : {}
+      };
+    });
+  }
+  return { areas: normalized, ...linked };
+}
+
 // core/tempo-simple.js
 var DEFAULT_AREA_COLORS = Object.freeze({
   Studio: "#D65B56",
@@ -202,16 +242,20 @@ function normalizeArchive(data) {
   if (data.defaults?.workMinutes !== void 0 && (!Number.isInteger(data.defaults.workMinutes) || data.defaults.workMinutes < 1 || data.defaults.workMinutes > 240)) throw Error("Durata del ciclo non valida.");
   if (data.sessions.some((s) => (s.timerStartedAt || s.timerEndsAt) && (!Number.isFinite(+new Date(s.timerStartedAt)) || !Number.isFinite(+new Date(s.timerEndsAt)) || new Date(s.timerEndsAt) <= new Date(s.timerStartedAt)))) throw Error("Orari timer non validi.");
   const config = data.defaults?.simple || {};
-  if (config.areas && (!Array.isArray(config.areas) || config.areas.some((a) => !a || typeof a.name !== "string" || !a.name.trim() || typeof a.description !== "string"))) throw Error("Aree non valide.");
+  if (config.areas && (!Array.isArray(config.areas) || !config.areas.length || config.areas.some((a) => !a || typeof a.name !== "string" || !a.name.trim() || typeof a.description !== "string"))) throw Error("Aree non valide.");
   if (config.windows && (!Array.isArray(config.windows) || config.windows.some((w) => !validSession({ ...w, id: "window", title: "window", workMinutes: 25 })))) throw Error("Fasce non valide.");
-  if (data.history && (!Array.isArray(data.history) || data.history.some((h) => !h || typeof h.sessionId !== "string" || !Number.isFinite(h.minutes) || h.minutes < 0))) throw Error("Storico non valido.");
+  if (data.history && (!Array.isArray(data.history) || data.history.some((h) => !h || typeof h.sessionId !== "string" || !h.sessionId.trim() || !Number.isFinite(h.minutes) || h.minutes < 0))) throw Error("Storico non valido.");
+  if (data.tasks !== void 0 && (!Array.isArray(data.tasks) || data.tasks.some((t) => !t || typeof t.id !== "string" || !t.id || t.title !== void 0 && typeof t.title !== "string") || new Set(data.tasks.map((t) => t.id)).size !== data.tasks.length)) throw Error("Attivit\xE0 non valide.");
+  if (data.history && new Set(data.history.map((h) => h.sessionId)).size !== data.history.length) throw Error("Storico duplicato.");
+  if (data.syncDeleted !== void 0 && (!data.syncDeleted || ["tasks", "sessions", "history"].some((k) => data.syncDeleted[k] !== void 0 && (!Array.isArray(data.syncDeleted[k]) || data.syncDeleted[k].some((id) => typeof id !== "string" || !id))))) throw Error("Cancellazioni non valide.");
   const names = [.../* @__PURE__ */ new Set(["Studio", "Lavoro", "Personale", ...data.sessions.map((s) => s.area || s.title)])];
   const storedAreas = config.areas || names.map((name) => ({ name, description: "" }));
   const areas = storedAreas.map((area) => ({
     ...area,
     color: normalizeAreaColor(area.color ?? data.appearance?.areaColors?.[area.name], area.name)
   }));
-  return { ...data, sessions: data.sessions.map(normalizeSession), tasks: data.tasks || [], history: data.history || [], syncDeleted: data.syncDeleted || { tasks: [], sessions: [] }, defaults: { ...data.defaults, workMinutes: data.defaults?.workMinutes || 25, breakEnabled: data.defaults?.breakEnabled !== false, simple: { ...config, areas, windows: config.windows || [] } } };
+  const linked = normalizeAreaLinks(data, areas);
+  return { ...data, sessions: linked.sessions.map(normalizeSession), tasks: linked.tasks, history: linked.history, syncDeleted: { tasks: [], sessions: [], ...data.syncDeleted }, defaults: { ...data.defaults, workMinutes: data.defaults?.workMinutes || 25, breakEnabled: data.defaults?.breakEnabled !== false, simple: { ...config, areas: linked.areas.map((a) => ({ ...a, color: normalizeAreaColor(a.color, a.name) })), windows: config.windows || [] } } };
 }
 function planSessions(requests, windows, existing, defaults, now = /* @__PURE__ */ new Date(), id = () => crypto.randomUUID(), selectedDate = localDateString(now)) {
   if (!Array.isArray(requests) || !Array.isArray(windows) || !Array.isArray(existing)) throw Error("Richieste e fasce non valide.");
@@ -251,7 +295,7 @@ function planSessions(requests, windows, existing, defaults, now = /* @__PURE__ 
     const start = dateTime(selectedDate, request.start);
     if (request.dayOffset) start.setDate(start.getDate() + request.dayOffset);
     const end = new Date(+start + request.minutes * 6e4);
-    const session = { id: id(), title: request.area, area: request.area, date: localDateString(start), start: request.start, end: formatTime(end), workMinutes: cycleFor(request), breakEnabled: defaults.breakEnabled !== false, ...cycleSettings(request), actualSeconds: 0 };
+    const session = { id: id(), title: request.area, area: request.area, ...request.areaId ? { areaId: request.areaId } : {}, date: localDateString(start), start: request.start, end: formatTime(end), workMinutes: cycleFor(request), breakEnabled: defaults.breakEnabled !== false, ...cycleSettings(request), actualSeconds: 0 };
     if (!validSession(session)) throw Error("Data o orario non valido.");
     if (+start < +now) throw Error("L\u2019orario " + request.start + " \xE8 gi\xE0 passato nel giorno scelto. Cambia giorno o orario.");
     applyPause(request, [session]);
@@ -276,7 +320,7 @@ function planSessions(requests, windows, existing, defaults, now = /* @__PURE__ 
         const minutes2 = Math.min(left, Math.floor((end - start) / 6e4), 1439);
         if (minutes2 <= 0) continue;
         const finish = new Date(start + minutes2 * 6e4);
-        result.push({ id: id(), title: request.area, area: request.area, date: localDateString(new Date(start)), start: formatTime(new Date(start)), end: formatTime(finish), workMinutes: cycleFor(request), breakEnabled: defaults.breakEnabled !== false, ...cycleSettings(request), actualSeconds: 0 });
+        result.push({ id: id(), title: request.area, area: request.area, ...request.areaId ? { areaId: request.areaId } : {}, date: localDateString(new Date(start)), start: formatTime(new Date(start)), end: formatTime(finish), workMinutes: cycleFor(request), breakEnabled: defaults.breakEnabled !== false, ...cycleSettings(request), actualSeconds: 0 });
         left -= minutes2;
         if (!left) break;
       }
@@ -286,52 +330,61 @@ function planSessions(requests, windows, existing, defaults, now = /* @__PURE__ 
     remainder += left;
   }
   if (hasSessionOverlaps([...existing, ...result])) throw Error("Le sessioni si sovrappongono.");
-  return { sessions: result, remainder };
+  return { sessions: result, remainder, unusedMinutes: requests.reduce((n, r) => n + (r.unusedMinutes || 0), 0) };
 }
 function parseQuick(text, areas) {
-  return text.trim().split("\n").filter((s) => s.trim()).flatMap((line) => {
-    const input = line.trim();
-    const range = input.match(/^(.+?)\s+\+((?:[01]\d|2[0-3]):[0-5]\d)-((?:[01]\d|2[0-3]):[0-5]\d)\s+-([1-9]\d{0,3})m$/i);
-    if (range) {
-      const area2 = areas.find((a) => a.name.toLocaleLowerCase() === range[1].trim().toLocaleLowerCase());
-      if (!area2) throw Error("Area sconosciuta: " + range[1].trim() + ".");
-      const minutesOf = (time) => {
-        const [hours, minutes3] = time.split(":").map(Number);
-        return hours * 60 + minutes3;
-      };
-      const timeOf = (minutes3) => String(Math.floor(minutes3 % 1440 / 60)).padStart(2, "0") + ":" + String(minutes3 % 60).padStart(2, "0");
-      const from = minutesOf(range[2]), until = minutesOf(range[3]);
-      const total = (until - from + 1440) % 1440, each = Number(range[4]);
-      if (!total) throw Error("La fascia deve avere inizio e fine diversi.");
-      if (!Number.isInteger(each) || each < 1 || each > 1439) throw Error("La durata lorda di una sessione deve essere da 1 a 1439 minuti.");
-      const sessions = [];
-      for (let consumed = 0; consumed < total; consumed += each) {
-        const at = from + consumed;
-        sessions.push({ area: area2.name, minutes: Math.min(each, total - consumed), start: timeOf(at), ...at >= 1440 ? { dayOffset: 1 } : {} });
+  return text.split("\n").flatMap((line, index) => {
+    if (!line.trim()) return [];
+    try {
+      const input = line.trim();
+      const range = input.match(/^(.+?)\s+\+\s*((?:[01]\d|2[0-3]):[0-5]\d)\s*-\s*((?:[01]\d|2[0-3]):[0-5]\d)\s+-\s*(\d+(?:[.,]\d+)?)\s*(m|h)$/i);
+      if (range) {
+        const area2 = areas.find((a) => a.name.trim().replace(/\s+/g, " ").toLocaleLowerCase() === range[1].trim().replace(/\s+/g, " ").toLocaleLowerCase());
+        if (!area2) throw Error("Area sconosciuta: " + range[1].trim() + ".");
+        const minutesOf = (time) => {
+          const [hours, minutes3] = time.split(":").map(Number);
+          return hours * 60 + minutes3;
+        };
+        const timeOf = (minutes3) => String(Math.floor(minutes3 % 1440 / 60)).padStart(2, "0") + ":" + String(minutes3 % 60).padStart(2, "0");
+        const from = minutesOf(range[2]), until = minutesOf(range[3]);
+        const total = (until - from + 1440) % 1440, value = Number(range[4].replace(",", ".")) * (range[5].toLowerCase() === "h" ? 60 : 1);
+        const each = Math.round(value);
+        if (Math.abs(value - each) > 1e-9) throw Error("La durata lorda deve corrispondere a minuti interi.");
+        if (!total) throw Error("La fascia deve avere inizio e fine diversi.");
+        if (!Number.isInteger(each) || each < 1 || each > 1439) throw Error("La durata lorda di una sessione deve essere da 1 a 1439 minuti.");
+        const sessions = [];
+        if (each > total) throw Error("La fascia \xE8 pi\xF9 breve di una sessione lorda da " + each + " minuti.");
+        for (let consumed = 0; consumed + each <= total; consumed += each) {
+          const at = from + consumed;
+          sessions.push({ area: area2.name, ...area2.id ? { areaId: area2.id } : {}, minutes: each, start: timeOf(at), ...at >= 1440 ? { dayOffset: 1 } : {} });
+        }
+        if (total % each) sessions[sessions.length - 1].unusedMinutes = total % each;
+        return sessions;
       }
-      return sessions;
+      const match = input.match(/^(.+?)\s+@(\d+(?:[.,]\d+)?)\s*(h|min|m)(.*)$/i);
+      if (!match) throw Error("Usa: Studio +14:00-16:00 -30m oppure Studio @2h +14:00 -60m.");
+      const area = areas.find((a) => a.name.toLocaleLowerCase() === match[1].trim().toLocaleLowerCase());
+      const minutes2 = Math.round(Number(match[2].replace(",", ".")) * (match[3].toLowerCase() === "h" ? 60 : 1));
+      if (!area || minutes2 < 1 || minutes2 > 10080) throw Error("Controlla area e durata lorda (da 1 minuto a 168 ore).");
+      let start, focusMinutes, customBreakMinutes, cycleMinutes;
+      for (const token of match[4].trim().split(/\s+/).filter(Boolean)) {
+        if (/^\+([01]\d|2[0-3]):[0-5]\d$/.test(token) && !start)
+          start = token.slice(1);
+        else if (/^~\d{1,3}m?$/i.test(token) && focusMinutes === void 0)
+          focusMinutes = focusCycle(Number(token.slice(1).replace(/m$/i, ""))).focusMinutes;
+        else if (/^-\d{1,3}m?$/i.test(token) && cycleMinutes === void 0) {
+          cycleMinutes = Number(token.slice(1).replace(/m$/i, ""));
+          grossCycle(cycleMinutes);
+        } else if (/^!\d{1,4}m?$/i.test(token) && customBreakMinutes === void 0)
+          customBreakMinutes = customPause(Number(token.slice(1).replace(/m$/i, "")), minutes2);
+        else throw Error("Opzione non valida: " + token + ". Usa +HH:MM, -60m (pomodoro lordo), ~40m (focus) o !5m (pausa finale).");
+      }
+      if (cycleMinutes !== void 0 && (focusMinutes !== void 0 || customBreakMinutes !== void 0))
+        throw Error("Non combinare -minuti con ~focus o !pausa finale.");
+      return [{ area: area.name, ...area.id ? { areaId: area.id } : {}, minutes: minutes2, ...cycleMinutes !== void 0 ? { cycleMinutes } : {}, ...start ? { start } : {}, ...focusMinutes !== void 0 ? { focusMinutes } : {}, ...customBreakMinutes !== void 0 ? { customBreakMinutes } : {} }];
+    } catch (error) {
+      throw Error("Riga " + (index + 1) + ": " + error.message);
     }
-    const match = input.match(/^(.+?)\s+@(\d+(?:[.,]\d+)?)\s*(h|min|m)(.*)$/i);
-    if (!match) throw Error("Usa: Studio +14:00-16:00 -30m oppure Studio @2h +14:00 -60m.");
-    const area = areas.find((a) => a.name.toLocaleLowerCase() === match[1].trim().toLocaleLowerCase());
-    const minutes2 = Math.round(Number(match[2].replace(",", ".")) * (match[3].toLowerCase() === "h" ? 60 : 1));
-    if (!area || minutes2 < 1 || minutes2 > 10080) throw Error("Controlla area e durata lorda (da 1 minuto a 168 ore).");
-    let start, focusMinutes, customBreakMinutes, cycleMinutes;
-    for (const token of match[4].trim().split(/\s+/).filter(Boolean)) {
-      if (/^\+([01]\d|2[0-3]):[0-5]\d$/.test(token) && !start)
-        start = token.slice(1);
-      else if (/^~\d{1,3}m?$/i.test(token) && focusMinutes === void 0)
-        focusMinutes = focusCycle(Number(token.slice(1).replace(/m$/i, ""))).focusMinutes;
-      else if (/^-\d{1,3}m?$/i.test(token) && cycleMinutes === void 0) {
-        cycleMinutes = Number(token.slice(1).replace(/m$/i, ""));
-        grossCycle(cycleMinutes);
-      } else if (/^!\d{1,4}m?$/i.test(token) && customBreakMinutes === void 0)
-        customBreakMinutes = customPause(Number(token.slice(1).replace(/m$/i, "")), minutes2);
-      else throw Error("Opzione non valida: " + token + ". Usa +HH:MM, -60m (pomodoro lordo), ~40m (focus) o !5m (pausa finale).");
-    }
-    if (cycleMinutes !== void 0 && (focusMinutes !== void 0 || customBreakMinutes !== void 0))
-      throw Error("Non combinare -minuti con ~focus o !pausa finale.");
-    return [{ area: area.name, minutes: minutes2, ...cycleMinutes !== void 0 ? { cycleMinutes } : {}, ...start ? { start } : {}, ...focusMinutes !== void 0 ? { focusMinutes } : {}, ...customBreakMinutes !== void 0 ? { customBreakMinutes } : {} }];
   });
 }
 function measuredFocus(session, from, to) {
@@ -350,7 +403,7 @@ function measuredFocus(session, from, to) {
 
 // core/tempo-merge.js
 var absent = Symbol("missing");
-var has = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
+var has = (obj, key2) => Object.prototype.hasOwnProperty.call(obj, key2);
 var same = (a, b) => a === absent || b === absent ? a === b : JSON.stringify(a) === JSON.stringify(b);
 var object = (v) => v !== null && v !== absent && typeof v === "object" && !Array.isArray(v);
 var snapshotList = (state, collection) => Array.isArray(state?.[collection]) ? state[collection] : [];
@@ -373,15 +426,15 @@ var choiceLabel = (section, id, field) => {
 function mergeSnapshots(base, local, remote, choices = {}) {
   if (!local || !remote) throw Error("Entrambi gli archivi sono necessari.");
   const conflicts = [];
-  const chosen = (key, section, label, left, right, options = null) => {
+  const chosen = (key2, section, label, left, right, options = null) => {
     const optionsList = options || [
       { value: "local", label: "Conserva questo dispositivo" },
       { value: "remote", label: "Conserva Dropbox" }
     ];
-    const value = choices[key];
+    const value = choices[key2];
     if (optionsList.some((option) => option.value === value)) return value;
     conflicts.push({
-      key,
+      key: key2,
       section,
       label,
       options: optionsList,
@@ -398,7 +451,7 @@ function mergeSnapshots(base, local, remote, choices = {}) {
     if (object(value)) return String(value.title || value.date || "Dati modificati").slice(0, 160);
     return String(value);
   }
-  const field = (baseValue, localValue, remoteValue, key, section, label) => {
+  const field = (baseValue, localValue, remoteValue, key2, section, label) => {
     if (same(localValue, remoteValue)) return localValue;
     if (baseValue === absent && (localValue === absent || remoteValue === absent))
       return localValue === absent ? remoteValue : localValue;
@@ -418,7 +471,7 @@ function mergeSnapshots(base, local, remote, choices = {}) {
           object(baseValue) && has(baseValue, property) ? baseValue[property] : absent,
           has(localValue, property) ? localValue[property] : absent,
           has(remoteValue, property) ? remoteValue[property] : absent,
-          key + "." + property,
+          key2 + "." + property,
           section,
           label + " \xB7 " + property
         );
@@ -426,7 +479,7 @@ function mergeSnapshots(base, local, remote, choices = {}) {
       }
       return output;
     }
-    const answer = chosen(key, section, label, localValue, remoteValue);
+    const answer = chosen(key2, section, label, localValue, remoteValue);
     return answer === "remote" ? remoteValue : localValue;
   };
   const merged = {
@@ -449,7 +502,7 @@ function mergeSnapshots(base, local, remote, choices = {}) {
       "Aspetto"
     )
   };
-  const finalDeleted = { tasks: /* @__PURE__ */ new Set(), sessions: /* @__PURE__ */ new Set() };
+  const finalDeleted = { tasks: /* @__PURE__ */ new Set(), sessions: /* @__PURE__ */ new Set(), history: /* @__PURE__ */ new Set() };
   function collection(name) {
     const b = mapById(snapshotList(base, name), name);
     const l = mapById(snapshotList(local, name), name);
@@ -459,7 +512,9 @@ function mergeSnapshots(base, local, remote, choices = {}) {
       ...b.keys(),
       ...l.keys(),
       ...r.keys(),
-      ...name === "history" ? [] : [...bDel, ...lDel, ...rDel]
+      ...bDel,
+      ...lDel,
+      ...rDel
     ]);
     const out = [];
     for (const id of allIds) {
@@ -469,37 +524,59 @@ function mergeSnapshots(base, local, remote, choices = {}) {
       let result = absent;
       if (lp && rp) {
         if ((lDel.has(id) || rDel.has(id)) && !bp) {
-          const key = name + ":" + id + ":delete";
-          const answer = chosen(key, name, label + " \xB7 eliminazione", lv, rv);
+          const key2 = name + ":" + id + ":delete";
+          const answer = chosen(key2, name, label + " \xB7 eliminazione", lv, rv);
           result = answer === "remote" ? rv : lv;
         } else result = field(bv, lv, rv, name + ":" + id, name, label);
       } else if (lp || rp) {
         const present = lp ? lv : rv;
-        const missingIsDeletion = bp || (lp ? rDel.has(id) : lDel.has(id));
-        if (!missingIsDeletion || name === "history") result = present;
-        else if (bp && same(present, bv)) result = absent;
+        const explicitDeletion = lp ? rDel.has(id) : lDel.has(id);
+        const missingIsDeletion = name !== "history" && bp || explicitDeletion;
+        if (!missingIsDeletion) result = present;
+        else if (bp && same(present, bv) || name === "history" && explicitDeletion && !bp) result = absent;
         else {
-          const key = name + ":" + id + ":exists";
-          const answer = chosen(key, name, label + " \xB7 modifica o eliminazione", lv, rv);
+          const key2 = name + ":" + id + ":exists";
+          const answer = chosen(key2, name, label + " \xB7 modifica o eliminazione", lv, rv);
           result = answer === "remote" ? rv : lv;
         }
       }
       if (result !== absent) out.push(result);
-      else if (name !== "history" && (bp || lDel.has(id) || rDel.has(id))) finalDeleted[name].add(id);
+      else if (bp || lDel.has(id) || rDel.has(id)) finalDeleted[name].add(id);
     }
     return out;
   }
   merged.tasks = collection("tasks");
   merged.sessions = collection("sessions");
   merged.history = collection("history");
+  if (merged.defaults !== absent) merged.defaults = JSON.parse(JSON.stringify(merged.defaults));
+  const areas = merged.defaults?.simple?.areas;
+  if (Array.isArray(areas)) {
+    const missing = /* @__PURE__ */ new Map();
+    for (const name of ["sessions", "tasks", "history"]) for (const item of merged[name]) {
+      if (item.areaId && !areas.some((a) => a.id === item.areaId || a.name === item.area)) missing.set(item.areaId, item.area);
+    }
+    for (const [id, name] of missing) {
+      const source = [local, remote, base].flatMap((state) => state?.defaults?.simple?.areas || []).find((a) => a.id === id);
+      if (!source) throw Error("Area associata non disponibile: " + name);
+      const answer = chosen("areas:" + id + ":exists", "areas", "Area eliminata con elementi modificati \xB7 " + name, absent, source, [
+        { value: "restore", label: "Ripristina l\u2019area e conserva gli elementi" },
+        { value: "delete", label: "Elimina gli elementi collegati all\u2019area" }
+      ]);
+      if (answer === "restore") areas.push(source);
+      else if (answer === "delete") for (const collection2 of ["sessions", "tasks", "history"]) {
+        for (const item of merged[collection2]) if (item.areaId === id) finalDeleted[collection2].add(collection2 === "history" ? item.sessionId : item.id);
+        merged[collection2] = merged[collection2].filter((item) => item.areaId !== id);
+      }
+    }
+  }
   const active = new Map(merged.sessions.map((s) => [s.id, s]));
   const sorted = [...active.values()].sort((a, b) => String(a.id).localeCompare(String(b.id)));
   for (let i = 0; i < sorted.length; i++) for (let j = i + 1; j < sorted.length; j++) {
     const a = sorted[i], b = sorted[j];
     if (!active.has(a.id) || !active.has(b.id)) continue;
     if (!isOverlap(a, b)) continue;
-    const key = "overlap:" + [a.id, b.id].sort().join(":");
-    const decision = chosen(key, "sessions", "Sessioni sovrapposte \xB7 " + a.date + " " + a.start + "\u2013" + a.end + " (" + a.title + ") / " + b.date + " " + b.start + "\u2013" + b.end + " (" + b.title + ")", a, b, [
+    const key2 = "overlap:" + [a.id, b.id].sort().join(":");
+    const decision = chosen(key2, "sessions", "Sessioni sovrapposte \xB7 " + a.date + " " + a.start + "\u2013" + a.end + " (" + a.title + ") / " + b.date + " " + b.start + "\u2013" + b.end + " (" + b.title + ")", a, b, [
       { value: a.id, label: "Conserva " + a.title + " \xB7 " + a.start + "\u2013" + a.end },
       { value: b.id, label: "Conserva " + b.title + " \xB7 " + b.start + "\u2013" + b.end }
     ]);
@@ -523,7 +600,8 @@ function mergeSnapshots(base, local, remote, choices = {}) {
   for (const s of merged.sessions) finalDeleted.sessions.delete(s.id);
   merged.syncDeleted = {
     tasks: [...finalDeleted.tasks].sort(),
-    sessions: [...finalDeleted.sessions].sort()
+    sessions: [...finalDeleted.sessions].sort(),
+    ...finalDeleted.history.size ? { history: [...finalDeleted.history].sort() } : {}
   };
   return { merged, conflicts };
 }
@@ -563,6 +641,8 @@ async function fail(response) {
   }
   const error = new Error("Dropbox HTTP " + response.status + " " + body.slice(0, 250));
   error.status = response.status;
+  const retryAfter = Number(response.headers?.get?.("Retry-After"));
+  if (Number.isFinite(retryAfter) && retryAfter > 0) error.retryAfter = retryAfter * 1e3;
   throw error;
 }
 function createDropboxSync({ getState, applyRemote, normalizeRemote, onStatus, resolveConflicts, platform = {} }) {
@@ -575,7 +655,14 @@ function createDropboxSync({ getState, applyRemote, normalizeRemote, onStatus, r
   const request = async (...args) => {
     const epoch = generation;
     assertCurrent(epoch);
-    const response = await rawRequest(...args);
+    let response;
+    try {
+      response = await rawRequest(...args);
+    } catch (error) {
+      assertCurrent(epoch);
+      error.retryable = true;
+      throw error;
+    }
     assertCurrent(epoch);
     const body = (method) => async () => {
       const value = await response[method]();
@@ -600,7 +687,7 @@ function createDropboxSync({ getState, applyRemote, normalizeRemote, onStatus, r
   const navigate = (url) => platform.navigate ? platform.navigate(url) : location.assign(url);
   const clearCallback = () => platform.clearCallback ? platform.clearCallback() : history.replaceState({}, document.title, redirectUri() + location.hash);
   let auth = read(AUTH_KEY), meta = read(META_KEY, { rev: null, dirty: false, ready: false });
-  let inFlight = null, delay = null, overridePending = false, retryCount = 0, eventsAttached = false;
+  let inFlight = null, delay = null, overridePending = false, retryCount = 0, eventsAttached = false, phase = "idle";
   const syncState = (data) => ({
     sessions: data?.sessions || [],
     tasks: data?.tasks || [],
@@ -609,7 +696,8 @@ function createDropboxSync({ getState, applyRemote, normalizeRemote, onStatus, r
     appearance: data?.appearance || {},
     syncDeleted: {
       tasks: data?.syncDeleted?.tasks || [],
-      sessions: data?.syncDeleted?.sessions || []
+      sessions: data?.syncDeleted?.sessions || [],
+      ...data?.syncDeleted?.history?.length ? { history: data.syncDeleted.history } : {}
     }
   });
   const stateJSON = (data) => JSON.stringify(syncState(data));
@@ -624,7 +712,10 @@ function createDropboxSync({ getState, applyRemote, normalizeRemote, onStatus, r
       data: { app: "TEMPVS", version: 5, ...local }
     });
   };
-  const status = (message, phase = "idle") => !disposed && onStatus(message, { connected: Boolean(auth.refreshToken), dirty: meta.dirty, ready: meta.ready, lastSyncedAt: meta.lastSyncedAt || null, recoveryAvailable: Boolean(recovery()), phase, busy: ["checking", "uploading", "downloading", "merging"].includes(phase) });
+  const status = (message, nextPhase = "idle") => {
+    phase = nextPhase;
+    return !disposed && onStatus(message, { connected: Boolean(auth.refreshToken), dirty: meta.dirty, ready: meta.ready, lastSyncedAt: meta.lastSyncedAt || null, recoveryAvailable: Boolean(recovery()), phase, busy: ["checking", "uploading", "downloading", "merging"].includes(phase) });
+  };
   const storeMeta = () => write(META_KEY, meta);
   const storeAuth = () => write(AUTH_KEY, auth);
   const snapshot = (data = current()) => ({
@@ -643,10 +734,10 @@ function createDropboxSync({ getState, applyRemote, normalizeRemote, onStatus, r
     }, wait);
   };
   const handleSyncError = (error) => {
-    const retryable = !error.status || error.status === 409 || error.status === 429 || error.status >= 500;
+    const retryable = error.retryable || error.status === 409 || error.status === 429 || error.status >= 500;
     if (retryable && !disposed && !overridePending && meta.ready && auth.refreshToken) {
       retryCount = Math.min(retryCount + 1, 6);
-      const wait = Math.min(5e3 * 2 ** (retryCount - 1), 12e4);
+      const wait = Math.max(error.retryAfter || 0, Math.min(5e3 * 2 ** (retryCount - 1), 12e4));
       status(error.message + " \xB7 nuovo tentativo automatico fra " + Math.round(wait / 1e3) + " s", "error");
       queueSync(wait);
     } else status(error.message, "error");
@@ -687,7 +778,7 @@ function createDropboxSync({ getState, applyRemote, normalizeRemote, onStatus, r
     const form = new URLSearchParams({ code, grant_type: "authorization_code", client_id: stored.appKey, code_verifier: stored.verifier });
     const res = await fail(await request(API + "/oauth2/token", { method: "POST", body: form }));
     const data = await res.json();
-    if (!data.refresh_token) throw Error("Dropbox non ha restituito un refresh token.");
+    if (!data.refresh_token || !data.access_token || !Number.isFinite(data.expires_in) || data.expires_in <= 0) throw Error("Credenziali OAuth Dropbox incomplete o non valide.");
     auth = { appKey: stored.appKey, refreshToken: data.refresh_token, accessToken: data.access_token, expiresAt: Date.now() + data.expires_in * 1e3 - 6e4 };
     transientStorage.removeItem("tempo-dropbox-pkce");
     storeAuth();
@@ -709,7 +800,7 @@ function createDropboxSync({ getState, applyRemote, normalizeRemote, onStatus, r
     const form = new URLSearchParams({ code, grant_type: "authorization_code", client_id: stored.appKey, code_verifier: stored.verifier, redirect_uri: redirectUri() });
     const res = await fail(await request(API + "/oauth2/token", { method: "POST", body: form }));
     const data = await res.json();
-    if (!data.refresh_token) throw new Error("Dropbox non ha restituito un refresh token.");
+    if (!data.refresh_token || !data.access_token || !Number.isFinite(data.expires_in) || data.expires_in <= 0) throw new Error("Credenziali OAuth Dropbox incomplete o non valide.");
     auth = { appKey: stored.appKey, refreshToken: data.refresh_token, accessToken: data.access_token, expiresAt: Date.now() + data.expires_in * 1e3 - 6e4 };
     storeAuth();
     meta = { rev: null, dirty: meta.dirty, ready: false };
@@ -723,6 +814,7 @@ function createDropboxSync({ getState, applyRemote, normalizeRemote, onStatus, r
     if (auth.accessToken && Date.now() < auth.expiresAt) return auth.accessToken;
     const res = await fail(await request(API + "/oauth2/token", { method: "POST", body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: auth.refreshToken, client_id: auth.appKey }) }));
     const data = await res.json();
+    if (!data.access_token || !Number.isFinite(data.expires_in) || data.expires_in <= 0) throw Error("Risposta di rinnovo Dropbox non valida.");
     auth.accessToken = data.access_token;
     auth.expiresAt = Date.now() + data.expires_in * 1e3 - 6e4;
     storeAuth();
@@ -735,14 +827,16 @@ function createDropboxSync({ getState, applyRemote, normalizeRemote, onStatus, r
       if (JSON.stringify(err).includes("not_found")) return null;
     }
     await fail(response);
-    return response.json();
+    const data = await response.json();
+    if (typeof data.rev !== "string" || !data.rev) throw Error("Metadati Dropbox non validi: revisione assente.");
+    return data;
   }
   async function download() {
     const response = await fail(await request(CONTENT + "/2/files/download", { method: "POST", headers: { "Authorization": "Bearer " + await token(), "Dropbox-API-Arg": JSON.stringify({ path: FILE }) } }));
     const file = await response.json();
-    if (!file || !Array.isArray(file.sessions) || !Array.isArray(file.tasks) || !Array.isArray(file.history)) throw new Error("Il backup Dropbox non \xE8 valido.");
+    if (!file || !Array.isArray(file.sessions) || file.tasks !== void 0 && !Array.isArray(file.tasks) || file.history !== void 0 && !Array.isArray(file.history)) throw new Error("Il backup Dropbox non \xE8 valido.");
     const info2 = JSON.parse(response.headers.get("Dropbox-API-Result") || "{}");
-    if (!info2.rev) throw new Error("Revisione Dropbox assente.");
+    if (typeof info2.rev !== "string" || !info2.rev) throw new Error("Revisione Dropbox assente.");
     return { file: normalizeRemote ? normalizeRemote(file) : syncState(file), rev: info2.rev };
   }
   async function upload(expectedRev, data = current()) {
@@ -752,10 +846,14 @@ function createDropboxSync({ getState, applyRemote, normalizeRemote, onStatus, r
       "Dropbox-API-Arg": JSON.stringify({ path: FILE, mode, autorename: false, strict_conflict: true, mute: true }),
       "Content-Type": "application/octet-stream"
     }, body: JSON.stringify(snapshot(data)) });
-    if (response.status === 409) throw new Error("Dropbox \xE8 cambiato durante la sincronizzazione. Riprova l'unione; nessun archivio locale \xE8 stato sostituito.");
+    if (response.status === 409) {
+      const error = new Error("Dropbox \xE8 cambiato durante la sincronizzazione. Riprova l'unione; nessun archivio locale \xE8 stato sostituito.");
+      error.status = 409;
+      throw error;
+    }
     await fail(response);
     const info2 = await response.json();
-    if (!info2.rev) throw new Error("Dropbox non ha restituito una revisione del backup.");
+    if (typeof info2.rev !== "string" || !info2.rev) throw new Error("Dropbox non ha restituito una revisione del backup.");
     return info2.rev;
   }
   function synced(data, rev) {
@@ -792,7 +890,7 @@ function createDropboxSync({ getState, applyRemote, normalizeRemote, onStatus, r
     if (result.conflicts.length && !manual) {
       meta.dirty = true;
       storeMeta();
-      status(result.conflicts.length + " conflitti da risolvere: usa \xABUnisci e sincronizza\xBB.", "error");
+      status(result.conflicts.length + " conflitti da risolvere: usa \xABUnisci archivi\xBB.", "conflict");
       return false;
     }
     let rounds = 0;
@@ -826,6 +924,7 @@ function createDropboxSync({ getState, applyRemote, normalizeRemote, onStatus, r
       meta.dirty = true;
       storeMeta();
       status("Backup unificato caricato, ma i dati locali sono cambiati: nuova unione necessaria.", "pending");
+      queueSync();
       return true;
     }
     await applyRemote(merged);
@@ -835,35 +934,46 @@ function createDropboxSync({ getState, applyRemote, normalizeRemote, onStatus, r
     return true;
   }
   async function firstSync(direction) {
-    const epoch = generation;
-    if (!auth.refreshToken) throw new Error("Collega prima Dropbox.");
-    if (meta.ready) throw new Error("Sincronizzazione gi\xE0 inizializzata.");
-    if (!isOnline()) throw new Error("Connessione assente.");
     if (direction === "merge") return mergeNow();
-    status("Verifica del backup Dropbox in corso\u2026", "checking");
-    const remote = await metadata();
-    if (direction === "download") {
-      if (!remote) throw new Error("Nessun backup presente su Dropbox.");
-      status("Scaricamento del backup Dropbox\u2026", "downloading");
-      const before = current();
-      const item = await download();
-      if (stateJSON(current()) !== stateJSON(before))
-        throw new Error("I dati locali sono cambiati durante il download. Riprova.");
-      backupBeforeReplacement(item.file);
-      await applyRemote(item.file);
-      assertCurrent(epoch);
-      synced(item.file, item.rev);
-      return;
+    if (overridePending) throw Error("Un'altra operazione manuale \xE8 in corso.");
+    overridePending = true;
+    clearTimeout(delay);
+    try {
+      const epoch = generation;
+      if (!auth.refreshToken) throw new Error("Collega prima Dropbox.");
+      if (meta.ready) throw new Error("Sincronizzazione gi\xE0 inizializzata.");
+      if (!isOnline()) throw new Error("Connessione assente.");
+      status("Verifica del backup Dropbox in corso\u2026", "checking");
+      const remote = await metadata();
+      if (direction === "download") {
+        if (!remote) throw new Error("Nessun backup presente su Dropbox.");
+        status("Scaricamento del backup Dropbox\u2026", "downloading");
+        const before = current();
+        const item = await download();
+        if (stateJSON(current()) !== stateJSON(before))
+          throw new Error("I dati locali sono cambiati durante il download. Riprova.");
+        backupBeforeReplacement(item.file);
+        await applyRemote(item.file);
+        assertCurrent(epoch);
+        synced(item.file, item.rev);
+        return;
+      }
+      if (direction === "upload") {
+        if (remote) throw new Error("Dropbox contiene gi\xE0 un backup. Usa \xABUnisci gli archivi\xBB.");
+        const local = current();
+        status("Caricamento del primo backup Dropbox\u2026", "uploading");
+        const rev = await upload(null, local);
+        synced(local, rev);
+        return;
+      }
+      throw new Error("Operazione iniziale non riconosciuta.");
+    } catch (error) {
+      status(error.message, "error");
+      throw error;
+    } finally {
+      overridePending = false;
+      if (!disposed && meta.dirty && meta.ready) queueSync();
     }
-    if (direction === "upload") {
-      if (remote) throw new Error("Dropbox contiene gi\xE0 un backup. Usa \xABUnisci gli archivi\xBB.");
-      const local = current();
-      status("Caricamento del primo backup Dropbox\u2026", "uploading");
-      const rev = await upload(null, local);
-      synced(local, rev);
-      return;
-    }
-    throw new Error("Operazione iniziale non riconosciuta.");
   }
   async function sync() {
     if (disposed || overridePending) return;
@@ -980,6 +1090,7 @@ function createDropboxSync({ getState, applyRemote, normalizeRemote, onStatus, r
       throw e;
     } finally {
       overridePending = false;
+      if (!disposed && meta.dirty && meta.ready) queueSync();
     }
   }
   async function forceDownload(allowDirty = false) {
@@ -1003,6 +1114,7 @@ function createDropboxSync({ getState, applyRemote, normalizeRemote, onStatus, r
       status("Archivio Dropbox scaricato.");
     } finally {
       overridePending = false;
+      if (!disposed && meta.dirty && meta.ready) queueSync();
     }
   }
   function disconnect() {
@@ -1028,7 +1140,7 @@ function createDropboxSync({ getState, applyRemote, normalizeRemote, onStatus, r
     }
   }
   function info() {
-    return { connected: Boolean(auth.refreshToken), ready: meta.ready, dirty: meta.dirty, lastSyncedAt: meta.lastSyncedAt || null, recoveryAvailable: Boolean(recovery()) };
+    return { phase, connected: Boolean(auth.refreshToken), ready: meta.ready, dirty: meta.dirty, lastSyncedAt: meta.lastSyncedAt || null, recoveryAvailable: Boolean(recovery()) };
   }
   async function init() {
     if (!eventsAttached) {
@@ -1064,8 +1176,8 @@ async function dropboxRequest(url, options = {}) {
     status: response.status,
     ok: response.status >= 200 && response.status < 300,
     headers: { get(name) {
-      const key = Object.keys(response.headers || {}).find((k) => k.toLowerCase() === name.toLowerCase());
-      return key ? response.headers[key] : null;
+      const key2 = Object.keys(response.headers || {}).find((k) => k.toLowerCase() === name.toLowerCase());
+      return key2 ? response.headers[key2] : null;
     } },
     text: async () => response.text,
     json: async () => JSON.parse(response.text)
@@ -1177,9 +1289,9 @@ function noteLinks(description = "") {
       }
     } else if (target.includes("://")) return;
     if (!target) return;
-    const key = target.toLowerCase();
-    if (seen.has(key)) return;
-    seen.add(key);
+    const key2 = target.toLowerCase();
+    if (seen.has(key2)) return;
+    seen.add(key2);
     found.push({ path: target, label: String(label || target).trim() || target });
   };
   for (const m of String(description).matchAll(wiki)) {
@@ -1492,13 +1604,13 @@ function renderCloudSettings(parent, plugin) {
   const status = cloud.createEl("p", { cls: "tempvs-cloud-status", text: plugin.cloudMessage || "Non collegato" });
   status.setAttribute("role", "status");
   if (plugin.cloudInfo?.lastSyncedAt) cloud.createEl("p", { cls: "tempvs-muted", text: "Ultimo controllo Dropbox riuscito: " + new Date(plugin.cloudInfo.lastSyncedAt).toLocaleString("it-IT") });
-  const key = cloud.createEl("input", { attr: { "aria-label": "Dropbox App key", placeholder: "App key Dropbox" } });
+  const key2 = cloud.createEl("input", { attr: { "aria-label": "Dropbox App key", placeholder: "App key Dropbox" } });
   const link = cloud.createEl("a", { text: "Apri autorizzazione Dropbox", href: "#", cls: "tempvs-cloud-link" });
   link.hidden = true;
   link.setAttribute("target", "_blank");
   link.setAttribute("rel", "noopener noreferrer");
   button(cloud, "1. Autorizza su Dropbox", async () => {
-    const url = await plugin.cloud.connect(key.value);
+    const url = await plugin.cloud.connect(key2.value);
     link.href = url;
     link.hidden = false;
     await plugin.persist();
