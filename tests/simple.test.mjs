@@ -208,3 +208,43 @@ test('scheduler rejects malformed requests even when no window can fit them',()=
  for(const request of [null,{}, {area:'Studio',minutes:NaN},{area:'Studio',minutes:0},{area:'Studio',minutes:1.5},{area:'Studio',minutes:10081},{area:' ',minutes:30},{area:'Studio',minutes:30,start:''},{area:'Studio',minutes:30,start:'25:00'}])
    assert.throws(()=>planSessions([request],[],[],defaults,now,id));
 });
+
+
+test('text range generates independent gross sessions and preserves the old syntax',()=>{
+  const areas=[{name:'Studio'}];
+  const requests=parseQuick('Studio +14:00-16:00 -30m',areas);
+  assert.deepEqual(requests.map(({area,minutes,start})=>[area,minutes,start]),[
+    ['Studio',30,'14:00'],['Studio',30,'14:30'],['Studio',30,'15:00'],['Studio',30,'15:30']
+  ]);
+  const planned=planSessions(requests,[],[],defaults,now,id,'2026-11-06');
+  assert.equal(planned.remainder,0);
+  assert.deepEqual(planned.sessions.map(s=>[s.start,s.end]),[
+    ['14:00','14:30'],['14:30','15:00'],['15:00','15:30'],['15:30','16:00']
+  ]);
+  assert(planned.sessions.every(s=>s.workMinutes===25 && s.breakEnabled));
+  assert.equal(parseQuick('Studio @2h +14:00 -60m',areas)[0].cycleMinutes,60);
+});
+
+test('time range keeps a shorter last session and supports midnight',()=>{
+  const areas=[{name:'Studio'}];
+  const short=parseQuick('Studio +14:00-15:40 -30m',areas);
+  assert.deepEqual(short.map(x=>x.minutes),[30,30,30,10]);
+  const crossing=parseQuick('Studio +23:50-01:00 -30m',areas);
+  assert.deepEqual(crossing.map(x=>[x.start,x.minutes,x.dayOffset||0]),[
+    ['23:50',30,0],['00:20',30,1],['00:50',10,1]
+  ]);
+  const plan=planSessions(crossing,[],[],defaults,now,id,'2026-11-06');
+  assert.deepEqual(plan.sessions.map(s=>[s.date,s.start,s.end]),[
+    ['2026-11-06','23:50','00:20'],['2026-11-07','00:20','00:50'],['2026-11-07','00:50','01:00']
+  ]);
+});
+
+test('text range rejects invalid syntax without partial planning',()=>{
+  const a=[{name:'Studio'}];
+  for(const line of [
+    'Studio +14:00-14:00 -30m','Studio +14:00-16:00 -0m',
+    'Studio +14:00-16:00 -1500m','Studio +25:00-16:00 -30m',
+    'Studio +14:00-16:00 -30m garbage','Sconosciuta +14:00-16:00 -30m'
+  ])assert.throws(()=>parseQuick(line,a),line);
+  assert.throws(()=>planSessions([{area:'Studio',minutes:30,start:'00:00',dayOffset:2}],[],[],defaults,now,id,'2026-11-06'));
+});
