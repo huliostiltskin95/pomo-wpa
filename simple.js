@@ -410,6 +410,7 @@ $('area-form').onsubmit=e=>{
     area.name=name;
     if(name!==previous)renameAreaReferences(previous,name);
   })){
+    if(name!==previous){planner?.remapArea(previous,name);planner?.syncAreas();}
     options($('edit-area'),name);loadAreaFields();render();tell('Area aggiornata.');
   }
 };
@@ -457,6 +458,7 @@ $('area-delete-confirm').onclick=()=>{
     config().areas=config().areas.filter(a=>a.name!==from);
   })){
     $('area-delete-dialog').close();pendingAreaDelete=null;
+    planner?.remapArea(from,to);planner?.syncAreas();
     options($('edit-area'),to);loadAreaFields();render();tell('Area eliminata. Sessioni e attività trasferite a «'+to+'».');
   }
 };
