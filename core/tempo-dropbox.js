@@ -42,7 +42,7 @@ export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus
   const navigate=url=>platform.navigate ? platform.navigate(url) : location.assign(url);
   const clearCallback=()=>platform.clearCallback ? platform.clearCallback() : history.replaceState({},document.title,redirectUri()+location.hash);
   let auth=read(AUTH_KEY),meta=read(META_KEY,{rev:null,dirty:false,ready:false});
-  let inFlight=null,delay=null,overridePending=false;
+  let inFlight=null,delay=null,overridePending=false,retryCount=0,eventsAttached=false;
   const syncState=data=>({
     sessions:data?.sessions||[],tasks:data?.tasks||[],history:data?.history||[],
     defaults:data?.defaults||{},appearance:data?.appearance||{},
@@ -62,12 +62,33 @@ export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus
       savedAt:new Date().toISOString(),data:{app:"TEMPVS",version:5,...local}
     });
   };
-  const status=(message,phase="idle")=>!disposed&&onStatus(message,{connected:Boolean(auth.refreshToken),dirty:meta.dirty,ready:meta.ready,phase,busy:["checking","uploading","downloading","merging"].includes(phase)});
+  const status=(message,phase="idle")=>!disposed&&onStatus(message,{connected:Boolean(auth.refreshToken),dirty:meta.dirty,ready:meta.ready,lastSyncedAt:meta.lastSyncedAt||null,phase,busy:["checking","uploading","downloading","merging"].includes(phase)});
   const storeMeta=()=>write(META_KEY,meta);
   const storeAuth=()=>write(AUTH_KEY,auth);
   const snapshot=(data=current())=>({app:"Tempo Pomodoro",version:5,
     exportedAt:new Date().toISOString(),...syncState(data)});
-  function changed(){if(disposed)return;meta.dirty=true;storeMeta();status("Modifiche locali in attesa di caricamento","pending");clearTimeout(delay);if(meta.ready&&auth.refreshToken)delay=setTimeout(()=>{sync().catch(e=>status(e.message));},2500);}
+  const queueSync=(wait=2500)=>{
+    clearTimeout(delay);
+    if(disposed||overridePending||!meta.ready||!auth.refreshToken)return;
+    delay=setTimeout(()=>{delay=null;sync().catch(()=>{});},wait);
+  };
+  const handleSyncError=error=>{
+    const retryable=!error.status||error.status===409||error.status===429||error.status>=500;
+    if(retryable&&!disposed&&!overridePending&&meta.ready&&auth.refreshToken){
+      retryCount=Math.min(retryCount+1,6);
+      const wait=Math.min(5000*2**(retryCount-1),120000);
+      status(error.message+' · nuovo tentativo automatico fra '+Math.round(wait/1000)+' s','error');
+      queueSync(wait);
+    }else status(error.message,'error');
+  };
+  const onConnectionResume=()=>{if(!disposed&&meta.ready&&auth.refreshToken)queueSync(0);};
+  const onVisibilityResume=()=>{if(typeof document!=='undefined'&&!document.hidden)onConnectionResume();};
+  function changed(){
+    if(disposed)return;
+    meta.dirty=true;storeMeta();
+    status("Modifiche locali in attesa di caricamento","pending");
+    retryCount=0;queueSync();
+  }
   async function connect(appKey){
     appKey=(appKey||auth.appKey||"").trim();
     if(!/^[a-z0-9]{8,}$/i.test(appKey))throw new Error("Inserisci una App key Dropbox valida.");
@@ -149,14 +170,15 @@ export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus
   function synced(data,rev){
     if(disposed)return;
     saveBase(data);
+    retryCount=0;
+    meta.lastSyncedAt=new Date().toISOString();
     meta.rev=rev;meta.ready=true;
     meta.dirty=stateJSON(current())!==stateJSON(data);
     storeMeta();
     status(meta.dirty?"Altre modifiche locali da sincronizzare":"Dropbox sincronizzato",
       meta.dirty?"pending":"idle");
     if(meta.dirty){
-      clearTimeout(delay);
-      delay=setTimeout(()=>sync().catch(e=>status(e.message,"error")),2500);
+      queueSync();
     }
   }
   async function adopt(data,rev,original=current()){
@@ -273,7 +295,7 @@ export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus
         return;
       }
       if(remote.rev===meta.rev && base){
-        if(!meta.dirty){status("Dropbox sincronizzato");return;}
+        if(!meta.dirty){retryCount=0;meta.lastSyncedAt=new Date().toISOString();storeMeta();status("Dropbox sincronizzato");return;}
         status("Caricamento delle modifiche su Dropbox…","uploading");
         const local=current();
         const rev=await upload(meta.rev,local);
@@ -295,7 +317,7 @@ export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus
         synced(item.file,item.rev);return;
       }
       await applyMerged(item);
-    })().catch(e=>{status(e.message,"error");throw e;})
+    })().catch(e=>{handleSyncError(e);throw e;})
       .finally(()=>{inFlight=null;});
     return inFlight;
   }
@@ -322,8 +344,7 @@ export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus
     finally{
       overridePending=false;
       if(!disposed&&meta.dirty&&meta.ready){
-        clearTimeout(delay);
-        delay=setTimeout(()=>sync().catch(e=>status(e.message,"error")),2500);
+        queueSync();
       }
     }
   }
@@ -367,7 +388,7 @@ export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus
     ++generation;
     clearTimeout(delay);
     transientStorage.removeItem("tempo-dropbox-pkce");
-    auth={};meta={rev:null,dirty:false,ready:false};
+    auth={};meta={rev:null,dirty:false,ready:false};retryCount=0;
     storage.removeItem(AUTH_KEY);
     storage.removeItem(META_KEY);
     storage.removeItem(BASE_KEY);
@@ -375,9 +396,19 @@ export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus
   }
   function destroy(){
     disposed=true;++generation;clearTimeout(delay);
+    if(eventsAttached){
+      if(typeof window!=='undefined')window.removeEventListener('online',onConnectionResume);
+      if(typeof document!=='undefined')document.removeEventListener('visibilitychange',onVisibilityResume);
+      eventsAttached=false;
+    }
   }
-  function info(){return {connected:Boolean(auth.refreshToken),ready:meta.ready,dirty:meta.dirty};}
+  function info(){return {connected:Boolean(auth.refreshToken),ready:meta.ready,dirty:meta.dirty,lastSyncedAt:meta.lastSyncedAt||null};}
   async function init(){
+    if(!eventsAttached){
+      if(typeof window!=='undefined')window.addEventListener('online',onConnectionResume);
+      if(typeof document!=='undefined')document.addEventListener('visibilitychange',onVisibilityResume);
+      eventsAttached=true;
+    }
     await callback();
     status(auth.refreshToken?(meta.ready?"Dropbox connesso":"Dropbox collegato: inizializzazione necessaria"):"Dropbox non collegato");
     if(meta.ready)await sync().catch(()=>{});
