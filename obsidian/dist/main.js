@@ -86,15 +86,15 @@ function formatTime(date) {
   return new Intl.DateTimeFormat("it-IT", { hour: "2-digit", minute: "2-digit" }).format(date);
 }
 function pauseMinutes(work) {
-  return Math.max(1, Math.round(work / 5));
+  return work / 5;
 }
 function normalizeSession(session) {
   if (!session || typeof session !== "object" || Array.isArray(session)) return session;
   return { ...session, breakEnabled: session.breakEnabled !== void 0 ? Boolean(session.breakEnabled) : true };
 }
 function validSession(session) {
-  if (!session || typeof session.id !== "string" || !session.id.trim() || typeof session.title !== "string" || !session.title.trim() || typeof session.date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(session.date) || !Number.isInteger(session.workMinutes) || session.workMinutes < 1 || session.workMinutes > 240) return false;
-  if (session.cycleMinutes !== void 0 && (!Number.isInteger(session.cycleMinutes) || session.cycleMinutes < 2 || session.cycleMinutes > 288 || session.cycleMinutes <= session.workMinutes || session.customBreakMinutes !== void 0)) return false;
+  if (!session || typeof session.id !== "string" || !session.id.trim() || typeof session.title !== "string" || !session.title.trim() || typeof session.date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(session.date) || !(session.cycleMinutes !== void 0 && session.workMinutes === session.cycleMinutes * 5 / 6) && (!Number.isInteger(session.workMinutes) || session.workMinutes < 1 || session.workMinutes > 240)) return false;
+  if (session.cycleMinutes !== void 0 && (!Number.isInteger(session.cycleMinutes) || session.cycleMinutes < 1 || session.cycleMinutes > 1439 || session.cycleMinutes <= session.workMinutes || session.customBreakMinutes !== void 0)) return false;
   const [year, month, day] = session.date.split("-").map(Number);
   const date = new Date(year, month - 1, day);
   if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return false;
@@ -145,7 +145,7 @@ function getPhase(session, now = /* @__PURE__ */ new Date()) {
       totalRemaining: Math.max(0, Math.ceil((end - now) / 1e3))
     };
   }
-  const workMs = session.workMinutes * 6e4;
+  const workMs = Math.round(session.workMinutes * 6e4);
   const elapsed = Math.max(0, now - start);
   const remainingSession = Math.max(0, end - now);
   if (!session.breakEnabled) {
@@ -160,7 +160,7 @@ function getPhase(session, now = /* @__PURE__ */ new Date()) {
       totalRemaining: Math.ceil(remainingSession / 1e3)
     };
   }
-  const breakMs = (session.cycleMinutes !== void 0 ? session.cycleMinutes - session.workMinutes : pauseMinutes(session.workMinutes)) * 6e4;
+  const breakMs = Math.round((session.cycleMinutes !== void 0 ? session.cycleMinutes - session.workMinutes : pauseMinutes(session.workMinutes)) * 6e4);
   const cycleMs = workMs + breakMs;
   const cycleIndex = Math.floor(elapsed / cycleMs);
   const within = elapsed % cycleMs;
@@ -221,9 +221,9 @@ function focusCycle(focusMinutes, breakEnabled = true) {
   return { focusMinutes, breakMinutes: breakEnabled ? pauseMinutes(focusMinutes) : 0 };
 }
 function grossCycle(cycleMinutes) {
-  if (!Number.isInteger(cycleMinutes) || cycleMinutes < 2 || cycleMinutes > 288)
-    throw Error("Il pomodoro lordo deve durare da 2 a 288 minuti interi.");
-  const focusMinutes = Math.min(cycleMinutes - 1, Math.round(cycleMinutes * 5 / 6));
+  if (!Number.isInteger(cycleMinutes) || cycleMinutes < 1 || cycleMinutes > 1439)
+    throw Error("Il pomodoro lordo deve durare da 1 a 1439 minuti interi.");
+  const focusMinutes = cycleMinutes * 5 / 6;
   return { focusMinutes, breakMinutes: cycleMinutes - focusMinutes };
 }
 function customPause(minutes2, grossMinutes) {
@@ -358,7 +358,7 @@ function parseQuick(text, areas) {
         if (each > total) throw Error("La fascia \xE8 pi\xF9 breve di una sessione lorda da " + each + " minuti.");
         for (let consumed = 0; consumed + each <= total; consumed += each) {
           const at = from + consumed;
-          sessions.push({ area: area2.name, ...area2.id ? { areaId: area2.id } : {}, minutes: each, start: timeOf(at), ...at >= 1440 ? { dayOffset: 1 } : {} });
+          sessions.push({ area: area2.name, ...area2.id ? { areaId: area2.id } : {}, minutes: each, cycleMinutes: each, rangeSession: true, start: timeOf(at), ...at >= 1440 ? { dayOffset: 1 } : {} });
         }
         if (total % each) sessions[sessions.length - 1].unusedMinutes = total % each;
         return sessions;
@@ -527,7 +527,7 @@ function prepareDailyPlan({ source, date, blockId, state, now = /* @__PURE__ */ 
     if (existing?.noteBlockId && existing.noteBlockId !== blockId) throw Error("Una sessione appartiene gi\xE0 a un altro blocco TEMPVS.");
     if (existing && claimed.has(existing.id)) throw Error("La stessa sessione compare due volte nel blocco.");
     if (existing && isLocked(existing, now)) {
-      if (!exact(existing) || request.cycleMinutes !== void 0 && request.cycleMinutes !== existing.cycleMinutes || request.focusMinutes !== void 0 && request.focusMinutes !== existing.workMinutes || request.customBreakMinutes !== void 0 && request.customBreakMinutes !== existing.customBreakMinutes)
+      if (!exact(existing) || !request.rangeSession && request.cycleMinutes !== void 0 && request.cycleMinutes !== existing.cycleMinutes || request.focusMinutes !== void 0 && request.focusMinutes !== existing.workMinutes || request.customBreakMinutes !== void 0 && request.customBreakMinutes !== existing.customBreakMinutes)
         throw Error("Le sessioni gi\xE0 avviate o concluse non possono essere riprogrammate dalla nota.");
       candidates.push({ ...existing, noteBlockId: blockId });
       claimed.add(existing.id);
@@ -696,7 +696,7 @@ var DailyBlocks = class {
       const blockId = this.bindingId(path) || blockIdentity(context.block.source) || uid();
       this.validateBinding(blockId, path, context.date);
       const binding = this.bindings[blockId];
-      if (binding?.source === context.block.source) {
+      if (binding?.ratioVersion === 1 && binding.source === context.block.source) {
         this.errors.delete(path);
         this.refresh(path);
         return;
@@ -767,7 +767,7 @@ var DailyBlocks = class {
           const checked = prepareDailyPlan({ source: prepared.source, date: prepared.date, blockId: prepared.blockId, state: this.plugin.state, id: () => available.shift() || uid() });
           applyDailyPlan(this.plugin.state, checked);
           this.plugin.state = normalizeArchive(this.plugin.state);
-          this.bindings[prepared.blockId] = { path: prepared.file.path, date: prepared.date, source: canonical, hiddenSessionIds: checked.retainedIds, unusedMinutes: fresh.unusedMinutes };
+          this.bindings[prepared.blockId] = { path: prepared.file.path, date: prepared.date, source: canonical, ratioVersion: 1, hiddenSessionIds: checked.retainedIds, unusedMinutes: fresh.unusedMinutes };
         });
       } catch (error) {
         if (previousBinding) this.bindings[prepared.blockId] = previousBinding;
@@ -823,7 +823,7 @@ var DailyBlocks = class {
         try {
           const context = await this.context(binding.path);
           if (!context) continue;
-          if (context.block.source !== binding.source) {
+          if (binding.ratioVersion !== 1 || context.block.source !== binding.source) {
             this.schedule(binding.path);
             continue;
           }
@@ -2303,7 +2303,7 @@ var TempvsView = class extends import_obsidian3.ItemView {
     const planFields = plan.createDiv({ cls: "tempvs-plan-fields" });
     const startTime = field(planFields, "Ora di inizio").createEl("input", { attr: { type: "time", required: "", value: "09:00" } });
     const duration = field(planFields, "Durata \xB7 minuti").createEl("input", { attr: { type: "number", min: "1", max: "1439", value: "30", required: "" } });
-    const cycleInput = field(plan, "Pomodoro lordo \xB7 minuti (facoltativo)").createEl("input", { attr: { type: "number", min: "2", max: "288", placeholder: "Es. 60 \u2192 50 focus + 10 pausa", "aria-label": "Durata lorda del pomodoro" } });
+    const cycleInput = field(plan, "Pomodoro lordo \xB7 minuti (facoltativo)").createEl("input", { attr: { type: "number", min: "1", max: "1439", placeholder: "Es. 60 \u2192 50 focus + 10 pausa", "aria-label": "Durata lorda del pomodoro" } });
     const cycleHint = plan.createEl("p", { cls: "tempvs-help", text: "Lascia vuoto per usare il focus predefinito. La durata totale della sessione comprende tutte le pause." });
     cycleInput.addEventListener("input", () => {
       try {
@@ -2315,7 +2315,7 @@ var TempvsView = class extends import_obsidian3.ItemView {
     });
     const batch = plan.createEl("details", { cls: "tempvs-batch" });
     batch.createEl("summary", { text: "Inserisci pi\xF9 sessioni con il testo" });
-    batch.createEl("p", { cls: "tempvs-help", text: "Nuovo formato: Studio +14:00-16:00 -30m \u2192 quattro sessioni da 30 minuti lordi. Si pu\xF2 oltrepassare mezzanotte. \xC8 ancora supportato Studio @2h +14:00 -60m: una sessione di due ore con cicli da 60 minuti lordi. Se compili questo campo, verranno usate queste righe." });
+    batch.createEl("p", { cls: "tempvs-help", text: "Nuovo formato: Studio +14:00-16:00 -30m \u2192 quattro sessioni da 25 minuti di concentrazione + 5 di pausa. Il rapporto \xE8 sempre 5:1: -60m d\xE0 50 + 10. Si pu\xF2 oltrepassare mezzanotte. \xC8 ancora supportato Studio @2h +14:00 -60m: una sessione di due ore con cicli da 60 minuti lordi. Se compili questo campo, verranno usate queste righe." });
     const lines = field(batch, "Sessioni in formato rapido").createEl("textarea", { attr: { "aria-label": "Sessioni", placeholder: "Studio +14:00-16:00 -30m\nLavoro +18:00-19:30 -45m", rows: "3" } });
     const updatePlanMode = () => {
       const textMode = Boolean(lines.value.trim());
