@@ -97,7 +97,13 @@ export function createPlannerTable({document,areas,defaults,checkPlan,invalidate
   };
   for(const id of ['quick-date','quick-focus'])$(id).addEventListener('input',refresh);
   newRow();refresh();
-  return {requests,refresh,reset(){body.replaceChildren();newRow();refresh();},syncAreas(){
+  return {requests,refresh,reset(){body.replaceChildren();newRow();refresh();},remapArea(from,to){
+    for(const row of body.children){
+      const select=row.querySelector('[data-field="area"]');
+      if(select.value===from)select.value=to;
+    }
+    refresh();
+  },syncAreas(){
     for(const row of body.children){const select=row.querySelector('[data-field="area"]'),old=select.value;select.innerHTML=areas().map(a=>'<option>'+esc(a.name)+'</option>').join('');if(areas().some(a=>a.name===old))select.value=old;else{const missing=document.createElement('option');missing.value=old;missing.textContent=old+' (non disponibile)';select.append(missing);select.value=old;}}
     refresh();
   }};
