@@ -505,6 +505,7 @@ initRefinedUI();
 render(); // Fill the day toolbar created by the progressive UI enhancement.
 function cloudStatus(message,info){
   $('cloud-status').textContent=message;
+  $('cloud-last-sync').textContent=info.lastSyncedAt?'Ultimo controllo riuscito: '+new Date(info.lastSyncedAt).toLocaleString('it-IT'):'Nessuna sincronizzazione verificata su questo dispositivo.';
   $('cloud-progress').hidden=!info.busy;
   $('cloud-setup').hidden=info.connected;
   $('cloud-actions').hidden=!info.connected;
@@ -520,7 +521,7 @@ function cloudStatus(message,info){
 }
 async function resolveConflicts(conflicts){const choices={};for(const c of conflicts){const chosen=await chooseSyncConflict(c);if(chosen===null)return null;choices[c.key]=chosen;}return choices;}
 cloud=createDropboxSync({getState:()=>state,applyRemote,normalizeRemote:normalizeArchive,onStatus:cloudStatus,resolveConflicts});
-const run=fn=>Promise.resolve().then(fn).catch(e=>tell(e.message));
+const run=fn=>Promise.resolve().then(fn).catch(e=>{cloudStatus(e.message,{...cloud.info(),phase:'error',busy:false});tell(e.message);});
 $('cloud-connect').onclick=()=>run(()=>cloud.connect($('cloud-key').value));$('cloud-sync').onclick=()=>run(()=>cloud.sync());$('cloud-merge').onclick=()=>run(()=>cloud.mergeNow());$('cloud-upload').onclick=()=>run(()=>cloud.firstSync('upload'));
 $('cloud-download').onclick=()=>{if(confirm('Sostituire i dati con Dropbox? Prima scarico una copia locale.')){backup();run(()=>cloud.info().ready?cloud.forceDownload(true):cloud.firstSync('download'));}};
 $('cloud-disconnect').onclick=()=>{if(confirm('Scollegare Dropbox mantenendo i dati locali?'))cloud.disconnect();};
