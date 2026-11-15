@@ -1,6 +1,6 @@
 {
-  "version": "0.4.0",
+  "version": "0.5.7",
   "release": "stable",
   "approvedByUser": true,
-  "description": "Release coordinata PWA e plugin Obsidian dopo collaudo automatizzato."
+  "description": "Release coordinata TEMPVS 0.5.7: fasce orarie, aree modificabili e sincronizzazione Dropbox."
 }

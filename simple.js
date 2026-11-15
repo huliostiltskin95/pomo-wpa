@@ -98,6 +98,15 @@ function options(select,chosen){
   if(!unchanged)select.replaceChildren(...names.map(name=>new Option(name,name)));
   if(names.includes(previous)&&select.value!==previous)select.value=previous;
 }
+function renderAreaManager(){
+  const list=$('area-list');
+  if(!list)return;
+  list.innerHTML=config().areas.map((area,index)=>'<div class="area-order-row"><span class="area-swatch" style="background:'+colorFor(area.name)+'"></span><strong>'+esc(area.name)+'</strong><div class="area-order-actions">'+
+    '<button type="button" data-area-move="'+index+'" data-direction="-1" '+(index===0?'disabled':'')+' aria-label="Sposta '+esc(area.name)+' in alto">↑</button>'+
+    '<button type="button" data-area-move="'+index+'" data-direction="1" '+(index===config().areas.length-1?'disabled':'')+' aria-label="Sposta '+esc(area.name)+' in basso">↓</button>'+
+    '<button type="button" data-area-select="'+index+'">Modifica</button>'+
+    '<button type="button" data-area-delete="'+index+'">Elimina</button></div></div>').join('');
+}
 function inline(text){
   // Tokenize code and links before emphasis, so formatting never modifies href attributes.
   const tokens=[];let out=esc(text).replace(/`([^`]+)`/g,(_,s)=>{tokens.push('<code>'+s+'</code>');return '\u0000'+(tokens.length-1)+'\u0000';});
@@ -116,6 +125,7 @@ function renderResources(){
 }
 function render(){
   for(const id of ['instant-area','resource-area','edit-area'])options($(id));
+  renderAreaManager();
   $('windows').innerHTML=[...config().windows].sort((a,b)=>sessionBounds(a).start-sessionBounds(b).start).map(w=>'<div class="item"><span>'+esc(formatDate(w.date))+'<small>'+w.start+'–'+w.end+'</small></span><button data-remove-window="'+esc(w.id)+'" aria-label="Elimina fascia">×</button></div>').join('')||'<p class="muted">Nessuna fascia: aggiungi il primo giorno.</p>';
   const chosen=$('session-date').value;
   const startOfDay=new Date(chosen+'T00:00:00');
@@ -357,8 +367,25 @@ $('session-list').onclick=async e=>{
 };
 function loadAreaFields(){
   const area=areaFor($('edit-area').value);
+  $('area-name').value=area?.name||'';
   $('description').value=area?.description||'';
   $('area-color').value=colorFor($('edit-area').value).toLowerCase();
+}
+function renameAreaReferences(from,to){
+  for(const session of state.sessions){
+    if(session.area===from)session.area=to;
+    if(session.title===from)session.title=to;
+  }
+  for(const entry of state.history||[]){
+    if(entry.area===from)entry.area=to;
+    if(entry.title===from)entry.title=to;
+  }
+  for(const task of state.tasks||[])if(task.area===from)task.area=to;
+  if(state.appearance?.areaColors && Object.prototype.hasOwnProperty.call(state.appearance.areaColors,from)){
+    if(!Object.prototype.hasOwnProperty.call(state.appearance.areaColors,to))
+      state.appearance.areaColors[to]=state.appearance.areaColors[from];
+    delete state.appearance.areaColors[from];
+  }
 }
 function openSettings(){
   $('work').value=state.defaults.workMinutes;$('breaks').checked=state.defaults.breakEnabled;$('focus-end-chime').checked=chimeEnabled();
@@ -371,8 +398,70 @@ $('chime-preview').onclick=async()=>{
 };
 $('settings-open').onclick=openSettings;$('area-edit').onclick=openSettings;$('settings-close').onclick=()=>$('settings').close();
 $('edit-area').onchange=loadAreaFields;
-$('area-form').onsubmit=e=>{e.preventDefault();if(commit(()=>{const area=areaFor($('edit-area').value);area.description=$('description').value;area.color=normalizeAreaColor($('area-color').value,area.name);}))tell('Area aggiornata.');};
-$('new-area-form').onsubmit=e=>{e.preventDefault();const name=$('new-area').value.trim();if(!name||config().areas.some(a=>a.name.toLowerCase()===name.toLowerCase()))return tell('Scegli un nome diverso.');if(commit(()=>config().areas.push({name,description:'',color:normalizeAreaColor(undefined,name)}))){$('new-area').value='';options($('edit-area'),name);loadAreaFields();}};
+$('area-form').onsubmit=e=>{
+  e.preventDefault();
+  const previous=$('edit-area').value,name=$('area-name').value.trim();
+  if(!name||name.length>80||config().areas.some(a=>a.name!==previous&&a.name.toLocaleLowerCase()===name.toLocaleLowerCase()))return tell('Indica un nome valido e non già utilizzato.');
+  if(commit(()=>{
+    const area=areaFor(previous);
+    if(!area)throw Error('Area non trovata.');
+    area.description=$('description').value;
+    area.color=normalizeAreaColor($('area-color').value,name);
+    area.name=name;
+    if(name!==previous)renameAreaReferences(previous,name);
+  })){
+    if(name!==previous){planner?.remapArea(previous,name);planner?.syncAreas();}
+    options($('edit-area'),name);loadAreaFields();render();tell('Area aggiornata.');
+  }
+};
+$('new-area-form').onsubmit=e=>{
+  e.preventDefault();const name=$('new-area').value.trim();
+  if(!name||config().areas.some(a=>a.name.toLocaleLowerCase()===name.toLocaleLowerCase()))return tell('Scegli un nome diverso.');
+  if(commit(()=>config().areas.push({name,description:'',color:normalizeAreaColor(undefined,name)}))){
+    $('new-area').value='';options($('edit-area'),name);loadAreaFields();
+  }
+};
+let pendingAreaDelete=null;
+$('area-list').onclick=e=>{
+  const button=e.target.closest('button');
+  if(!button)return;
+  if(button.hasAttribute('data-area-select')){
+    const area=config().areas[Number(button.dataset.areaSelect)];if(!area)return;
+    $('edit-area').value=area.name;loadAreaFields();$('area-name').focus();return;
+  }
+  if(button.hasAttribute('data-area-move')){
+    const from=Number(button.dataset.areaMove),to=from+Number(button.dataset.direction);
+    if(to<0||to>=config().areas.length)return;
+    const selected=$('edit-area').value;
+    if(commit(()=>{const areas=config().areas;[areas[from],areas[to]]=[areas[to],areas[from]];})){
+      $('edit-area').value=selected;loadAreaFields();
+    }
+    return;
+  }
+  if(button.hasAttribute('data-area-delete')){
+    const area=config().areas[Number(button.dataset.areaDelete)];
+    if(!area)return;
+    if(config().areas.length<2)return tell('Deve rimanere almeno un’area.');
+    pendingAreaDelete=area.name;
+    const used=state.sessions.filter(s=>s.area===area.name||s.title===area.name).length;
+    $('area-delete-message').textContent='Eliminare «'+area.name+'»? '+used+' sessioni collegate saranno trasferite, senza cancellare i tempi registrati. Questa operazione sarà inclusa nel backup.';
+    $('area-delete-target').replaceChildren(...config().areas.filter(a=>a.name!==area.name).map(a=>new Option(a.name,a.name)));
+    $('area-delete-dialog').showModal();
+  }
+};
+$('area-delete-cancel').onclick=()=>{$('area-delete-dialog').close();pendingAreaDelete=null;};
+$('area-delete-confirm').onclick=()=>{
+  const from=pendingAreaDelete,to=$('area-delete-target').value;
+  if(!from||!to||from===to||!areaFor(from)||!areaFor(to))return tell('Scegli un’area di destinazione valida.');
+  if(commit(()=>{
+    renameAreaReferences(from,to);
+    config().areas=config().areas.filter(a=>a.name!==from);
+  })){
+    $('area-delete-dialog').close();pendingAreaDelete=null;
+    planner?.remapArea(from,to);planner?.syncAreas();
+    options($('edit-area'),to);loadAreaFields();render();tell('Area eliminata. Sessioni e attività trasferite a «'+to+'».');
+  }
+};
 $('preferences').onsubmit=e=>{e.preventDefault();
   const before=state.defaults.workMinutes,work=Number($('work').value);
   try{focusCycle(work);}catch(error){return tell(error.message);}
@@ -419,10 +508,12 @@ initRefinedUI();
 render(); // Fill the day toolbar created by the progressive UI enhancement.
 function cloudStatus(message,info){
   $('cloud-status').textContent=message;
+  $('cloud-last-sync').textContent=info.lastSyncedAt?'Ultimo controllo riuscito: '+new Date(info.lastSyncedAt).toLocaleString('it-IT'):'Nessuna sincronizzazione verificata su questo dispositivo.';
   $('cloud-progress').hidden=!info.busy;
   $('cloud-setup').hidden=info.connected;
   $('cloud-actions').hidden=!info.connected;
   $('cloud-upload').hidden=info.ready;
+  $('cloud-recovery').hidden=!info.recoveryAvailable;
   const indicator=$('cloud-indicator'),label=$('cloud-indicator-text');
   if(!indicator||!label)return;
   const status=info.busy?'busy':!info.connected?'disconnected':(info.phase==='error'||/\b(?:errore|error|failed|http [45]\d\d|conflitto non risolto)\b/i.test(message))?'error':!info.ready?'setup':info.dirty?'pending':'synced';
@@ -434,9 +525,15 @@ function cloudStatus(message,info){
 }
 async function resolveConflicts(conflicts){const choices={};for(const c of conflicts){const chosen=await chooseSyncConflict(c);if(chosen===null)return null;choices[c.key]=chosen;}return choices;}
 cloud=createDropboxSync({getState:()=>state,applyRemote,normalizeRemote:normalizeArchive,onStatus:cloudStatus,resolveConflicts});
-const run=fn=>Promise.resolve().then(fn).catch(e=>tell(e.message));
+const run=fn=>Promise.resolve().then(fn).catch(e=>{cloudStatus(e.message,{...cloud.info(),phase:'error',busy:false});tell(e.message);});
 $('cloud-connect').onclick=()=>run(()=>cloud.connect($('cloud-key').value));$('cloud-sync').onclick=()=>run(()=>cloud.sync());$('cloud-merge').onclick=()=>run(()=>cloud.mergeNow());$('cloud-upload').onclick=()=>run(()=>cloud.firstSync('upload'));
 $('cloud-download').onclick=()=>{if(confirm('Sostituire i dati con Dropbox? Prima scarico una copia locale.')){backup();run(()=>cloud.info().ready?cloud.forceDownload(true):cloud.firstSync('download'));}};
+$('cloud-recovery').onclick=()=>{
+  const copy=cloud.recovery();
+  if(!copy?.data)return tell('Nessuna copia di recupero disponibile.');
+  download(copy.data,'tempvs-recupero-'+localDateString()+'.json');
+  tell('Copia di recupero esportata. Puoi ripristinarla tramite Ripristina JSON.');
+};
 $('cloud-disconnect').onclick=()=>{if(confirm('Scollegare Dropbox mantenendo i dati locali?'))cloud.disconnect();};
 run(()=>cloud.init());
 window.addEventListener('pagehide',()=>{flush();++audioRequest;audioPreviewUntil=0;audioArmed=false;ambient.stop(0);});document.addEventListener('visibilitychange',()=>{if(document.hidden)flush();else{lastTick=Date.now();render();}});
