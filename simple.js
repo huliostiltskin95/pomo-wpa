@@ -382,7 +382,8 @@ function renameAreaReferences(from,to){
   }
   for(const task of state.tasks||[])if(task.area===from)task.area=to;
   if(state.appearance?.areaColors && Object.prototype.hasOwnProperty.call(state.appearance.areaColors,from)){
-    state.appearance.areaColors[to]=state.appearance.areaColors[from];
+    if(!Object.prototype.hasOwnProperty.call(state.appearance.areaColors,to))
+      state.appearance.areaColors[to]=state.appearance.areaColors[from];
     delete state.appearance.areaColors[from];
   }
 }
