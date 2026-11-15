@@ -188,8 +188,8 @@ class TempvsView extends ItemView {
     });
     const batch=plan.createEl("details",{cls:"tempvs-batch"});
     batch.createEl("summary",{text:"Inserisci più sessioni con il testo"});
-    batch.createEl("p",{cls:"tempvs-help",text:"Una sessione per riga: Area @durata +ora -pomodoro. Esempio: Studio @2h +14:00 -60m → 50/10 + 50/10. -60m include la pausa; ~50m indica solo il focus. Se compili questo campo, verranno usate queste righe."});
-    const lines=field(batch,"Sessioni in formato rapido").createEl("textarea",{attr:{"aria-label":"Sessioni",placeholder:"Studio @2h +14:00 -60m\nLavoro @45m +18:00 !5m",rows:"3"}});
+    batch.createEl("p",{cls:"tempvs-help",text:"Nuovo formato: Studio +14:00-16:00 -30m → quattro sessioni da 30 minuti lordi. Si può oltrepassare mezzanotte. È ancora supportato Studio @2h +14:00 -60m: una sessione di due ore con cicli da 60 minuti lordi. Se compili questo campo, verranno usate queste righe."});
+    const lines=field(batch,"Sessioni in formato rapido").createEl("textarea",{attr:{"aria-label":"Sessioni",placeholder:"Studio +14:00-16:00 -30m\nLavoro +18:00-19:30 -45m",rows:"3"}});
     const updatePlanMode=()=>{
       const textMode=Boolean(lines.value.trim());
       for(const input of [plannedArea,startTime,duration,cycleInput])input.disabled=textMode;
@@ -402,6 +402,67 @@ class TempvsSettings extends PluginSettingTab {
           if(!ok)new Notice("Audio non disponibile: controlla il volume e riprova toccando Riproduci.");
         });
       }));
+    el.createEl("h3",{text:"Aree"});
+    el.createEl("p",{cls:"tempvs-muted",text:"Rinomina, riordina o elimina le aree senza perdere sessioni e statistiche. La descrizione Markdown resta associata all'area."});
+    for(const [index,area] of this.plugin.config.areas.entries()){
+      const section=el.createDiv({cls:"tempvs-area-config"});
+      const heading=new Setting(section).setName(area.name);
+      const nameInput=section.createEl("input",{attr:{type:"text",maxlength:"80","aria-label":"Nuovo nome area "+area.name,value:area.name}});
+      const colorInput=section.createEl("input",{attr:{type:"color","aria-label":"Colore area "+area.name,value:area.color||"#54769b"}});
+      const details=section.createEl("details");
+      details.createEl("summary",{text:"Descrizione Markdown"});
+      const description=details.createEl("textarea",{attr:{rows:"4","aria-label":"Descrizione area "+area.name}});
+      description.value=area.description||"";
+      heading.addButton(b=>b.setButtonText("Salva").onClick(async()=>{
+        try{
+          const next=nameInput.value.trim();
+          if(!next||next.length>80||this.plugin.config.areas.some(a=>a.name!==area.name&&a.name.toLocaleLowerCase()===next.toLocaleLowerCase()))throw Error("Nome area non valido o già presente.");
+          await this.plugin.change(()=>{
+            const stored=this.plugin.config.areas.find(a=>a.name===area.name);
+            if(!stored)throw Error("Area non disponibile.");
+            stored.name=next;stored.color=colorInput.value;stored.description=description.value;
+            if(next!==area.name)this.plugin.remapArea(area.name,next);
+          });
+          this.display();
+          new Notice("Area aggiornata.");
+        }catch(e){new Notice(e.message);}
+      }));
+      heading.addButton(b=>b.setButtonText("↑").setTooltip("Sposta in alto").setDisabled(index===0).onClick(async()=>{
+        try{await this.plugin.change(()=>{const a=this.plugin.config.areas;[a[index-1],a[index]]=[a[index],a[index-1]];});this.display();}
+        catch(e){new Notice(e.message);}
+      }));
+      heading.addButton(b=>b.setButtonText("↓").setTooltip("Sposta in basso").setDisabled(index===this.plugin.config.areas.length-1).onClick(async()=>{
+        try{await this.plugin.change(()=>{const a=this.plugin.config.areas;[a[index],a[index+1]]=[a[index+1],a[index]];});this.display();}
+        catch(e){new Notice(e.message);}
+      }));
+      if(this.plugin.config.areas.length>1){
+        const transfer=section.createEl("select",{attr:{"aria-label":"Sposta i dati di "+area.name+" nell'area"}});
+        for(const other of this.plugin.config.areas.filter(a=>a.name!==area.name))
+          transfer.createEl("option",{text:"Trasferisci in "+other.name,value:other.name});
+        heading.addButton(b=>b.setButtonText("Elimina").onClick(async()=>{
+          const target=transfer.value;
+          if(!await confirmTempvs(this.plugin.app,"Eliminare «"+area.name+"»?","Le sessioni, le attività e lo storico verranno trasferiti nell'area «"+target+"» senza cancellare i tempi registrati."))return;
+          try{
+            await this.plugin.change(()=>{
+              this.plugin.remapArea(area.name,target);
+              this.plugin.config.areas=this.plugin.config.areas.filter(a=>a.name!==area.name);
+            });
+            this.display();new Notice("Area eliminata e dati trasferiti.");
+          }catch(e){new Notice(e.message);}
+        }));
+      }
+    }
+    const addArea=new Setting(el).setName("Nuova area");
+    let addName="";
+    addArea.addText(t=>t.setPlaceholder("Nome della nuova area").onChange(v=>{addName=v;}));
+    addArea.addButton(b=>b.setButtonText("Aggiungi").onClick(async()=>{
+      const name=addName.trim();
+      if(!name||name.length>80||this.plugin.config.areas.some(a=>a.name.toLocaleLowerCase()===name.toLocaleLowerCase()))return new Notice("Nome area non valido o già utilizzato.");
+      try{
+        await this.plugin.change(()=>this.plugin.config.areas.push({name,description:"",color:"#54769B"}));
+        this.display();new Notice("Area aggiunta.");
+      }catch(e){new Notice(e.message);}
+    }));
     el.createEl("h3",{text:"Dropbox"});
     renderCloudSettings(el,this.plugin);
     el.createEl("p",{cls:"tempvs-muted",text:"Lo storico delle sessioni rimane salvato per statistiche, backup e sincronizzazione, ma non è mostrato nel timer."});
@@ -658,6 +719,22 @@ export default class TempvsPlugin extends Plugin {
     if(updated===area.description){new Notice("Nota già collegata all'area.");return;}
     await this.change(()=>{area.description=updated;});
     new Notice("Nota collegata all'area "+areaName+".");
+  }
+  remapArea(from,to){
+    for(const session of this.state.sessions){
+      if(session.area===from)session.area=to;
+      if(session.title===from)session.title=to;
+    }
+    for(const item of this.state.history||[]){
+      if(item.area===from)item.area=to;
+      if(item.title===from)item.title=to;
+    }
+    for(const task of this.state.tasks||[])if(task.area===from)task.area=to;
+    if(this.state.appearance?.areaColors && Object.prototype.hasOwnProperty.call(this.state.appearance.areaColors,from)){
+      if(!Object.prototype.hasOwnProperty.call(this.state.appearance.areaColors,to))
+        this.state.appearance.areaColors[to]=this.state.appearance.areaColors[from];
+      delete this.state.appearance.areaColors[from];
+    }
   }
   async start(area, gross, focus, pause) {
     if (!this.config.areas.some(a => a.name === area)) throw Error("Area non valida.");
