@@ -223,6 +223,8 @@ function planSessions(requests, windows, existing, defaults, now = /* @__PURE__ 
   for (const request of requests) {
     if (!request || typeof request.area !== "string" || !request.area.trim() || !Number.isInteger(request.minutes) || request.minutes < 1 || request.minutes > 10080)
       throw Error("Indica area e durata lorda da 1 a 10080 minuti interi.");
+    if (request.dayOffset !== void 0 && ![0, 1].includes(request.dayOffset))
+      throw Error("Il giorno della sessione deve essere quello selezionato o il successivo.");
     if (request.start !== void 0 && !/^([01]\d|2[0-3]):[0-5]\d$/.test(request.start))
       throw Error("Orario fisso non valido: usa HH:MM.");
     cycleFor(request);
@@ -246,8 +248,10 @@ function planSessions(requests, windows, existing, defaults, now = /* @__PURE__ 
   };
   for (const request of requests.filter((r) => r.start)) {
     if (request.minutes > 1440) throw Error("Una sessione con orario fisso pu\xF2 durare al massimo 24 ore.");
-    const start = dateTime(selectedDate, request.start), end = new Date(+start + request.minutes * 6e4);
-    const session = { id: id(), title: request.area, area: request.area, date: selectedDate, start: request.start, end: formatTime(end), workMinutes: cycleFor(request), breakEnabled: defaults.breakEnabled !== false, ...cycleSettings(request), actualSeconds: 0 };
+    const start = dateTime(selectedDate, request.start);
+    if (request.dayOffset) start.setDate(start.getDate() + request.dayOffset);
+    const end = new Date(+start + request.minutes * 6e4);
+    const session = { id: id(), title: request.area, area: request.area, date: localDateString(start), start: request.start, end: formatTime(end), workMinutes: cycleFor(request), breakEnabled: defaults.breakEnabled !== false, ...cycleSettings(request), actualSeconds: 0 };
     if (!validSession(session)) throw Error("Data o orario non valido.");
     if (+start < +now) throw Error("L\u2019orario " + request.start + " \xE8 gi\xE0 passato nel giorno scelto. Cambia giorno o orario.");
     applyPause(request, [session]);
@@ -285,9 +289,30 @@ function planSessions(requests, windows, existing, defaults, now = /* @__PURE__ 
   return { sessions: result, remainder };
 }
 function parseQuick(text, areas) {
-  return text.trim().split("\n").filter((s) => s.trim()).map((line) => {
-    const match = line.trim().match(/^(.+?)\s+@(\d+(?:[.,]\d+)?)\s*(h|min|m)(.*)$/i);
-    if (!match) throw Error("Usa: Studio @2h +14:00 -60m (orario e ciclo facoltativi).");
+  return text.trim().split("\n").filter((s) => s.trim()).flatMap((line) => {
+    const input = line.trim();
+    const range = input.match(/^(.+?)\s+\+((?:[01]\d|2[0-3]):[0-5]\d)-((?:[01]\d|2[0-3]):[0-5]\d)\s+-([1-9]\d{0,3})m$/i);
+    if (range) {
+      const area2 = areas.find((a) => a.name.toLocaleLowerCase() === range[1].trim().toLocaleLowerCase());
+      if (!area2) throw Error("Area sconosciuta: " + range[1].trim() + ".");
+      const minutesOf = (time) => {
+        const [hours, minutes3] = time.split(":").map(Number);
+        return hours * 60 + minutes3;
+      };
+      const timeOf = (minutes3) => String(Math.floor(minutes3 % 1440 / 60)).padStart(2, "0") + ":" + String(minutes3 % 60).padStart(2, "0");
+      const from = minutesOf(range[2]), until = minutesOf(range[3]);
+      const total = (until - from + 1440) % 1440, each = Number(range[4]);
+      if (!total) throw Error("La fascia deve avere inizio e fine diversi.");
+      if (!Number.isInteger(each) || each < 1 || each > 1439) throw Error("La durata lorda di una sessione deve essere da 1 a 1439 minuti.");
+      const sessions = [];
+      for (let consumed = 0; consumed < total; consumed += each) {
+        const at = from + consumed;
+        sessions.push({ area: area2.name, minutes: Math.min(each, total - consumed), start: timeOf(at), ...at >= 1440 ? { dayOffset: 1 } : {} });
+      }
+      return sessions;
+    }
+    const match = input.match(/^(.+?)\s+@(\d+(?:[.,]\d+)?)\s*(h|min|m)(.*)$/i);
+    if (!match) throw Error("Usa: Studio +14:00-16:00 -30m oppure Studio @2h +14:00 -60m.");
     const area = areas.find((a) => a.name.toLocaleLowerCase() === match[1].trim().toLocaleLowerCase());
     const minutes2 = Math.round(Number(match[2].replace(",", ".")) * (match[3].toLowerCase() === "h" ? 60 : 1));
     if (!area || minutes2 < 1 || minutes2 > 10080) throw Error("Controlla area e durata lorda (da 1 minuto a 168 ore).");
@@ -306,7 +331,7 @@ function parseQuick(text, areas) {
     }
     if (cycleMinutes !== void 0 && (focusMinutes !== void 0 || customBreakMinutes !== void 0))
       throw Error("Non combinare -minuti con ~focus o !pausa finale.");
-    return { area: area.name, minutes: minutes2, ...cycleMinutes !== void 0 ? { cycleMinutes } : {}, ...start ? { start } : {}, ...focusMinutes !== void 0 ? { focusMinutes } : {}, ...customBreakMinutes !== void 0 ? { customBreakMinutes } : {} };
+    return [{ area: area.name, minutes: minutes2, ...cycleMinutes !== void 0 ? { cycleMinutes } : {}, ...start ? { start } : {}, ...focusMinutes !== void 0 ? { focusMinutes } : {}, ...customBreakMinutes !== void 0 ? { customBreakMinutes } : {} }];
   });
 }
 function measuredFocus(session, from, to) {
@@ -575,7 +600,7 @@ function createDropboxSync({ getState, applyRemote, normalizeRemote, onStatus, r
   const navigate = (url) => platform.navigate ? platform.navigate(url) : location.assign(url);
   const clearCallback = () => platform.clearCallback ? platform.clearCallback() : history.replaceState({}, document.title, redirectUri() + location.hash);
   let auth = read(AUTH_KEY), meta = read(META_KEY, { rev: null, dirty: false, ready: false });
-  let inFlight = null, delay = null, overridePending = false;
+  let inFlight = null, delay = null, overridePending = false, retryCount = 0, eventsAttached = false;
   const syncState = (data) => ({
     sessions: data?.sessions || [],
     tasks: data?.tasks || [],
@@ -599,7 +624,7 @@ function createDropboxSync({ getState, applyRemote, normalizeRemote, onStatus, r
       data: { app: "TEMPVS", version: 5, ...local }
     });
   };
-  const status = (message, phase = "idle") => !disposed && onStatus(message, { connected: Boolean(auth.refreshToken), dirty: meta.dirty, ready: meta.ready, phase, busy: ["checking", "uploading", "downloading", "merging"].includes(phase) });
+  const status = (message, phase = "idle") => !disposed && onStatus(message, { connected: Boolean(auth.refreshToken), dirty: meta.dirty, ready: meta.ready, lastSyncedAt: meta.lastSyncedAt || null, recoveryAvailable: Boolean(recovery()), phase, busy: ["checking", "uploading", "downloading", "merging"].includes(phase) });
   const storeMeta = () => write(META_KEY, meta);
   const storeAuth = () => write(AUTH_KEY, auth);
   const snapshot = (data = current()) => ({
@@ -608,15 +633,37 @@ function createDropboxSync({ getState, applyRemote, normalizeRemote, onStatus, r
     exportedAt: (/* @__PURE__ */ new Date()).toISOString(),
     ...syncState(data)
   });
+  const queueSync = (wait = 2500) => {
+    clearTimeout(delay);
+    if (disposed || overridePending || !meta.ready || !auth.refreshToken) return;
+    delay = setTimeout(() => {
+      delay = null;
+      sync().catch(() => {
+      });
+    }, wait);
+  };
+  const handleSyncError = (error) => {
+    const retryable = !error.status || error.status === 409 || error.status === 429 || error.status >= 500;
+    if (retryable && !disposed && !overridePending && meta.ready && auth.refreshToken) {
+      retryCount = Math.min(retryCount + 1, 6);
+      const wait = Math.min(5e3 * 2 ** (retryCount - 1), 12e4);
+      status(error.message + " \xB7 nuovo tentativo automatico fra " + Math.round(wait / 1e3) + " s", "error");
+      queueSync(wait);
+    } else status(error.message, "error");
+  };
+  const onConnectionResume = () => {
+    if (!disposed && meta.ready && auth.refreshToken) queueSync(0);
+  };
+  const onVisibilityResume = () => {
+    if (typeof document !== "undefined" && !document.hidden) onConnectionResume();
+  };
   function changed() {
     if (disposed) return;
     meta.dirty = true;
     storeMeta();
     status("Modifiche locali in attesa di caricamento", "pending");
-    clearTimeout(delay);
-    if (meta.ready && auth.refreshToken) delay = setTimeout(() => {
-      sync().catch((e) => status(e.message));
-    }, 2500);
+    retryCount = 0;
+    queueSync();
   }
   async function connect(appKey) {
     appKey = (appKey || auth.appKey || "").trim();
@@ -714,6 +761,8 @@ function createDropboxSync({ getState, applyRemote, normalizeRemote, onStatus, r
   function synced(data, rev) {
     if (disposed) return;
     saveBase(data);
+    retryCount = 0;
+    meta.lastSyncedAt = (/* @__PURE__ */ new Date()).toISOString();
     meta.rev = rev;
     meta.ready = true;
     meta.dirty = stateJSON(current()) !== stateJSON(data);
@@ -723,8 +772,7 @@ function createDropboxSync({ getState, applyRemote, normalizeRemote, onStatus, r
       meta.dirty ? "pending" : "idle"
     );
     if (meta.dirty) {
-      clearTimeout(delay);
-      delay = setTimeout(() => sync().catch((e) => status(e.message, "error")), 2500);
+      queueSync();
     }
   }
   async function adopt(data, rev, original = current()) {
@@ -844,6 +892,9 @@ function createDropboxSync({ getState, applyRemote, normalizeRemote, onStatus, r
       }
       if (remote.rev === meta.rev && base) {
         if (!meta.dirty) {
+          retryCount = 0;
+          meta.lastSyncedAt = (/* @__PURE__ */ new Date()).toISOString();
+          storeMeta();
           status("Dropbox sincronizzato");
           return;
         }
@@ -869,7 +920,7 @@ function createDropboxSync({ getState, applyRemote, normalizeRemote, onStatus, r
       }
       await applyMerged(item);
     })().catch((e) => {
-      status(e.message, "error");
+      handleSyncError(e);
       throw e;
     }).finally(() => {
       inFlight = null;
@@ -902,8 +953,7 @@ function createDropboxSync({ getState, applyRemote, normalizeRemote, onStatus, r
     } finally {
       overridePending = false;
       if (!disposed && meta.dirty && meta.ready) {
-        clearTimeout(delay);
-        delay = setTimeout(() => sync().catch((e) => status(e.message, "error")), 2500);
+        queueSync();
       }
     }
   }
@@ -961,6 +1011,7 @@ function createDropboxSync({ getState, applyRemote, normalizeRemote, onStatus, r
     transientStorage.removeItem("tempo-dropbox-pkce");
     auth = {};
     meta = { rev: null, dirty: false, ready: false };
+    retryCount = 0;
     storage.removeItem(AUTH_KEY);
     storage.removeItem(META_KEY);
     storage.removeItem(BASE_KEY);
@@ -970,11 +1021,21 @@ function createDropboxSync({ getState, applyRemote, normalizeRemote, onStatus, r
     disposed = true;
     ++generation;
     clearTimeout(delay);
+    if (eventsAttached) {
+      if (typeof window !== "undefined") window.removeEventListener("online", onConnectionResume);
+      if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVisibilityResume);
+      eventsAttached = false;
+    }
   }
   function info() {
-    return { connected: Boolean(auth.refreshToken), ready: meta.ready, dirty: meta.dirty };
+    return { connected: Boolean(auth.refreshToken), ready: meta.ready, dirty: meta.dirty, lastSyncedAt: meta.lastSyncedAt || null, recoveryAvailable: Boolean(recovery()) };
   }
   async function init() {
+    if (!eventsAttached) {
+      if (typeof window !== "undefined") window.addEventListener("online", onConnectionResume);
+      if (typeof document !== "undefined") document.addEventListener("visibilitychange", onVisibilityResume);
+      eventsAttached = true;
+    }
     await callback();
     status(auth.refreshToken ? meta.ready ? "Dropbox connesso" : "Dropbox collegato: inizializzazione necessaria" : "Dropbox non collegato");
     if (meta.ready) await sync().catch(() => {
@@ -1430,6 +1491,7 @@ function renderCloudSettings(parent, plugin) {
   const cloud = more.createDiv({ cls: "tempvs-cloud tempvs-form" });
   const status = cloud.createEl("p", { cls: "tempvs-cloud-status", text: plugin.cloudMessage || "Non collegato" });
   status.setAttribute("role", "status");
+  if (plugin.cloudInfo?.lastSyncedAt) cloud.createEl("p", { cls: "tempvs-muted", text: "Ultimo controllo Dropbox riuscito: " + new Date(plugin.cloudInfo.lastSyncedAt).toLocaleString("it-IT") });
   const key = cloud.createEl("input", { attr: { "aria-label": "Dropbox App key", placeholder: "App key Dropbox" } });
   const link = cloud.createEl("a", { text: "Apri autorizzazione Dropbox", href: "#", cls: "tempvs-cloud-link" });
   link.hidden = true;
@@ -1452,6 +1514,13 @@ function renderCloudSettings(parent, plugin) {
   const actions = cloud.createDiv({ cls: "tempvs-controls" });
   button(actions, "Sincronizza", () => plugin.cloudOperation("sync"));
   button(actions, "Unisci", () => plugin.cloudOperation("mergeNow"));
+  button(actions, "Salva recupero nel vault", async () => {
+    const copy = plugin.cloud.recovery();
+    if (!copy?.data) throw Error("Nessuna copia di recupero disponibile.");
+    const filename = "tempvs-recupero-" + Date.now() + ".json";
+    await plugin.app.vault.create(filename, JSON.stringify(copy.data, null, 2));
+    new import_obsidian2.Notice("Copia di recupero salvata nel vault: " + filename);
+  });
   const initial = cloud.createDiv({ cls: "tempvs-controls" });
   button(initial, "Prima unione", () => plugin.cloudOperation("firstSync", "merge"));
   button(initial, "Scarica prima copia", async () => {
@@ -1628,8 +1697,8 @@ var TempvsView = class extends import_obsidian2.ItemView {
     });
     const batch = plan.createEl("details", { cls: "tempvs-batch" });
     batch.createEl("summary", { text: "Inserisci pi\xF9 sessioni con il testo" });
-    batch.createEl("p", { cls: "tempvs-help", text: "Una sessione per riga: Area @durata +ora -pomodoro. Esempio: Studio @2h +14:00 -60m \u2192 50/10 + 50/10. -60m include la pausa; ~50m indica solo il focus. Se compili questo campo, verranno usate queste righe." });
-    const lines = field(batch, "Sessioni in formato rapido").createEl("textarea", { attr: { "aria-label": "Sessioni", placeholder: "Studio @2h +14:00 -60m\nLavoro @45m +18:00 !5m", rows: "3" } });
+    batch.createEl("p", { cls: "tempvs-help", text: "Nuovo formato: Studio +14:00-16:00 -30m \u2192 quattro sessioni da 30 minuti lordi. Si pu\xF2 oltrepassare mezzanotte. \xC8 ancora supportato Studio @2h +14:00 -60m: una sessione di due ore con cicli da 60 minuti lordi. Se compili questo campo, verranno usate queste righe." });
+    const lines = field(batch, "Sessioni in formato rapido").createEl("textarea", { attr: { "aria-label": "Sessioni", placeholder: "Studio +14:00-16:00 -30m\nLavoro +18:00-19:30 -45m", rows: "3" } });
     const updatePlanMode = () => {
       const textMode = Boolean(lines.value.trim());
       for (const input of [plannedArea, startTime, duration, cycleInput]) input.disabled = textMode;
@@ -1874,6 +1943,94 @@ var TempvsSettings = class extends import_obsidian2.PluginSettingTab {
       void this.plugin.chime.play("break").then((ok) => {
         if (!ok) new import_obsidian2.Notice("Audio non disponibile: controlla il volume e riprova toccando Riproduci.");
       });
+    }));
+    el.createEl("h3", { text: "Aree" });
+    el.createEl("p", { cls: "tempvs-muted", text: "Rinomina, riordina o elimina le aree senza perdere sessioni e statistiche. La descrizione Markdown resta associata all'area." });
+    for (const [index, area] of this.plugin.config.areas.entries()) {
+      const section = el.createDiv({ cls: "tempvs-area-config" });
+      const heading = new import_obsidian2.Setting(section).setName(area.name);
+      const nameInput = section.createEl("input", { attr: { type: "text", maxlength: "80", "aria-label": "Nuovo nome area " + area.name, value: area.name } });
+      const colorInput = section.createEl("input", { attr: { type: "color", "aria-label": "Colore area " + area.name, value: area.color || "#54769b" } });
+      const details = section.createEl("details");
+      details.createEl("summary", { text: "Descrizione Markdown" });
+      const description = details.createEl("textarea", { attr: { rows: "4", "aria-label": "Descrizione area " + area.name } });
+      description.value = area.description || "";
+      heading.addButton((b) => b.setButtonText("Salva").onClick(async () => {
+        try {
+          const next = nameInput.value.trim();
+          if (!next || next.length > 80 || this.plugin.config.areas.some((a) => a.name !== area.name && a.name.toLocaleLowerCase() === next.toLocaleLowerCase())) throw Error("Nome area non valido o gi\xE0 presente.");
+          const previous = area.name;
+          await this.plugin.change(() => {
+            const stored = this.plugin.config.areas.find((a) => a.name === previous);
+            if (!stored) throw Error("Area non disponibile.");
+            stored.name = next;
+            stored.color = colorInput.value;
+            stored.description = description.value;
+            if (next !== previous) this.plugin.remapArea(previous, next);
+          });
+          this.display();
+          new import_obsidian2.Notice("Area aggiornata.");
+        } catch (e) {
+          new import_obsidian2.Notice(e.message);
+        }
+      }));
+      heading.addButton((b) => b.setButtonText("\u2191").setTooltip("Sposta in alto").setDisabled(index === 0).onClick(async () => {
+        try {
+          await this.plugin.change(() => {
+            const a = this.plugin.config.areas;
+            [a[index - 1], a[index]] = [a[index], a[index - 1]];
+          });
+          this.display();
+        } catch (e) {
+          new import_obsidian2.Notice(e.message);
+        }
+      }));
+      heading.addButton((b) => b.setButtonText("\u2193").setTooltip("Sposta in basso").setDisabled(index === this.plugin.config.areas.length - 1).onClick(async () => {
+        try {
+          await this.plugin.change(() => {
+            const a = this.plugin.config.areas;
+            [a[index], a[index + 1]] = [a[index + 1], a[index]];
+          });
+          this.display();
+        } catch (e) {
+          new import_obsidian2.Notice(e.message);
+        }
+      }));
+      if (this.plugin.config.areas.length > 1) {
+        const transfer = section.createEl("select", { attr: { "aria-label": "Sposta i dati di " + area.name + " nell'area" } });
+        for (const other of this.plugin.config.areas.filter((a) => a.name !== area.name))
+          transfer.createEl("option", { text: "Trasferisci in " + other.name, value: other.name });
+        heading.addButton((b) => b.setButtonText("Elimina").onClick(async () => {
+          const target = transfer.value;
+          if (!await confirmTempvs(this.plugin.app, "Eliminare \xAB" + area.name + "\xBB?", "Le sessioni, le attivit\xE0 e lo storico verranno trasferiti nell'area \xAB" + target + "\xBB senza cancellare i tempi registrati.")) return;
+          try {
+            await this.plugin.change(() => {
+              this.plugin.remapArea(area.name, target);
+              this.plugin.config.areas = this.plugin.config.areas.filter((a) => a.name !== area.name);
+            });
+            this.display();
+            new import_obsidian2.Notice("Area eliminata e dati trasferiti.");
+          } catch (e) {
+            new import_obsidian2.Notice(e.message);
+          }
+        }));
+      }
+    }
+    const addArea = new import_obsidian2.Setting(el).setName("Nuova area");
+    let addName = "";
+    addArea.addText((t) => t.setPlaceholder("Nome della nuova area").onChange((v) => {
+      addName = v;
+    }));
+    addArea.addButton((b) => b.setButtonText("Aggiungi").onClick(async () => {
+      const name = addName.trim();
+      if (!name || name.length > 80 || this.plugin.config.areas.some((a) => a.name.toLocaleLowerCase() === name.toLocaleLowerCase())) return new import_obsidian2.Notice("Nome area non valido o gi\xE0 utilizzato.");
+      try {
+        await this.plugin.change(() => this.plugin.config.areas.push({ name, description: "", color: "#54769B" }));
+        this.display();
+        new import_obsidian2.Notice("Area aggiunta.");
+      } catch (e) {
+        new import_obsidian2.Notice(e.message);
+      }
     }));
     el.createEl("h3", { text: "Dropbox" });
     renderCloudSettings(el, this.plugin);
@@ -2179,6 +2336,22 @@ var TempvsPlugin = class extends import_obsidian2.Plugin {
       area.description = updated;
     });
     new import_obsidian2.Notice("Nota collegata all'area " + areaName + ".");
+  }
+  remapArea(from, to) {
+    for (const session of this.state.sessions) {
+      if (session.area === from) session.area = to;
+      if (session.title === from) session.title = to;
+    }
+    for (const item of this.state.history || []) {
+      if (item.area === from) item.area = to;
+      if (item.title === from) item.title = to;
+    }
+    for (const task of this.state.tasks || []) if (task.area === from) task.area = to;
+    if (this.state.appearance?.areaColors && Object.prototype.hasOwnProperty.call(this.state.appearance.areaColors, from)) {
+      if (!Object.prototype.hasOwnProperty.call(this.state.appearance.areaColors, to))
+        this.state.appearance.areaColors[to] = this.state.appearance.areaColors[from];
+      delete this.state.appearance.areaColors[from];
+    }
   }
   async start(area, gross, focus, pause) {
     if (!this.config.areas.some((a) => a.name === area)) throw Error("Area non valida.");
