@@ -1,3 +1,14 @@
+## Programmazione per intervalli, aree modificabili e Dropbox affidabile (novembre 2026)
+
+- **Nuova sintassi condivisa PWA / plugin Obsidian:** `Studio +14:00-16:00 -30m` divide la fascia in quattro sessioni indipendenti da 30 minuti **lordi**, comprese le pause. Anche `Studio +23:50-01:00 -30m` funziona: le sessioni dopo mezzanotte sono associate al giorno successivo; un eventuale resto diventa un'ultima sessione più breve.
+- **Compatibilità mantenuta:** `Studio @2h +14:00 -60m` continua a indicare una sessione lorda da 2 ore con cicli Pomodoro lordi da 60 minuti. Nella PWA le sessioni importate dalla stringa passano sempre per tabella, anteprima e conferma; non vengono create senza controllo.
+- **Aree editabili:** aggiunta, rinomina, modifica del colore e della descrizione Markdown, ordinamento su/giù ed eliminazione con scelta esplicita dell'area di destinazione. Sessioni, attività e storico vengono riassegnati e non cancellati. Sono disponibili sia nella PWA sia nelle impostazioni del plugin Obsidian.
+- **Dropbox:** tentativi automatici con attesa crescente dopo errori temporanei (rete, HTTP 409/429/5xx), nuovo controllo al ritorno in primo piano o alla riconnessione, indicazione dell'ultimo controllo riuscito e accesso a una copia locale di recupero prima delle sostituzioni remote. Restano attivi i controlli di revisione, l'unione a tre vie e la risoluzione manuale dei conflitti.
+- **Limite del browser:** la sincronizzazione non può essere garantita a PWA chiusa o terminata dal sistema operativo; i cambiamenti vengono conservati localmente, inviati mentre l'app è attiva e ripresi al successivo avvio.
+- Test aggiunti per intervalli e attraversamento della mezzanotte, compatibilità del parser, esito di verifica Dropbox e gestione degli errori temporanei.
+
+---
+
 ## Segnale acustico di fine focus (novembre 2026)
 
 - Alla fine di ogni fase di concentrazione viene emesso un breve segnale a due note, anche se i rumori ambientali sono disattivati; funziona sia per pause automatiche che per pause personalizzate e all'eventuale termine della sessione.
