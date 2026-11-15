@@ -511,6 +511,7 @@ function cloudStatus(message,info){
   $('cloud-setup').hidden=info.connected;
   $('cloud-actions').hidden=!info.connected;
   $('cloud-upload').hidden=info.ready;
+  $('cloud-recovery').hidden=!info.recoveryAvailable;
   const indicator=$('cloud-indicator'),label=$('cloud-indicator-text');
   if(!indicator||!label)return;
   const status=info.busy?'busy':!info.connected?'disconnected':(info.phase==='error'||/\b(?:errore|error|failed|http [45]\d\d|conflitto non risolto)\b/i.test(message))?'error':!info.ready?'setup':info.dirty?'pending':'synced';
@@ -525,6 +526,12 @@ cloud=createDropboxSync({getState:()=>state,applyRemote,normalizeRemote:normaliz
 const run=fn=>Promise.resolve().then(fn).catch(e=>{cloudStatus(e.message,{...cloud.info(),phase:'error',busy:false});tell(e.message);});
 $('cloud-connect').onclick=()=>run(()=>cloud.connect($('cloud-key').value));$('cloud-sync').onclick=()=>run(()=>cloud.sync());$('cloud-merge').onclick=()=>run(()=>cloud.mergeNow());$('cloud-upload').onclick=()=>run(()=>cloud.firstSync('upload'));
 $('cloud-download').onclick=()=>{if(confirm('Sostituire i dati con Dropbox? Prima scarico una copia locale.')){backup();run(()=>cloud.info().ready?cloud.forceDownload(true):cloud.firstSync('download'));}};
+$('cloud-recovery').onclick=()=>{
+  const copy=cloud.recovery();
+  if(!copy?.data)return tell('Nessuna copia di recupero disponibile.');
+  download(copy.data,'tempvs-recupero-'+localDateString()+'.json');
+  tell('Copia di recupero esportata. Puoi ripristinarla tramite Ripristina JSON.');
+};
 $('cloud-disconnect').onclick=()=>{if(confirm('Scollegare Dropbox mantenendo i dati locali?'))cloud.disconnect();};
 run(()=>cloud.init());
 window.addEventListener('pagehide',()=>{flush();++audioRequest;audioPreviewUntil=0;audioArmed=false;ambient.stop(0);});document.addEventListener('visibilitychange',()=>{if(document.hidden)flush();else{lastTick=Date.now();render();}});
