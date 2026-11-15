@@ -169,3 +169,17 @@ test('unlinking a daily note preserves all sessions and removes only the local a
  assert.deepEqual(p.state.sessions.map(s=>s.id),ids);assert(p.state.sessions.every(s=>!s.noteBlockId));assert.equal(Object.keys(p.dailyNotes).length,0);assert.equal(vault.text(),text);await p.onunload();
 });
 
+
+test('note assignment records only subsequent focus and survives saved archive',async()=>{
+ const {PluginClass,getSaved}=mockPlugin(true),p=new PluginClass();await p.onload();
+ const area=p.config.areas.find(a=>a.name==='Studio');
+ p.config.noteEstimates={n:{id:'n',title:'Platone',path:'Platone.md',vault:'Test',entries:[{areaId:area.id,area:area.name,count:20,minutes:30}]}};
+ await p.start('Studio',30,25,5);
+ const s=p.state.sessions[0],now=Date.now();s.timerStartedAt=new Date(now-20000).toISOString();s.timerEndsAt=new Date(now+1780000).toISOString();
+ p.lastTick=now-5000;p.record();assert.ok(s.actualSeconds>=5);assert.equal(s.noteWork,undefined);
+ await p.estimates.assign(s.id,'n');
+ const assigned=p.state.sessions[0];p.lastTick=Date.now()-5000;p.record();assert.ok(assigned.noteWork.n>=5);
+ const credited=assigned.noteWork.n;await p.estimates.assign(s.id,'');p.lastTick=Date.now()-5000;p.record();
+ assert.ok(p.state.sessions[0].noteWork.n<credited+1);
+ await p.persist();assert.ok(getSaved().archive.sessions[0].noteWork.n>=5);
+});

@@ -1,3 +1,5 @@
+import {renderNoteEstimates} from './estimate-ui.js';
+import {recordNoteWork} from './core/tempo-estimates.js';
 import {createArea,renameArea,reorderArea,moveAreaRecords,deleteArea} from './core/tempo-areas.js';
 import {initRefinedUI,editSessionDetails,chooseSyncConflict,updatePlannerDay} from './ui-refine.js';
 import {createTimerPip,timerColor} from './timer-pip.js';
@@ -138,6 +140,7 @@ function render(){
   }).sort((a,b)=>sessionBounds(a).start-sessionBounds(b).start);
   updatePlannerDay(chosen,state.sessions,config().windows);
   $('session-list').innerHTML=list.map(s=>{const end=+sessionBounds(s).end,old=end<Date.now();const status=s.finished?'Conclusa':old?(s.actualSeconds>0?'Svolta':'Non registrata / saltata'):s.paused?'In pausa':+sessionBounds(s).start<=Date.now()?'In corso':'In programma';return '<div class="item session-item" style="--area-color:'+colorFor(s.area||s.title)+'"><span><strong>'+esc(s.title)+'</strong><small>'+s.start+'–'+s.end+' · '+status+' · '+sessionPauseLabel(s)+'</small></span><div class="row">'+(!old&&!s.finished?'<button data-edit-pause="'+esc(s.id)+'">Pausa</button><button data-move="'+esc(s.id)+'">Sposta</button>':'')+'<button data-delete="'+esc(s.id)+'">Elimina</button></div></div>';}).join('')||'<p class="muted">Nessuna sessione in questo giorno.</p>';
+  renderNoteEstimates({document,state,day:chosen,commit:fn=>{record();return commit(fn);}});
   const measured=new Map(state.history.filter(h=>h.measured).map(h=>[h.sessionId,h]));
   for(const session of state.sessions)if(session.actualSeconds>0)
     measured.set(session.id,{sessionId:session.id,title:session.title,date:session.date,minutes:session.actualSeconds/60,measured:true,area:session.area||session.title});
@@ -276,7 +279,7 @@ function renderTimer(){
   timerPip.update();
   document.title=s?$('clock').textContent+' · TEMPVS':'TEMPVS · Tempo per te';
 }
-function record(){const now=Date.now();for(const s of state.sessions){const seconds=measuredFocus(s,lastTick,now);if(seconds){s.actualSeconds=(s.actualSeconds||0)+seconds;measuredDirty=true;}}lastTick=now;}
+function record(){const now=Date.now();for(const s of state.sessions){const seconds=measuredFocus(s,lastTick,now);if(seconds){s.actualSeconds=(s.actualSeconds||0)+seconds;recordNoteWork(s,seconds);measuredDirty=true;}}lastTick=now;}
 function flush(){record();if(!measuredDirty)return;try{archiveStore.save(state);measuredDirty=false;cloud?.changed();}catch(e){tell('Impossibile salvare il tempo registrato: '+e.message);}}
 let lastViewMinute=-1;
 setInterval(()=>{
@@ -322,7 +325,7 @@ $('session-list').onclick=async e=>{
       const s=current();
       if(s.actualSeconds>0){
         state.history=state.history.filter(h=>h.sessionId!==s.id);
-        state.history.push({sessionId:s.id,areaId:s.areaId,area:s.area,taskId:'',title:s.title,date:s.date,minutes:s.actualSeconds/60,measured:true});
+        state.history.push({sessionId:s.id,areaId:s.areaId,area:s.area,taskId:'',title:s.title,date:s.date,minutes:s.actualSeconds/60,measured:true,...(s.noteWork?{noteWork:s.noteWork}:{})});
       }
       state.sessions=state.sessions.filter(x=>x.id!==id);
       state.syncDeleted.sessions.push(id);

@@ -113,4 +113,4 @@ jobs:
             obsidian/dist/styles.css#styles.css \
             --target "${{ github.sha }}" \
             --title "TEMPVS $VERSION" \
-            --notes "Sessioni da fascia oraria con rapporto automatico esatto 5:1: -60m = 50+10, -30m = 25+5. Precisione al secondo, correzione delle sessioni future nelle note giornaliere, storico preservato. PWA e plugin pubblicati dallo stesso codice verificato."
+            --notes "Stime nelle note TEMPVS: associazione alle aree, sessioni stimate con rapporto 5:1, assegnazione alla giornata, avanzamento misurato e proiezione del residuo. Supporto PWA e sincronizzazione Dropbox. Completamento manuale."

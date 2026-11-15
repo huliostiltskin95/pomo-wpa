@@ -74,6 +74,22 @@ try {
   await ratioPage.locator('#confirm-plan').click();
   const ratios=await ratioPage.evaluate(()=>JSON.parse(localStorage.getItem('tempo-pomodoro-v2')).sessions.filter(s=>s.date==='2099-11-07').map(s=>[s.workMinutes,s.cycleMinutes]));
   assert.deepEqual(ratios,[[50,60],[25,30],[25,30],[37.5,45]]);
+  await ratioPage.evaluate(()=>{
+    const s=JSON.parse(localStorage.getItem('tempo-pomodoro-v2'));
+    const area=s.defaults.simple.areas.find(a=>a.name==='Personale');
+    s.defaults.simple.noteEstimates={'note-test':{id:'note-test',path:'Progetto.md',title:'Progetto',vault:'Test',entries:[{areaId:area.id,area:area.name,count:20,minutes:30},{areaId:area.id,area:area.name,count:10,minutes:60}]}};
+    localStorage.setItem('tempo-pomodoro-v2',JSON.stringify(s));
+  });
+  await ratioPage.reload();
+  await ratioPage.waitForFunction(()=>document.querySelector('#note-estimates summary'));
+  await ratioPage.getByRole('button',{name:'Pianifica',exact:true}).click();
+  await ratioPage.locator('#session-date').fill('2099-11-07');
+  await ratioPage.locator('#note-estimates summary').click();
+  assert.match(await ratioPage.locator('#note-estimates').textContent(),/16 h 40 min/);
+  await ratioPage.locator('#note-estimates').getByRole('button',{name:'Assegna alle sessioni libere del giorno',exact:true}).click();
+  assert.equal(await ratioPage.evaluate(()=>JSON.parse(localStorage.getItem('tempo-pomodoro-v2')).sessions.filter(s=>s.noteEstimateId==='note-test').length),4);
+  await ratioPage.getByLabel('Nota della sessione 15:00').selectOption('');
+  assert.equal(await ratioPage.evaluate(()=>JSON.parse(localStorage.getItem('tempo-pomodoro-v2')).sessions.filter(s=>s.noteEstimateId==='note-test').length),3);
   await ratioPage.close();
   const noAudio=await browser.newPage();
   await noAudio.addInitScript(()=>{window.AudioContext=undefined;window.webkitAudioContext=undefined;});

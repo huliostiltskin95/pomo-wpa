@@ -1,3 +1,4 @@
+import {isEstimateSource} from '../core/tempo-estimates.js';
 import {MarkdownRenderChild,Notice,moment} from 'obsidian';
 import {normalizeArchive} from '../core/tempo-simple.js';
 import {sessionBounds} from '../core/tempo-core.js';
@@ -27,7 +28,9 @@ export class DailyBlocks {
   if(this.plugin.app.workspace.on)this.plugin.registerEvent(this.plugin.app.workspace.on('editor-change',(_editor,view)=>{if(view?.file?.extension==='md')this.schedule(view.file.path);}));
   if(vault?.on){
    this.plugin.registerEvent(vault.on('modify',file=>{if(file.extension==='md')this.schedule(file.path);}));
+   this.plugin.registerEvent(vault.on('delete',file=>{this.plugin.estimates?.archive(file.path).catch(e=>new Notice(e.message));}));
    this.plugin.registerEvent(vault.on('rename',(file,oldPath)=>{
+    this.plugin.estimates?.rename(file,oldPath).catch(e=>new Notice(e.message));
     let changed=false;for(const binding of Object.values(this.bindings))if(binding.path===oldPath||binding.path.startsWith(oldPath+'/')){binding.path=file.path+binding.path.slice(oldPath.length);changed=true;}
     if(changed)this.plugin.persist().catch(e=>new Notice('TEMPVS: '+e.message));this.refresh();
    }));
@@ -65,7 +68,10 @@ export class DailyBlocks {
   const markdown=await this.readMarkdown(file),blocks=findDailyBlocks(markdown);
   if(!blocks.length)return null;
   if(blocks.length!==1)throw Error('Usa un solo blocco TEMPVS per nota giornaliera.');
-  const block=blocks[0],date=resolveDailyDate(block.source,file,{
+  const block=blocks[0];
+  if(!block.source.trim()&&this.plugin.estimates?.find(file.path))return {file,block,markdown,kind:"estimate-empty"};
+  if(isEstimateSource(block.source))return {file,block,markdown,kind:"estimate"};
+  const date=resolveDailyDate(block.source,file,{
    moment,format:this.plugin.app.internalPlugins?.getPluginById('daily-notes')?.instance?.options?.format||'YYYY-MM-DD',
    frontmatter:this.plugin.app.metadataCache?.getFileCache(file)?.frontmatter
   });
@@ -76,9 +82,18 @@ export class DailyBlocks {
   if(!context)throw Error('Blocco TEMPVS non trovato.');
   return context;
  }
+ async syncEstimate(context,path){
+  this.applying=true;
+  try{if(context?.kind==='estimate')await this.plugin.estimates?.sync(context);else await this.plugin.estimates?.archive(path);}
+  finally{this.applying=false;}
+ }
  syncFile(path){return this.queue(async()=>{
   if(this.detached.has(path))return;
-  const context=await this.context(path);if(!context)return;
+  const context=await this.context(path);
+  if(!context){await this.syncEstimate(null,path);return;}
+  if(context.kind==="estimate-empty"){await this.syncEstimate(null,path);this.errors.delete(path);this.refresh(path);return;}
+  if(context.kind==="estimate"){await this.syncEstimate(context,path);this.errors.delete(path);this.refresh(path);return;}
+  await this.syncEstimate(null,path);
   const blockId=this.bindingId(path)||blockIdentity(context.block.source)||uid();
   this.validateBinding(blockId,path,context.date);
   const binding=this.bindings[blockId];
@@ -179,7 +194,7 @@ export class DailyBlocks {
     try{
      const context=await this.context(binding.path);if(!context)continue;
      // Edits in the note win. Never replace incomplete or unsaved user input.
-     if(binding.ratioVersion!==1||context.block.source!==binding.source){this.schedule(binding.path);continue;}
+     if(context.kind==="estimate"||binding.ratioVersion!==1||context.block.source!==binding.source){this.schedule(binding.path);continue;}
      const sessions=daySessions(this.plugin.state,binding.date,blockId).filter(s=>!binding.hiddenSessionIds?.includes(s.id));
      const body=serializeDailyPlan(sessions,binding.date);
      const source=explicitDay(binding.source)?'date: '+binding.date+'\n'+body:body;
@@ -218,6 +233,14 @@ class DailyBlock extends MarkdownRenderChild {
   try{
    const context=await this.controller.locate(this);if(this.disposed||version!==this.version)return;
    this.source=context.block.source;
+   if(context.kind==="estimate"||context.kind==="estimate-empty"){
+    const el=this.containerEl;el.empty();el.addClass("tempvs-daily");el.createEl("pre").createEl("code",{text:this.source});
+    const error=this.controller.errors.get(this.ctx.sourcePath);
+    if(error)el.createEl("p",{text:error,cls:"tempvs-daily-error"});
+    const note=this.controller.plugin.estimates?.find(this.ctx.sourcePath);
+    if(note&&!note.archived)this.controller.plugin.estimates.render(el,note);
+    return;
+   }
    const el=this.containerEl;el.empty();el.addClass('tempvs-daily');
    el.createEl('pre').createEl('code',{text:plain(this.source)});
    const error=this.controller.errors.get(this.ctx.sourcePath);

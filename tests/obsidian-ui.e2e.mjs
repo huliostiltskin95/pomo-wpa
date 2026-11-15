@@ -154,6 +154,33 @@ try {
   }
   await page.setViewportSize({width:390,height:844});
   await daily.screenshot({path:'/tmp/tempvs-daily-note.png'});
+  await page.evaluate(()=>{
+    const previous=plugin.app.vault;
+    window.estimateText='```tempus\n@Studio 20 -30m\n@Studio 10 -60m\n```';
+    const file={path:'Studio/Platone.md',basename:'Platone',extension:'md'};
+    plugin.app.vault={...previous,getName:()=> 'Test',getAbstractFileByPath:path=>path===file.path?file:previous.getAbstractFileByPath(path),read:async f=>f.path===file.path?estimateText:previous.read(f)};
+    const root=document.body.createDiv({cls:'estimate-container'});
+    plugin.processors.tempus('@Studio 20 -30m\n@Studio 10 -60m',root,{sourcePath:file.path,addChild:child=>{window.estimateChild=child;child.onload();}});
+  });
+  await page.waitForFunction(()=>plugin.estimates.notes.length===1);
+  await page.waitForFunction(()=>document.querySelector('.estimate-container')?.textContent.includes('16 h 40 min'));
+  const estimates=page.locator('.tempvs-estimates');
+  await estimates.locator('summary').click();
+  await estimates.getByRole('button',{name:'Assegna alle sessioni libere del giorno',exact:true}).click();
+  await page.waitForFunction(()=>plugin.state.sessions.filter(s=>s.date==='2099-11-06'&&!s.finished).every(s=>s.noteEstimateId));
+  assert.match(await estimates.textContent(),/0%/);
+  assert.match(await estimates.textContent(),/15 h/);
+  await page.getByLabel('Nota della sessione 18:00').selectOption('');
+  await page.waitForFunction(()=>!plugin.state.sessions.find(s=>s.start==='18:00'&&s.date==='2099-11-06').noteEstimateId);
+  await estimates.getByRole('button',{name:'Segna completata',exact:true}).click();
+  await page.waitForFunction(()=>plugin.estimates.notes[0].completed);
+  assert.equal(await page.evaluate(()=>plugin.state.sessions.filter(s=>s.date==='2099-11-06'&&!s.finished).length),2);
+  await estimates.getByRole('button',{name:'Riapri attività',exact:true}).click();
+  await page.waitForFunction(()=>!plugin.estimates.notes[0].completed);
+  await page.evaluate(async()=>{window.estimateText='```tempus\n@Studio 4 -60m\n```';await plugin.daily.syncFile('Studio/Platone.md');});
+  await page.waitForFunction(()=>plugin.estimates.notes[0].entries[0].count===4);
+  assert.equal(await page.evaluate(()=>plugin.estimates.notes.length),1);
+  console.log('Note estimates: ordinary note, exact totals, daily assignment, progress and manual completion passed.');
   console.log('Daily block: uppercase fence, source edits, stable IDs, panel-to-note updates and mobile layout passed.');
   assert.deepEqual(errors,[]);
   assert.deepEqual(await page.evaluate(()=>notices.filter(n=>/errore|invalid|sovrappost/i.test(n))),[]);

@@ -136,3 +136,5 @@
 /* The daily plan is plain text, readable on narrow screens. */
 .tempvs-daily pre { margin: 0 0 0.5em; white-space: pre-wrap; overflow-wrap: anywhere; }
 .tempvs-daily pre code { white-space: inherit; }
+
+.tempvs-estimate{padding:10px 0;overflow-wrap:anywhere}.tempvs-estimate p{margin:8px 0}.tempvs-estimate progress{width:100%;accent-color:var(--interactive-accent)}.tempvs-estimate button{margin:4px 6px 4px 0;white-space:normal;max-width:100%}.tempvs-estimate-details{border-top:1px solid var(--background-modifier-border);padding:8px 0}.tempvs-note-assignment{width:100%;max-width:100%;margin-top:6px}.tempvs-estimate small{display:block}

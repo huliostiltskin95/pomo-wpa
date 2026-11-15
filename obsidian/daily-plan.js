@@ -136,7 +136,7 @@ export function prepareDailyPlan({source,date,blockId,state,now=new Date(),id=()
 export function applyDailyPlan(state,proposal){
  const affected=new Set([...proposal.sessions.map(s=>s.id),...proposal.removeIds]);
  const current=new Map(state.sessions.map(s=>[s.id,s]));
- state.sessions=state.sessions.filter(s=>!affected.has(s.id)).concat(proposal.sessions.map(s=>({...s,...(current.has(s.id)?{actualSeconds:current.get(s.id).actualSeconds||0,paused:current.get(s.id).paused}:{} )})));
+ state.sessions=state.sessions.filter(s=>!affected.has(s.id)).concat(proposal.sessions.map(s=>({...s,...(current.has(s.id)?{actualSeconds:current.get(s.id).actualSeconds||0,...(current.get(s.id).noteWork?{noteWork:current.get(s.id).noteWork}:{}),paused:current.get(s.id).paused}:{} )})));
  state.syncDeleted.sessions=[...new Set([...state.syncDeleted.sessions,...proposal.removeIds])];
 }
 

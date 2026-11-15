@@ -1,3 +1,4 @@
+import {validateEstimates} from './tempo-estimates.js';
 import {normalizeAreaLinks} from './tempo-areas.js';
 import {sessionBounds, localDateString, formatTime, validSession, hasSessionOverlaps, getPhase, normalizeSession, dateTime, pauseMinutes, durationLabel} from './tempo-core.js';
 
@@ -51,6 +52,8 @@ export function normalizeArchive(data) {
   if(data.defaults?.workMinutes!==undefined&&(!Number.isInteger(data.defaults.workMinutes)||data.defaults.workMinutes<1||data.defaults.workMinutes>240))throw Error('Durata del ciclo non valida.');
   if(data.sessions.some(s=>(s.timerStartedAt||s.timerEndsAt)&&(!Number.isFinite(+new Date(s.timerStartedAt))||!Number.isFinite(+new Date(s.timerEndsAt))||new Date(s.timerEndsAt)<=new Date(s.timerStartedAt))))throw Error('Orari timer non validi.');
   const config=data.defaults?.simple || {};
+  validateEstimates(config.noteEstimates);
+  for(const item of [...data.sessions,...(data.history||[])])if(item.noteWork!==undefined&&(!item.noteWork||typeof item.noteWork!=='object'||Array.isArray(item.noteWork)||Object.values(item.noteWork).some(v=>!Number.isFinite(v)||v<0)))throw Error('Avanzamento note non valido.');
   if(config.areas && (!Array.isArray(config.areas)||!config.areas.length||config.areas.some(a=>!a || typeof a.name!=='string'||!a.name.trim()||typeof a.description!=='string')))throw Error('Aree non valide.');
   if(config.windows && (!Array.isArray(config.windows)||config.windows.some(w=>!validSession({...w,id:'window',title:'window',workMinutes:25}))))throw Error('Fasce non valide.');
   if(data.history && (!Array.isArray(data.history)||data.history.some(h=>!h || typeof h.sessionId!=='string'||!h.sessionId.trim()||!Number.isFinite(h.minutes)||h.minutes<0)))throw Error('Storico non valido.');

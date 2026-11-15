@@ -1,3 +1,5 @@
+import {NoteEstimates} from './note-estimates.js';
+import {recordNoteWork} from '../core/tempo-estimates.js';
 import {DailyBlocks} from './daily-blocks.js';
 import { Plugin, ItemView, Notice, Platform, PluginSettingTab, Setting, setIcon } from "obsidian";
 import { getActiveSession, getPhase, sessionBounds, hasSessionOverlaps, localDateString, formatTime, mmss } from "../core/tempo-core.js";
@@ -129,6 +131,7 @@ class TempvsView extends ItemView {
     iconButton(nav,"chevron-right","Giorno successivo",()=>{this.day=shiftDate(this.day,1);this.update(true);});
     root.createDiv({cls:"tempvs-daily-status",attr:{role:"status"}});
     root.createDiv({cls:"tempvs-sessions"});
+    root.createDiv({cls:"tempvs-estimates"});
     const add = button(root,"+ Nuova sessione",()=>this.togglePanel("create"));
     add.addClass("mod-cta","tempvs-add-button");
     add.dataset.panel="create";
@@ -289,6 +292,7 @@ class TempvsView extends ItemView {
       const el=root.querySelector(".tempvs-"+name+"-panel");
       if(el){el.id=this.panelId+"-"+name;setPanel(el,this.panel===name);}
     }
+    plugin.estimates?.renderPanel(root.querySelector(".tempvs-estimates"),this.day);
     if(this.panel==="notes")this.renderNotes();
     for(const trigger of root.querySelectorAll("[data-panel]")){
       trigger.setAttribute("aria-controls",this.panelId+"-"+trigger.dataset.panel);
@@ -353,7 +357,7 @@ class TempvsView extends ItemView {
     if(dailyStatus){
       const path=plugin.app.workspace.getActiveFile?.()?.path;
       const error=plugin.daily?.errors.get(path);
-      dailyStatus.textContent=error?'Nota giornaliera: '+error:'';
+      dailyStatus.textContent=error?'TEMPVS: '+error:'';
       dailyStatus.hidden=!error;
       dailyStatus.toggleClass('tempvs-daily-error',Boolean(error));
     }
@@ -376,6 +380,7 @@ class TempvsView extends ItemView {
       info.createEl("strong",{text:s.start+"–"+s.end});
       const details=info.createDiv({cls:"tempvs-session-details"});
       details.createSpan({text:s.area||s.title});
+      plugin.estimates?.selector(info,s);
       const isActive=active?.id===s.id;
       item.toggleClass("is-current",isActive);
       details.createEl("small",{cls:"tempvs-muted",text:isActive?(s.paused?"Focus sospeso":"In corso"):minutes((sessionBounds(s).end-sessionBounds(s).start)/1000)+" min · Programmata"+(s.cycleMinutes!==undefined?` · ${s.workMinutes}/${s.cycleMinutes-s.workMinutes}`:"")});
@@ -388,6 +393,7 @@ class TempvsView extends ItemView {
       empty.createEl("strong",{text:"Spazio per i tuoi progetti"});
       empty.createEl("p",{text:"Nessuna sessione in agenda. Avvia un focus o pianifica un momento per questa giornata."});
     }
+    plugin.estimates?.renderPanel(root.querySelector(".tempvs-estimates"),this.day);
     if(this.panel==="notes")this.renderNotes();
   }
 }
@@ -559,6 +565,7 @@ export default class TempvsPlugin extends Plugin {
         isOnline: () => navigator.onLine !== false
       }
     });
+    this.estimates=new NoteEstimates(this);
     this.daily=new DailyBlocks(this);this.daily.start();
     this.registerView(VIEW_TYPE, leaf => new TempvsView(leaf, this));
     this.addSettingTab(new TempvsSettings(this.app,this));
@@ -687,7 +694,7 @@ export default class TempvsPlugin extends Plugin {
     if (now <= this.lastTick) { this.lastTick = now; return; }
     for (const s of this.state.sessions) {
       const elapsed = measuredFocus(s, this.lastTick, now);
-      if (elapsed > 0) { s.actualSeconds = (s.actualSeconds || 0) + elapsed; this.dirty = true; }
+      if (elapsed > 0) { s.actualSeconds = (s.actualSeconds || 0) + elapsed; recordNoteWork(s,elapsed); this.dirty = true; }
     }
     this.lastTick = now;
   }
@@ -701,6 +708,7 @@ export default class TempvsPlugin extends Plugin {
       }).catch(e => new Notice("TEMPVS: salvataggio fallito: " + e.message));
       this.lastSave = now;
     }
+    if(Math.floor(now/15000)!==Math.floor((now-1000)/15000))this.daily?.refresh();
     this.refresh(Math.floor(now / 60000) !== Math.floor((now-1000)/60000));
   }
   async persist() {
