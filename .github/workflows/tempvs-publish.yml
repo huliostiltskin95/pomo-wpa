@@ -1,0 +1,55 @@
+name: Validate and publish TEMPVS
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main, feature/planning-interval-areas-dropbox-20261115]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test-build-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install build tools
+        run: npm install --no-audit --no-fund
+      - name: Run core and integration tests
+        run: npm test
+      - name: Build Obsidian plugin and PWA
+        run: npm run build:all
+      - name: Validate JavaScript sources
+        run: |
+          node --check simple.js
+          node --check planner-table.js
+          node --check obsidian/main.js
+          node --check core/tempo-simple.js
+          node --check core/tempo-dropbox.js
+      - name: Publish BRAT-compatible Obsidian release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(node -p "require('./manifest.json').version")
+          TAG="v${VERSION}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG exists; refusing to overwrite automatically."
+            exit 1
+          fi
+          gh release create "$TAG" \
+            'obsidian/dist/main.js#main.js' \
+            'obsidian/dist/styles.css#styles.css' \
+            'obsidian/dist/manifest.json#manifest.json' \
+            --target "$GITHUB_SHA" \
+            --title "TEMPVS $TAG" \
+            --notes "Pianificazione per fasce orarie, gestione delle aree e sincronizzazione Dropbox rafforzata. Aggiornamento PWA e plugin Obsidian." \
+            --latest
