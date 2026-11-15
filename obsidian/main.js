@@ -38,6 +38,7 @@ function renderCloudSettings(parent, plugin) {
     const cloud = more.createDiv({ cls: "tempvs-cloud tempvs-form" });
     const status = cloud.createEl("p", { cls: "tempvs-cloud-status", text: plugin.cloudMessage || "Non collegato" });
     status.setAttribute("role","status");
+    if(plugin.cloudInfo?.lastSyncedAt)cloud.createEl("p",{cls:"tempvs-muted",text:"Ultimo controllo Dropbox riuscito: "+new Date(plugin.cloudInfo.lastSyncedAt).toLocaleString("it-IT")});
     const key = cloud.createEl("input", { attr: { "aria-label": "Dropbox App key", placeholder: "App key Dropbox" } });
     const link = cloud.createEl("a", { text: "Apri autorizzazione Dropbox", href: "#", cls: "tempvs-cloud-link" });
     link.hidden = true; link.setAttribute("target","_blank"); link.setAttribute("rel","noopener noreferrer");
@@ -57,6 +58,13 @@ function renderCloudSettings(parent, plugin) {
     const actions = cloud.createDiv({ cls: "tempvs-controls" });
     button(actions, "Sincronizza", () => plugin.cloudOperation("sync"));
     button(actions, "Unisci", () => plugin.cloudOperation("mergeNow"));
+    button(actions, "Salva recupero nel vault", async()=>{
+      const copy=plugin.cloud.recovery();
+      if(!copy?.data)throw Error("Nessuna copia di recupero disponibile.");
+      const filename="tempvs-recupero-"+Date.now()+".json";
+      await plugin.app.vault.create(filename,JSON.stringify(copy.data,null,2));
+      new Notice("Copia di recupero salvata nel vault: "+filename);
+    });
     const initial = cloud.createDiv({ cls: "tempvs-controls" });
     button(initial, "Prima unione", () => plugin.cloudOperation("firstSync","merge"));
     button(initial, "Scarica prima copia", async () => {
