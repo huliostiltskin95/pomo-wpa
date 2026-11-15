@@ -51,6 +51,7 @@ export class NoteEstimates {
  render(parent,note,day=localDateString()){
   const p=estimateProgress(note,this.plugin.state,{day}),box=parent.createDiv({cls:'tempvs-estimate'});
   action(box,note.title,()=>this.plugin.app.workspace.openLinkText(note.path,'',false));
+  box.createEl('p',{text:'Stima: '+note.entries.map(e=>`${e.count} × ${e.minutes} min (${e.area})`).join(' + ')+` · ${note.entries.reduce((n,e)=>n+e.count,0)} sessioni · ${estimateTime(p.estimated*6/5)} lordi.`});
   box.createEl('p',{text:`${note.completed?'Completata · ':''}${Math.round(p.percent)}% · Lavoro registrato: ${estimateTime(p.done)} / ${estimateTime(p.estimated)}`});
   box.createEl('progress',{attr:{max:'100',value:String(p.percent),'aria-label':'Avanzamento '+note.title}});
   box.createEl('p',{text:`Resta da lavorare: ${estimateTime(p.remaining)} netti · ${estimateTime(p.remaining*6/5)} lordi, pause comprese.`});

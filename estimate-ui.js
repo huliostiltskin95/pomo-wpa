@@ -12,6 +12,7 @@ export function renderNoteEstimates({document,state,day,commit}){
  for(const note of notes){
   const p=estimateProgress(note,state,{day}),box=add(root,'details');box.dataset.noteId=note.id;box.open=open.has(note.id);
   add(box,'summary',`${note.title} · ${Math.round(p.percent)}%${note.completed?' · completata':''}`);
+  add(box,'p','Stima: '+note.entries.map(e=>`${e.count} × ${e.minutes} min (${e.area})`).join(' + ')+` · ${note.entries.reduce((n,e)=>n+e.count,0)} sessioni · ${estimateTime(p.estimated*6/5)} lordi.`);
   add(box,'p',`Lavoro registrato: ${estimateTime(p.done)} / ${estimateTime(p.estimated)}. Restano ${estimateTime(p.remaining)} netti (${estimateTime(p.remaining*6/5)} lordi).`);
   const link=add(box,'a','Apri nota in Obsidian');link.href='obsidian://open?'+new URLSearchParams({vault:note.vault||'',file:note.path});
   for(const a of p.areas)add(box,'p',`${a.area}: ${a.durations.map(m=>`${Math.ceil(a.remaining/(m*50))} sessioni equivalenti da ${m} min`).join(' oppure ')}. `+(a.dayCapacity?`Dedicando tutti gli slot ancora disponibili del ${day} a questa nota, resterebbero ${estimateTime(a.afterDay)} netti.`:'Nessuno slot disponibile in questo giorno per la proiezione.'));

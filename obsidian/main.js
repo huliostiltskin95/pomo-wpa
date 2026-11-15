@@ -292,7 +292,6 @@ class TempvsView extends ItemView {
       const el=root.querySelector(".tempvs-"+name+"-panel");
       if(el){el.id=this.panelId+"-"+name;setPanel(el,this.panel===name);}
     }
-    plugin.estimates?.renderPanel(root.querySelector(".tempvs-estimates"),this.day);
     if(this.panel==="notes")this.renderNotes();
     for(const trigger of root.querySelectorAll("[data-panel]")){
       trigger.setAttribute("aria-controls",this.panelId+"-"+trigger.dataset.panel);
