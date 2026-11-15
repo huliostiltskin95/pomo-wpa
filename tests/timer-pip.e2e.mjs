@@ -6,6 +6,7 @@ try {
  page.on('pageerror',e=>errors.push(e.message));
  await page.goto('http://127.0.0.1:8123/');
  await page.locator('#instant-minutes').fill('2');
+ await page.getByText('Personalizza focus e pause',{exact:true}).click();
  await page.locator('#instant-pause-mode').selectOption('custom');
  await page.locator('#instant-pause-minutes').fill('1');
  await page.locator('#instant button.primary').click();
@@ -27,14 +28,18 @@ try {
  assert.equal(await page.locator('#pip-toggle').isVisible(),false);
  // Reload into the final custom break, then into an automatic break.
  for(const custom of [true,false]) {
-  await page.evaluate(custom=>{
-   const key='tempo-pomodoro-v2',s=JSON.parse(localStorage.getItem(key));
+  const phasePage=await browser.newPage();
+  phasePage.on('pageerror',e=>errors.push(e.message));
+  await phasePage.addInitScript(custom=>{
    const start=new Date(Date.now()-65000),end=new Date(+start+120000);
-   s.sessions=[{id:'test',title:'Studio',area:'Studio',date:start.toISOString().slice(0,10),start:'00:00',end:'00:02',timerStartedAt:start.toISOString(),timerEndsAt:end.toISOString(),workMinutes:1,breakEnabled:true,...(custom?{customBreakMinutes:1}:{})}];
-   localStorage.setItem(key,JSON.stringify(s));
+   const date=[start.getFullYear(),String(start.getMonth()+1).padStart(2,'0'),String(start.getDate()).padStart(2,'0')].join('-');
+   const state={sessions:[{id:'test',title:'Studio',area:'Studio',date,start:'00:00',end:'00:02',timerStartedAt:start.toISOString(),timerEndsAt:end.toISOString(),workMinutes:1,breakEnabled:true,...(custom?{customBreakMinutes:1}:{})}]};
+   localStorage.setItem('tempo-pomodoro-v2',JSON.stringify(state));
   },custom);
-  await page.reload(); await page.waitForFunction(()=>document.querySelector('#phase').textContent==='PAUSA');
-  assert.equal(await color(),'#2563EB');
+  await phasePage.goto('http://127.0.0.1:8123/');
+  await phasePage.waitForFunction(()=>document.querySelector('#phase').textContent==='PAUSA');
+  assert.equal(await phasePage.locator('#timer').evaluate(e=>e.style.getPropertyValue('--area-color')),'#2563EB');
+  await phasePage.close();
  }
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
  assert.deepEqual(errors,[]);

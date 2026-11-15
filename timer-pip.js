@@ -3,14 +3,14 @@ export const BREAK_COLOR = '#2563EB';
 export function timerColor(areaColor, phase, paused) {
   return paused || phase?.kind === 'break' ? BREAK_COLOR : areaColor;
 }
-export function createTimerPip({button, snapshot, notify, togglePause}) {
+export function createTimerPip({button, snapshot, notify, togglePause, fallback}) {
   let pipWindow, video, stream, canvas, busy = false, prepared = false;
   const probe = document.createElement('video');
   const documentSupported = Boolean(window.documentPictureInPicture?.requestWindow);
   const videoSupported = Boolean(HTMLCanvasElement.prototype.captureStream &&
     ((document.pictureInPictureEnabled && probe.requestPictureInPicture) || probe.webkitSetPresentationMode));
   const supported = documentSupported || videoSupported;
-  button.title = supported ? 'Mostra il timer sopra le altre finestre' : 'Picture-in-Picture non disponibile in questo browser';
+  button.title = supported ? 'Mostra il timer sopra le altre finestre' : 'Apri la vista Focus del timer';
   function opened() { return Boolean(pipWindow && !pipWindow.closed) || Boolean(video &&
     (document.pictureInPictureElement === video || video.webkitPresentationMode === 'picture-in-picture')); }
   function cleanupVideo() {
@@ -24,7 +24,8 @@ export function createTimerPip({button, snapshot, notify, togglePause}) {
     const view = snapshot();
     button.hidden = !view.active && !opened();
     button.disabled = busy;
-    button.textContent = opened() ? 'Chiudi mini timer' : prepared ? 'Apri mini timer' : 'Mini timer (PiP)';
+    button.parentElement?.classList?.toggle('pip-active',opened());
+    button.textContent = !supported ? 'Vista Focus' : opened() ? 'Chiudi mini timer' : prepared ? 'Apri mini timer' : 'Mini timer (PiP)';
     button.setAttribute('aria-pressed', String(opened()));
     if(pipWindow && !pipWindow.closed) {
       const doc = pipWindow.document;
@@ -54,7 +55,7 @@ export function createTimerPip({button, snapshot, notify, togglePause}) {
   }
   button.addEventListener('click', async () => {
     if(busy) return;
-    if(!supported) return notify('Questo browser non consente il mini timer PiP. Puoi usare Schermo intero.');
+    if(!supported){fallback?.();return notify('PiP non disponibile: aperta la vista Focus del timer.');}
     busy = true;
     try {
       if(pipWindow && !pipWindow.closed) { pipWindow.close(); return; }
@@ -99,7 +100,8 @@ export function createTimerPip({button, snapshot, notify, togglePause}) {
       }
     } catch (error) {
       cleanupVideo();
-      notify(pipErrorMessage(error));
+      fallback?.();
+      notify(pipErrorMessage(error)+(fallback?' Aperta la vista Focus del timer.':''));
     } finally { busy = false; update(); }
   });
   window.addEventListener('pagehide', () => { pipWindow?.close(); cleanupVideo(); });

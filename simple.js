@@ -1,3 +1,4 @@
+import {createArea,renameArea,reorderArea,moveAreaRecords,deleteArea} from './core/tempo-areas.js';
 import {initRefinedUI,editSessionDetails,chooseSyncConflict,updatePlannerDay} from './ui-refine.js';
 import {createTimerPip,timerColor} from './timer-pip.js';
 import {createPlannerTable} from './planner-table.js';
@@ -83,7 +84,7 @@ const available=()=>state.sessions.filter(s=>!s.finished);
 const active=()=>getActiveSession(available());
 function commit(change){
   const previous=JSON.stringify(state);
-  try{change();archiveStore.save(state);}
+  try{change();state=normalizeArchive(state);archiveStore.save(state);}
   catch(e){state=JSON.parse(previous);tell('Salvataggio non riuscito: '+e.message);return false;}
   // The archive is committed. A sync/UI failure must not roll memory back behind disk.
   proposal=null;$('proposal').hidden=true;
@@ -105,7 +106,7 @@ function renderAreaManager(){
     '<button type="button" data-area-move="'+index+'" data-direction="-1" '+(index===0?'disabled':'')+' aria-label="Sposta '+esc(area.name)+' in alto">↑</button>'+
     '<button type="button" data-area-move="'+index+'" data-direction="1" '+(index===config().areas.length-1?'disabled':'')+' aria-label="Sposta '+esc(area.name)+' in basso">↓</button>'+
     '<button type="button" data-area-select="'+index+'">Modifica</button>'+
-    '<button type="button" data-area-delete="'+index+'">Elimina</button></div></div>').join('');
+    '<button type="button" data-area-records="'+index+'">Sposta elementi</button><button type="button" data-area-delete="'+index+'">Elimina</button></div></div>').join('');
 }
 function inline(text){
   // Tokenize code and links before emphasis, so formatting never modifies href attributes.
@@ -157,9 +158,12 @@ function render(){
     const hours=Math.floor(rounded/60),remainder=rounded%60;
     return hours?hours+' h'+(remainder?' '+remainder+' min':''):rounded+' min';
   };
+  const weekEnd=new Date(weekStart);weekEnd.setDate(weekEnd.getDate()+7);
+  const plannedWeek=state.sessions.reduce((sum,s)=>{const b=sessionBounds(s);return sum+Math.max(0,Math.min(+b.end,+weekEnd)-Math.max(+b.start,+weekStart))/60000;},0);
   const measures=[
     ['Oggi',formatMinutes(today)],
-    ['Questa settimana',formatMinutes(weekly)],
+    ['Concentrazione · settimana',formatMinutes(weekly)],
+    ['Programmato lordo · settimana',formatMinutes(plannedWeek)],
     ['Totale registrato',formatMinutes(total)]
   ];
   const areaTotals=new Map();
@@ -224,7 +228,7 @@ async function startAudio(preview=false){
   syncAudio();
 }
 function stopAudio(){++audioRequest;audioPreviewUntil=0;audioArmed=false;ambient.stop(.9);updateAudioStatus();}
-const timerPip=createTimerPip({button:$('pip-toggle'),notify:tell,
+const timerPip=createTimerPip({button:$('pip-toggle'),notify:tell,fallback:enterImmersive,
   togglePause:()=>$('pause').click(),
   snapshot:()=>({active:Boolean(active()),paused:Boolean(active()?.paused),
     title:$('active-title').textContent,phase:$('phase').textContent,clock:$('clock').textContent,
@@ -297,7 +301,7 @@ $('finish').onclick=()=>{record();const s=active();if(s)commit(()=>{s.finished=t
 $('window-form').onsubmit=e=>{e.preventDefault();const w={id:uid(),date:$('window-date').value,start:$('window-start').value,end:$('window-end').value};if(w.start===w.end)return tell('Indica due orari diversi.');if(config().windows.some(x=>{const a=sessionBounds(x),b=sessionBounds(w);return a.start<b.end&&a.end>b.start;}))return tell('Questa fascia si sovrappone a una disponibilità già inserita.');commit(()=>config().windows.push(w));};
 $('windows').onclick=e=>{const b=e.target.closest('[data-remove-window]');if(b)commit(()=>config().windows=config().windows.filter(w=>w.id!==b.dataset.removeWindow));};
 function tablePlan(requests){return planSessions(requests,config().windows,available(),{...state.defaults,breakEnabled:true,workMinutes:state.defaults.workMinutes},new Date(),uid,$('quick-date').value);}
-$('quick-form').onsubmit=e=>{e.preventDefault();proposal=null;$('proposal').hidden=true;try{proposal=tablePlan(planner.requests());$('proposal-list').innerHTML=proposal.sessions.map(s=>'<p>'+esc(s.title)+' · '+formatDate(s.date)+' · '+s.start+'–'+s.end+' · '+sessionPauseLabel(s)+'</p>').join('')+'<p>'+ (proposal.remainder?'Mancano '+proposal.remainder+' minuti di disponibilità. Aggiungi altre fasce: non è stato salvato nulla.':'Tutto pronto: '+proposal.sessions.length+' sessioni.')+'</p>';$('confirm-plan').disabled=proposal.remainder>0||!proposal.sessions.length;$('proposal').hidden=false;}catch(err){tell(err.message);}};
+$('quick-form').onsubmit=e=>{e.preventDefault();proposal=null;$('proposal').hidden=true;try{proposal=tablePlan(planner.requests());$('proposal-list').innerHTML=proposal.sessions.map(s=>'<p>'+esc(s.title)+' · '+formatDate(s.date)+' · '+s.start+'–'+s.end+' · '+sessionPauseLabel(s)+'</p>').join('')+'<p>'+ (proposal.remainder?'Mancano '+proposal.remainder+' minuti di disponibilità. Aggiungi altre fasce: non è stato salvato nulla.':'Tutto pronto: '+proposal.sessions.length+' sessioni.'+(proposal.unusedMinutes?' '+proposal.unusedMinutes+' minuti finali lasciati liberi: vengono create soltanto sessioni intere.':''))+'</p>';$('confirm-plan').disabled=proposal.remainder>0||!proposal.sessions.length;$('proposal').hidden=false;}catch(err){tell(err.message);}};
 $('confirm-plan').onclick=()=>{if(!proposal||proposal.remainder)return;const planned=proposal.sessions;if(planned.some(s=>+sessionBounds(s).start<Date.now())||hasSessionOverlaps([...available(),...planned]))return tell('Gli orari sono cambiati: prepara nuovamente il programma.');if(commit(()=>state.sessions.push(...planned))){planner.reset();$('quick').value='';tell('Sessioni programmate.');}};
 
 $('cancel-plan').onclick=()=>{proposal=null;$('proposal').hidden=true;};
@@ -318,7 +322,7 @@ $('session-list').onclick=async e=>{
       const s=current();
       if(s.actualSeconds>0){
         state.history=state.history.filter(h=>h.sessionId!==s.id);
-        state.history.push({sessionId:s.id,taskId:'',title:s.title,date:s.date,minutes:s.actualSeconds/60,measured:true});
+        state.history.push({sessionId:s.id,areaId:s.areaId,area:s.area,taskId:'',title:s.title,date:s.date,minutes:s.actualSeconds/60,measured:true});
       }
       state.sessions=state.sessions.filter(x=>x.id!==id);
       state.syncDeleted.sessions.push(id);
@@ -371,22 +375,6 @@ function loadAreaFields(){
   $('description').value=area?.description||'';
   $('area-color').value=colorFor($('edit-area').value).toLowerCase();
 }
-function renameAreaReferences(from,to){
-  for(const session of state.sessions){
-    if(session.area===from)session.area=to;
-    if(session.title===from)session.title=to;
-  }
-  for(const entry of state.history||[]){
-    if(entry.area===from)entry.area=to;
-    if(entry.title===from)entry.title=to;
-  }
-  for(const task of state.tasks||[])if(task.area===from)task.area=to;
-  if(state.appearance?.areaColors && Object.prototype.hasOwnProperty.call(state.appearance.areaColors,from)){
-    if(!Object.prototype.hasOwnProperty.call(state.appearance.areaColors,to))
-      state.appearance.areaColors[to]=state.appearance.areaColors[from];
-    delete state.appearance.areaColors[from];
-  }
-}
 function openSettings(){
   $('work').value=state.defaults.workMinutes;$('breaks').checked=state.defaults.breakEnabled;$('focus-end-chime').checked=chimeEnabled();
   options($('edit-area'));loadAreaFields();$('settings').showModal();
@@ -396,7 +384,7 @@ $('chime-preview').onclick=async()=>{
   const played=await focusEndChime.play();
   $('chime-status').textContent=played?'Segnale riprodotto.':'Audio non disponibile: verifica il volume o riprova toccando Prova segnale.';
 };
-$('settings-open').onclick=openSettings;$('area-edit').onclick=openSettings;$('settings-close').onclick=()=>$('settings').close();
+$('areas-open').onclick=()=>{openSettings();const group=$('area-form').closest('details');if(group)group.open=true;$('area-form').scrollIntoView({block:'start'});};$('settings-open').onclick=openSettings;$('area-edit').onclick=openSettings;$('settings-close').onclick=()=>$('settings').close();
 $('edit-area').onchange=loadAreaFields;
 $('area-form').onsubmit=e=>{
   e.preventDefault();
@@ -407,8 +395,7 @@ $('area-form').onsubmit=e=>{
     if(!area)throw Error('Area non trovata.');
     area.description=$('description').value;
     area.color=normalizeAreaColor($('area-color').value,name);
-    area.name=name;
-    if(name!==previous)renameAreaReferences(previous,name);
+    renameArea(state,area.id,name);
   })){
     if(name!==previous){planner?.remapArea(previous,name);planner?.syncAreas();}
     options($('edit-area'),name);loadAreaFields();render();tell('Area aggiornata.');
@@ -417,7 +404,7 @@ $('area-form').onsubmit=e=>{
 $('new-area-form').onsubmit=e=>{
   e.preventDefault();const name=$('new-area').value.trim();
   if(!name||config().areas.some(a=>a.name.toLocaleLowerCase()===name.toLocaleLowerCase()))return tell('Scegli un nome diverso.');
-  if(commit(()=>config().areas.push({name,description:'',color:normalizeAreaColor(undefined,name)}))){
+  if(commit(()=>createArea(state,{id:uid(),name,description:'',color:normalizeAreaColor(undefined,name)}))){
     $('new-area').value='';options($('edit-area'),name);loadAreaFields();
   }
 };
@@ -425,6 +412,18 @@ let pendingAreaDelete=null;
 $('area-list').onclick=e=>{
   const button=e.target.closest('button');
   if(!button)return;
+  if(button.hasAttribute('data-area-records')){
+    const area=config().areas[Number(button.dataset.areaRecords)];
+    if(!area)return;
+    $('area-records-dialog').dataset.areaId=area.id;
+    $('area-records-title').textContent='Elementi di '+area.name;
+    $('area-records-target').replaceChildren(...config().areas.filter(a=>a.id!==area.id).map(a=>new Option(a.name,a.id)));
+    $('area-records-list').innerHTML=['sessions','tasks','history'].map(collection=>{
+      const labels={sessions:'Sessioni',tasks:'Attività',history:'Storico'};
+      return '<fieldset><legend>'+labels[collection]+'</legend>'+state[collection].filter(item=>item.areaId===area.id).map(item=>'<label class="check"><input type="checkbox" data-collection="'+collection+'" value="'+esc(item.id||item.sessionId)+'">'+esc(item.title||'Senza titolo')+' '+esc(item.date||'')+'</label>').join('')+'</fieldset>';
+    }).join('');
+    $('area-records-dialog').showModal();return;
+  }
   if(button.hasAttribute('data-area-select')){
     const area=config().areas[Number(button.dataset.areaSelect)];if(!area)return;
     $('edit-area').value=area.name;loadAreaFields();$('area-name').focus();return;
@@ -433,7 +432,7 @@ $('area-list').onclick=e=>{
     const from=Number(button.dataset.areaMove),to=from+Number(button.dataset.direction);
     if(to<0||to>=config().areas.length)return;
     const selected=$('edit-area').value;
-    if(commit(()=>{const areas=config().areas;[areas[from],areas[to]]=[areas[to],areas[from]];})){
+    if(commit(()=>{reorderArea(state,config().areas[from].id,to-from);})){
       $('edit-area').value=selected;loadAreaFields();
     }
     return;
@@ -443,19 +442,39 @@ $('area-list').onclick=e=>{
     if(!area)return;
     if(config().areas.length<2)return tell('Deve rimanere almeno un’area.');
     pendingAreaDelete=area.name;
-    const used=state.sessions.filter(s=>s.area===area.name||s.title===area.name).length;
-    $('area-delete-message').textContent='Eliminare «'+area.name+'»? '+used+' sessioni collegate saranno trasferite, senza cancellare i tempi registrati. Questa operazione sarà inclusa nel backup.';
+    const used=state.sessions.filter(s=>s.areaId===area.id).length,tasks=state.tasks.filter(t=>t.areaId===area.id).length,history=state.history.filter(h=>h.areaId===area.id).length;
+    $('area-delete-message').textContent='Eliminare «'+area.name+'»? '+used+' sessioni, '+tasks+' attività e '+history+' voci di storico collegate. Puoi trasferirle oppure eliminarle definitivamente.';
     $('area-delete-target').replaceChildren(...config().areas.filter(a=>a.name!==area.name).map(a=>new Option(a.name,a.name)));
     $('area-delete-dialog').showModal();
   }
+};
+$('area-records-cancel').onclick=()=>$('area-records-dialog').close();
+$('area-records-confirm').onclick=()=>{
+  const from=$('area-records-dialog').dataset.areaId,to=$('area-records-target').value;
+  const selected=[...$('area-records-list').querySelectorAll('input:checked')];
+  if(!selected.length)return tell('Seleziona gli elementi da spostare.');
+  if(commit(()=>{
+    for(const collection of ['sessions','tasks','history']){
+      const ids=selected.filter(input=>input.dataset.collection===collection).map(input=>input.value);
+      // Keep archived measurements attached to their session when moving it.
+      moveAreaRecords(state,from,to,{collections:collection==='sessions'?['sessions','history']:[collection],ids});
+    }
+  })){$('area-records-dialog').close();tell('Elementi trasferiti.');}
+};
+$('area-delete-records').onclick=()=>{
+  const area=areaFor(pendingAreaDelete);if(!area)return;
+  if(!confirm('Eliminare definitivamente sessioni, attività e storico di «'+area.name+'»? I tempi eliminati non compariranno più nelle statistiche. Verrà conservata una copia locale di recupero.'))return;
+  if(commit(()=>{
+    localStorage.setItem('tempo-dropbox-recovery-v1',JSON.stringify({savedAt:new Date().toISOString(),data:state}));
+    deleteArea(state,area.id,{deleteRecords:true});
+  })){$('area-delete-dialog').close();pendingAreaDelete=null;loadAreaFields();tell('Area e dati associati eliminati.');}
 };
 $('area-delete-cancel').onclick=()=>{$('area-delete-dialog').close();pendingAreaDelete=null;};
 $('area-delete-confirm').onclick=()=>{
   const from=pendingAreaDelete,to=$('area-delete-target').value;
   if(!from||!to||from===to||!areaFor(from)||!areaFor(to))return tell('Scegli un’area di destinazione valida.');
   if(commit(()=>{
-    renameAreaReferences(from,to);
-    config().areas=config().areas.filter(a=>a.name!==from);
+    deleteArea(state,areaFor(from).id,{transferTo:areaFor(to).id});
   })){
     $('area-delete-dialog').close();pendingAreaDelete=null;
     planner?.remapArea(from,to);planner?.syncAreas();
@@ -516,8 +535,8 @@ function cloudStatus(message,info){
   $('cloud-recovery').hidden=!info.recoveryAvailable;
   const indicator=$('cloud-indicator'),label=$('cloud-indicator-text');
   if(!indicator||!label)return;
-  const status=info.busy?'busy':!info.connected?'disconnected':(info.phase==='error'||/\b(?:errore|error|failed|http [45]\d\d|conflitto non risolto)\b/i.test(message))?'error':!info.ready?'setup':info.dirty?'pending':'synced';
-  const names={busy:'Sincronizzazione…',disconnected:'Dropbox non collegato',error:'Errore Dropbox',setup:'Dropbox da configurare',pending:'Modifiche da sincronizzare',synced:'Sincronizzato'};
+  const status=info.busy?'busy':info.phase==='conflict'?'conflict':!info.connected?'disconnected':(info.phase==='error'||/\b(?:errore|error|failed|http [45]\d\d|conflitto non risolto)\b/i.test(message))?'error':!info.ready?'setup':info.dirty?'pending':'synced';
+  const names={busy:'Sincronizzazione…',disconnected:'Dropbox non collegato',error:'Errore Dropbox',conflict:'Conflitto da risolvere',setup:'Dropbox da configurare',pending:'Modifiche da sincronizzare',synced:'Sincronizzato'};
   indicator.dataset.status=status;
   label.textContent=names[status];
   indicator.title=message;

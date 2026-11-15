@@ -67,6 +67,8 @@ jobs:
           python3 -m http.server 8123 --bind 127.0.0.1 --directory dist/pwa >/tmp/tempvs-http.log 2>&1 &
           sleep 2
           node tests/simple.e2e.mjs
+          node tests/pwa-consolidation.e2e.mjs
+          node tests/timer-pip.e2e.mjs
 
   deploy-pwa:
     if: startsWith(github.ref, 'refs/tags/v')

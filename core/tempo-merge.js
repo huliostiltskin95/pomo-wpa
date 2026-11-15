@@ -90,14 +90,14 @@ export function mergeSnapshots(base, local, remote, choices = {}) {
     appearance:field(base?.appearance??absent,local.appearance??absent,remote.appearance??absent,
       "appearance","appearance","Aspetto")
   };
-  const finalDeleted = {tasks:new Set(),sessions:new Set()};
+  const finalDeleted = {tasks:new Set(),sessions:new Set(),history:new Set()};
   function collection(name) {
     const b=mapById(snapshotList(base,name),name);
     const l=mapById(snapshotList(local,name),name);
     const r=mapById(snapshotList(remote,name),name);
     const bDel=deleted(base,name),lDel=deleted(local,name),rDel=deleted(remote,name);
     const allIds=new Set([...b.keys(),...l.keys(),...r.keys(),
-      ...(name==="history"?[]:[...bDel,...lDel,...rDel])]);
+      ...bDel,...lDel,...rDel]);
     const out=[];
     for (const id of allIds) {
       const bp=b.has(id),lp=l.has(id),rp=r.has(id);
@@ -113,9 +113,10 @@ export function mergeSnapshots(base, local, remote, choices = {}) {
         } else result=field(bv,lv,rv,name+":"+id,name,label);
       } else if (lp || rp) {
         const present=lp?lv:rv;
-        const missingIsDeletion = bp || (lp?rDel.has(id):lDel.has(id));
-        if (!missingIsDeletion || name==="history") result=present;
-        else if (bp && same(present,bv)) result=absent;
+        const explicitDeletion=lp?rDel.has(id):lDel.has(id);
+        const missingIsDeletion = (name!=="history"&&bp) || explicitDeletion;
+        if (!missingIsDeletion) result=present;
+        else if ((bp && same(present,bv)) || (name==="history"&&explicitDeletion&&!bp)) result=absent;
         else {
           const key=name+":"+id+":exists";
           const answer=chosen(key,name,label+" · modifica o eliminazione",lv,rv);
@@ -123,13 +124,37 @@ export function mergeSnapshots(base, local, remote, choices = {}) {
         }
       }
       if (result!==absent) out.push(result);
-      else if(name!=="history" && (bp || lDel.has(id)||rDel.has(id)))finalDeleted[name].add(id);
+      else if(bp || lDel.has(id)||rDel.has(id))finalDeleted[name].add(id);
     }
     return out;
   }
   merged.tasks=collection("tasks");
   merged.sessions=collection("sessions");
   merged.history=collection("history");
+
+  // A remote addition can refer to an area deleted on this device. Resolve the
+  // relationship before normalizing/uploading; never silently recreate the area.
+  if(merged.defaults!==absent)merged.defaults=JSON.parse(JSON.stringify(merged.defaults));
+  const areas=merged.defaults?.simple?.areas;
+  if(Array.isArray(areas)){
+    const missing=new Map();
+    for(const name of ["sessions","tasks","history"])for(const item of merged[name]){
+      if(item.areaId&&!areas.some(a=>a.id===item.areaId||a.name===item.area))missing.set(item.areaId,item.area);
+    }
+    for(const [id,name] of missing){
+      const source=[local,remote,base].flatMap(state=>state?.defaults?.simple?.areas||[]).find(a=>a.id===id);
+      if(!source)throw Error("Area associata non disponibile: "+name);
+      const answer=chosen("areas:"+id+":exists","areas","Area eliminata con elementi modificati · "+name,absent,source,[
+        {value:"restore",label:"Ripristina l’area e conserva gli elementi"},
+        {value:"delete",label:"Elimina gli elementi collegati all’area"}
+      ]);
+      if(answer==="restore")areas.push(source);
+      else if(answer==="delete")for(const collection of ["sessions","tasks","history"]){
+        for(const item of merged[collection])if(item.areaId===id)finalDeleted[collection].add(collection==="history"?item.sessionId:item.id);
+        merged[collection]=merged[collection].filter(item=>item.areaId!==id);
+      }
+    }
+  }
 
   // Different IDs can still collide on the calendar. Never accept overlapping sessions.
   const active = new Map(merged.sessions.map(s=>[s.id,s]));
@@ -167,7 +192,8 @@ export function mergeSnapshots(base, local, remote, choices = {}) {
   for (const s of merged.sessions) finalDeleted.sessions.delete(s.id);
   merged.syncDeleted={
     tasks:[...finalDeleted.tasks].sort(),
-    sessions:[...finalDeleted.sessions].sort()
+    sessions:[...finalDeleted.sessions].sort(),
+    ...(finalDeleted.history.size?{history:[...finalDeleted.history].sort()}:{})
   };
   return {merged,conflicts};
 }

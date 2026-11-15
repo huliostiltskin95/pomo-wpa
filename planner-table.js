@@ -11,7 +11,7 @@ export function rowRequest(row, areas, defaultFocus) {
   if (row.placement==='fixed' && minutes>1440) throw Error('Con orario fisso la durata massima è 24 ore.');
   const dayOffset=Number(row.dayOffset??0);
   if(![0,1].includes(dayOffset))throw Error('Scegli il giorno di inizio.');
-  const request={area:row.area,minutes,...(row.placement==='fixed'?{start:row.start,...(dayOffset?{dayOffset}:{})}:{})};
+  const request={area:row.area,...(areas.find(a=>a.name===row.area)?.id?{areaId:areas.find(a=>a.name===row.area).id}:{}),...(Number(row.unusedMinutes)>0?{unusedMinutes:Number(row.unusedMinutes)}:{}),minutes,...(row.placement==='fixed'?{start:row.start,...(dayOffset?{dayOffset}:{})}:{})};
   if(row.mode==='auto') request.focusMinutes=focusCycle(Number(row.focus||defaultFocus)).focusMinutes;
   else if(row.mode==='cycle'){grossCycle(Number(row.cycle));request.cycleMinutes=Number(row.cycle);}
   else if(row.mode==='custom') {
@@ -38,15 +38,17 @@ export function requestSummary(request, date) {
     if(!Number.isFinite(+start))throw Error('Scegli il giorno.');
     text+=' · '+(request.dayOffset?'inizio giorno successivo · ':'')+'fine '+formatTime(end)+(end.getDate()!==start.getDate()?' (+1 giorno)':'');
   }else text+=' · nelle fasce disponibili';
+  if(request.unusedMinutes)text+=' · '+request.unusedMinutes+' min finali della fascia lasciati liberi (solo sessioni intere)';
   return text;
 }
 export function createPlannerTable({document,areas,defaults,checkPlan,invalidate,onError}) {
   const $=id=>document.getElementById(id),body=$('planner-rows');
-  let sequence=0;
+  let sequence=0,initialRow;
   function newRow(request) {
     const id=++sequence;
     const row=document.createElement('tr');row.dataset.row=String(id);
-    const mode=request?.cycleMinutes!==undefined?'cycle':request?.customBreakMinutes===0?'none':request?.customBreakMinutes!==undefined?'custom':request?'auto':defaults().breakEnabled?'auto':'none';
+    if(request?.unusedMinutes)row.dataset.unusedMinutes=String(request.unusedMinutes);
+    const mode=request?.cycleMinutes!==undefined?'cycle':request?.customBreakMinutes===0?'none':request?.customBreakMinutes!==undefined?'custom':defaults().breakEnabled?'auto':'none';
     const field=(name,label,html)=>'<td data-label="'+label+'">'+html+'</td>';
     const select=(name,label,options)=>'<select data-field="'+name+'" aria-label="'+label+' sessione '+id+'">'+options+'</select>';
     row.innerHTML=field('area','Area',select('area','Area',areas().map(a=>'<option>'+esc(a.name)+'</option>').join('')))
@@ -62,7 +64,7 @@ export function createPlannerTable({document,areas,defaults,checkPlan,invalidate
     if(request){set('area',request.area);set('minutes',request.minutes);set('placement',request.start?'fixed':'windows');set('start',request.start||'');set('dayOffset',request.dayOffset||0);set('focus',request.focusMinutes||'');if(mode==='custom')set('pause',request.customBreakMinutes);}
     body.append(row);return row;
   }
-  function values(row){return Object.fromEntries([...row.querySelectorAll('[data-field]')].map(el=>[el.dataset.field,el.value]));}
+  function values(row){return {...(row.dataset.unusedMinutes?{unusedMinutes:row.dataset.unusedMinutes}:{}),...Object.fromEntries([...row.querySelectorAll('[data-field]')].map(el=>[el.dataset.field,el.value]))};}
   function requests(){
     if(!body.children.length)throw Error('Aggiungi almeno una sessione.');
     return [...body.children].map((row,i)=>{try{return rowRequest(values(row),areas(),$('quick-focus').value);}catch(e){throw Error('Riga '+(i+1)+': '+e.message);}});
@@ -85,19 +87,20 @@ export function createPlannerTable({document,areas,defaults,checkPlan,invalidate
     if(!invalid){try{const plan=checkPlan(requests());if(plan.remainder)status.textContent='Mancano '+plan.remainder+' minuti nelle fasce disponibili.';}catch(e){status.textContent=e.message;}}
     $('prepare-plan').disabled=invalid||!body.children.length;
   }
-  body.addEventListener('input',refresh);
+  body.addEventListener('input',e=>{const row=e.target.closest('tr');row.dataset.edited='true';delete row.dataset.unusedMinutes;refresh();});
   body.addEventListener('click',e=>{const button=e.target.closest('[data-remove]');if(button){button.closest('tr').remove();refresh();}});
   $('planner-add').onclick=()=>{const row=newRow();refresh();row.querySelector('select').focus();};
   $('planner-import').onclick=()=>{
     try{
       const imported=parseQuick($('quick').value,areas());if(!imported.length)throw Error('Incolla almeno una sessione.');
       // Parse every line before changing the table: an error never imports half a batch.
+      if(body.children.length===1&&body.firstElementChild===initialRow&&!initialRow.dataset.edited)body.replaceChildren();
       imported.forEach(newRow);$('quick').value='';refresh();
     }catch(e){onError(e.message);}
   };
   for(const id of ['quick-date','quick-focus'])$(id).addEventListener('input',refresh);
-  newRow();refresh();
-  return {requests,refresh,reset(){body.replaceChildren();newRow();refresh();},remapArea(from,to){
+  initialRow=newRow();refresh();
+  return {requests,refresh,reset(){body.replaceChildren();initialRow=newRow();refresh();},remapArea(from,to){
     for(const row of body.children){
       const select=row.querySelector('[data-field="area"]');
       if(select.value===from)select.value=to;

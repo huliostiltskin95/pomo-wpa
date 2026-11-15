@@ -124,7 +124,7 @@ nav button{border-radius:10px;font-weight:500}
 #timer:not(.timer-live) .tempo-hero #phase-progress,
 #timer:not(.timer-live) .tempo-hero #cycle-note,
 #timer:not(.timer-live) .tempo-hero #timer-note,
-#timer:not(.timer-live) .tempo-live-actions{display:none!important}
+#timer:not(.timer-live) .tempo-live-actions:not(.pip-active){display:none!important}
 #timer:not(.timer-live) .tempo-hero #phase{margin:0;font-size:10px}
 #timer:not(.timer-live) .tempo-hero #active-title{font-size:21px;line-height:1.25;font-weight:550;margin:0}
 #timer.timer-live .tempo-launch{display:none!important}
@@ -357,3 +357,7 @@ header .brand{margin-right:auto}
 #area-delete-dialog button{min-height:44px}
 #area-delete-confirm{background:#276c53;color:#fff;border-color:#276c53}
 @media(max-width:600px){.area-order-actions{width:100%}.area-order-actions button{flex:1}}
+
+.cloud-indicator[data-status="conflict"] .cloud-indicator-dot{background:#b7791f}
+#area-records-list{max-height:50vh;overflow:auto}
+#area-records-list label{overflow-wrap:anywhere}

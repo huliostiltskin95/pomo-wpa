@@ -10,7 +10,7 @@ const CONTENT="https://content.dropboxapi.com";
 const bytesToBase64=url=>btoa(String.fromCharCode(...new Uint8Array(url))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/g,"");
 const randomCode=()=>bytesToBase64(crypto.getRandomValues(new Uint8Array(48)));
 async function shaChallenge(code){return bytesToBase64(await crypto.subtle.digest("SHA-256",new TextEncoder().encode(code)));}
-async function fail(response){if(response.ok)return response;let body="";try{body=await response.text();}catch{}const error=new Error("Dropbox HTTP "+response.status+" "+body.slice(0,250));error.status=response.status;throw error;}
+async function fail(response){if(response.ok)return response;let body="";try{body=await response.text();}catch{}const error=new Error("Dropbox HTTP "+response.status+" "+body.slice(0,250));error.status=response.status;const retryAfter=Number(response.headers?.get?.('Retry-After'));if(Number.isFinite(retryAfter)&&retryAfter>0)error.retryAfter=retryAfter*1000;throw error;}
 /** Platform adapters allow PWA and Obsidian to use the same Dropbox protocol.
  * Defaults preserve the existing browser behavior; Obsidian can inject its own
  * persistent storage and OAuth navigation/callback implementation.
@@ -28,7 +28,11 @@ export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus
   // A disconnected/unloaded client must never apply a late network response.
   const request=async(...args)=>{
     const epoch=generation;assertCurrent(epoch);
-    const response=await rawRequest(...args);assertCurrent(epoch);
+    let response;
+    try{response=await rawRequest(...args);}catch(error){
+      assertCurrent(epoch);error.retryable=true;throw error;
+    }
+    assertCurrent(epoch);
     const body=method=>async()=>{const value=await response[method]();assertCurrent(epoch);return value;};
     return {ok:response.ok,status:response.status,headers:response.headers,json:body('json'),text:body('text')};
   };
@@ -42,12 +46,12 @@ export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus
   const navigate=url=>platform.navigate ? platform.navigate(url) : location.assign(url);
   const clearCallback=()=>platform.clearCallback ? platform.clearCallback() : history.replaceState({},document.title,redirectUri()+location.hash);
   let auth=read(AUTH_KEY),meta=read(META_KEY,{rev:null,dirty:false,ready:false});
-  let inFlight=null,delay=null,overridePending=false,retryCount=0,eventsAttached=false;
+  let inFlight=null,delay=null,overridePending=false,retryCount=0,eventsAttached=false,phase="idle";
   const syncState=data=>({
     sessions:data?.sessions||[],tasks:data?.tasks||[],history:data?.history||[],
     defaults:data?.defaults||{},appearance:data?.appearance||{},
     syncDeleted:{
-      tasks:data?.syncDeleted?.tasks||[],sessions:data?.syncDeleted?.sessions||[]
+      tasks:data?.syncDeleted?.tasks||[],sessions:data?.syncDeleted?.sessions||[],...(data?.syncDeleted?.history?.length?{history:data.syncDeleted.history}:{})
     }
   });
   const stateJSON=data=>JSON.stringify(syncState(data));
@@ -62,7 +66,7 @@ export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus
       savedAt:new Date().toISOString(),data:{app:"TEMPVS",version:5,...local}
     });
   };
-  const status=(message,phase="idle")=>!disposed&&onStatus(message,{connected:Boolean(auth.refreshToken),dirty:meta.dirty,ready:meta.ready,lastSyncedAt:meta.lastSyncedAt||null,recoveryAvailable:Boolean(recovery()),phase,busy:["checking","uploading","downloading","merging"].includes(phase)});
+  const status=(message,nextPhase="idle")=>{phase=nextPhase;return !disposed&&onStatus(message,{connected:Boolean(auth.refreshToken),dirty:meta.dirty,ready:meta.ready,lastSyncedAt:meta.lastSyncedAt||null,recoveryAvailable:Boolean(recovery()),phase,busy:["checking","uploading","downloading","merging"].includes(phase)});};
   const storeMeta=()=>write(META_KEY,meta);
   const storeAuth=()=>write(AUTH_KEY,auth);
   const snapshot=(data=current())=>({app:"Tempo Pomodoro",version:5,
@@ -73,10 +77,10 @@ export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus
     delay=setTimeout(()=>{delay=null;sync().catch(()=>{});},wait);
   };
   const handleSyncError=error=>{
-    const retryable=!error.status||error.status===409||error.status===429||error.status>=500;
+    const retryable=error.retryable||error.status===409||error.status===429||error.status>=500;
     if(retryable&&!disposed&&!overridePending&&meta.ready&&auth.refreshToken){
       retryCount=Math.min(retryCount+1,6);
-      const wait=Math.min(5000*2**(retryCount-1),120000);
+      const wait=Math.max(error.retryAfter||0,Math.min(5000*2**(retryCount-1),120000));
       status(error.message+' · nuovo tentativo automatico fra '+Math.round(wait/1000)+' s','error');
       queueSync(wait);
     }else status(error.message,'error');
@@ -111,7 +115,7 @@ export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus
     const form=new URLSearchParams({code,grant_type:"authorization_code",client_id:stored.appKey,code_verifier:stored.verifier});
     const res=await fail(await request(API+"/oauth2/token",{method:"POST",body:form}));
     const data=await res.json();
-    if(!data.refresh_token)throw Error("Dropbox non ha restituito un refresh token.");
+    if(!data.refresh_token||!data.access_token||!Number.isFinite(data.expires_in)||data.expires_in<=0)throw Error("Credenziali OAuth Dropbox incomplete o non valide.");
     auth={appKey:stored.appKey,refreshToken:data.refresh_token,accessToken:data.access_token,expiresAt:Date.now()+data.expires_in*1000-60000};
     transientStorage.removeItem("tempo-dropbox-pkce");
     storeAuth();meta={rev:null,dirty:meta.dirty,ready:false};storage.removeItem(BASE_KEY);storeMeta();
@@ -130,7 +134,7 @@ export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus
     const form=new URLSearchParams({code,grant_type:"authorization_code",client_id:stored.appKey,code_verifier:stored.verifier,redirect_uri:redirectUri()});
     const res=await fail(await request(API+"/oauth2/token",{method:"POST",body:form}));
     const data=await res.json();
-    if(!data.refresh_token)throw new Error("Dropbox non ha restituito un refresh token.");
+    if(!data.refresh_token||!data.access_token||!Number.isFinite(data.expires_in)||data.expires_in<=0)throw new Error("Credenziali OAuth Dropbox incomplete o non valide.");
     auth={appKey:stored.appKey,refreshToken:data.refresh_token,accessToken:data.access_token,expiresAt:Date.now()+data.expires_in*1000-60000};
     storeAuth();meta={rev:null,dirty:meta.dirty,ready:false};storage.removeItem(BASE_KEY);storeMeta();status("Dropbox collegato. Scegli la prima sincronizzazione.");
     return true;
@@ -139,19 +143,19 @@ export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus
     if(!auth.refreshToken)throw new Error("Collega prima Dropbox.");
     if(auth.accessToken&&Date.now()<auth.expiresAt)return auth.accessToken;
     const res=await fail(await request(API+"/oauth2/token",{method:"POST",body:new URLSearchParams({grant_type:"refresh_token",refresh_token:auth.refreshToken,client_id:auth.appKey})}));
-    const data=await res.json();auth.accessToken=data.access_token;auth.expiresAt=Date.now()+data.expires_in*1000-60000;storeAuth();return auth.accessToken;
+    const data=await res.json();if(!data.access_token||!Number.isFinite(data.expires_in)||data.expires_in<=0)throw Error("Risposta di rinnovo Dropbox non valida.");auth.accessToken=data.access_token;auth.expiresAt=Date.now()+data.expires_in*1000-60000;storeAuth();return auth.accessToken;
   }
   async function metadata(){
     const response=await request(API+"/2/files/get_metadata",{method:"POST",headers:{"Authorization":"Bearer "+await token(),"Content-Type":"application/json"},body:JSON.stringify({path:FILE})});
     if(response.status===409){const err=await response.json().catch(()=>({}));if(JSON.stringify(err).includes("not_found"))return null;}
-    await fail(response);return response.json();
+    await fail(response);const data=await response.json();if(typeof data.rev!=="string"||!data.rev)throw Error("Metadati Dropbox non validi: revisione assente.");return data;
   }
   async function download(){
     const response=await fail(await request(CONTENT+"/2/files/download",{method:"POST",headers:{"Authorization":"Bearer "+await token(),"Dropbox-API-Arg":JSON.stringify({path:FILE})}}));
     const file=await response.json();
-    if(!file||!Array.isArray(file.sessions)||!Array.isArray(file.tasks)||!Array.isArray(file.history))throw new Error("Il backup Dropbox non è valido.");
+    if(!file||!Array.isArray(file.sessions)||(file.tasks!==undefined&&!Array.isArray(file.tasks))||(file.history!==undefined&&!Array.isArray(file.history)))throw new Error("Il backup Dropbox non è valido.");
     const info=JSON.parse(response.headers.get("Dropbox-API-Result")||"{}");
-    if(!info.rev)throw new Error("Revisione Dropbox assente.");
+    if(typeof info.rev!=="string"||!info.rev)throw new Error("Revisione Dropbox assente.");
     return {file:normalizeRemote?normalizeRemote(file):syncState(file),rev:info.rev};
   }
   async function upload(expectedRev,data=current()){
@@ -161,10 +165,10 @@ export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus
       "Dropbox-API-Arg":JSON.stringify({path:FILE,mode,autorename:false,strict_conflict:true,mute:true}),
       "Content-Type":"application/octet-stream"
     },body:JSON.stringify(snapshot(data))});
-    if(response.status===409)throw new Error("Dropbox è cambiato durante la sincronizzazione. Riprova l'unione; nessun archivio locale è stato sostituito.");
+    if(response.status===409){const error=new Error("Dropbox è cambiato durante la sincronizzazione. Riprova l'unione; nessun archivio locale è stato sostituito.");error.status=409;throw error;}
     await fail(response);
     const info=await response.json();
-    if(!info.rev)throw new Error("Dropbox non ha restituito una revisione del backup.");
+    if(typeof info.rev!=="string"||!info.rev)throw new Error("Dropbox non ha restituito una revisione del backup.");
     return info.rev;
   }
   function synced(data,rev){
@@ -197,7 +201,7 @@ export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus
     let decisions={},result=mergeSnapshots(base,local,item.file,decisions);
     if(result.conflicts.length && !manual){
       meta.dirty=true;storeMeta();
-      status(result.conflicts.length+" conflitti da risolvere: usa «Unisci e sincronizza».","error");
+      status(result.conflicts.length+" conflitti da risolvere: usa «Unisci archivi».","conflict");
       return false;
     }
     let rounds=0;
@@ -231,6 +235,7 @@ export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus
       // remote-only items that have not reached the local copy yet.
       meta.ready=true;meta.dirty=true;storeMeta();
       status("Backup unificato caricato, ma i dati locali sono cambiati: nuova unione necessaria.","pending");
+      queueSync();
       return true;
     }
     // The upload succeeded: now update the local copy and the common base.
@@ -243,11 +248,14 @@ export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus
     return true;
   }
   async function firstSync(direction){
+    if(direction==="merge")return mergeNow();
+    if(overridePending)throw Error("Un'altra operazione manuale è in corso.");
+    overridePending=true;clearTimeout(delay);
+    try{
     const epoch=generation;
     if(!auth.refreshToken)throw new Error("Collega prima Dropbox.");
     if(meta.ready)throw new Error("Sincronizzazione già inizializzata.");
     if(!isOnline())throw new Error("Connessione assente.");
-    if(direction==="merge")return mergeNow();
     status("Verifica del backup Dropbox in corso…","checking");
     const remote=await metadata();
     if(direction==="download"){
@@ -272,6 +280,8 @@ export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus
       return;
     }
     throw new Error("Operazione iniziale non riconosciuta.");
+    }catch(error){status(error.message,"error");throw error;}
+    finally{overridePending=false;if(!disposed&&meta.dirty&&meta.ready)queueSync();}
   }
   async function sync(){
     if(disposed||overridePending)return;
@@ -363,7 +373,7 @@ export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus
       status(meta.dirty?"Modifiche successive da inviare":"Dropbox sovrascritto con i dati locali",
         meta.dirty?"pending":"idle");
     }catch(e){status(e.message,"error");throw e;}
-    finally{overridePending=false;}
+    finally{overridePending=false;if(!disposed&&meta.dirty&&meta.ready)queueSync();}
   }
   async function forceDownload(allowDirty=false){
     const epoch=generation;
@@ -382,7 +392,7 @@ export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus
       assertCurrent(epoch);
       synced(item.file,item.rev);
       status("Archivio Dropbox scaricato.");
-    }finally{overridePending=false;}
+    }finally{overridePending=false;if(!disposed&&meta.dirty&&meta.ready)queueSync();}
   }
   function disconnect(){
     ++generation;
@@ -402,7 +412,7 @@ export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus
       eventsAttached=false;
     }
   }
-  function info(){return {connected:Boolean(auth.refreshToken),ready:meta.ready,dirty:meta.dirty,lastSyncedAt:meta.lastSyncedAt||null,recoveryAvailable:Boolean(recovery())};}
+  function info(){return {phase,connected:Boolean(auth.refreshToken),ready:meta.ready,dirty:meta.dirty,lastSyncedAt:meta.lastSyncedAt||null,recoveryAvailable:Boolean(recovery())};}
   async function init(){
     if(!eventsAttached){
       if(typeof window!=='undefined')window.addEventListener('online',onConnectionResume);

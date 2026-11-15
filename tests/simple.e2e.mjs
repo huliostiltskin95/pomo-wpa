@@ -12,8 +12,8 @@ try {
   await page.locator('#quick-date').fill('2099-11-06');
   await page.locator('#quick').fill('Studio @45m +08:30\nStudio @2h +14:00 -60m');
   await page.locator('#planner-import').click();
-  // Import adds rows; remove the initial default row that targets an empty availability window.
-  await page.locator('#planner-rows tr').first().locator('[data-remove]').click();
+  // An untouched initial row is replaced by the imported batch.
+  assert.equal(await page.locator('#planner-rows tr').count(),2);
   assert.equal(await page.locator('[data-field="mode"]').last().inputValue(),'cycle');
   assert.equal(await page.locator('[data-field="cycle"]').last().inputValue(),'60');
   await page.locator('#prepare-plan').click();

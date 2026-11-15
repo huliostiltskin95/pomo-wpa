@@ -12,7 +12,7 @@ test('overnight window and exact midnight are represented correctly',()=>{const 
 test('insufficient capacity stays explicit and inputs are immutable',()=>{const windows=[w('2026-11-06','09:00','10:00')];const out=planSessions([{area:'Studio',minutes:180}],windows,[],defaults,now,id);assert.equal(out.remainder,120);assert.equal(windows.length,1);});
 test('overlapping imported windows cannot double-book',()=>{const out=planSessions([{area:'Studio',minutes:180}],[w('2026-11-06','09:00','11:00'),w('2026-11-06','10:00','12:00')],[],defaults,now,id);assert.equal(out.remainder,0);assert.deepEqual(out.sessions.map(s=>[s.start,s.end]),[['09:00','11:00'],['11:00','12:00']]);});
 test('quick entry supports decimal hours and validates area',()=>{assert.deepEqual(parseQuick('Studio @1,5h\nStudio @45m',[{name:'Studio'}]).map(x=>x.minutes),[90,45]);assert.throws(()=>parseQuick('Unknown @2h',[{name:'Studio'}]));});
-test('migration preserves old sessions, tasks, history and metadata',()=>{const old={sessions:[session],tasks:[{id:'t'}],history:[{sessionId:'deleted',minutes:15}],defaults:{workMinutes:50}};const out=normalizeArchive(old);assert.deepEqual(out.sessions,old.sessions);assert.deepEqual(out.tasks,old.tasks);assert.deepEqual(out.history,old.history);assert.equal(out.defaults.workMinutes,50);assert.ok(out.defaults.simple.areas.find(a=>a.name==='Studio'));assert.throws(()=>normalizeArchive({sessions:[{id:'bad'}]}));});
+test('migration preserves old sessions, tasks, history and metadata',()=>{const old={sessions:[session],tasks:[{id:'t'}],history:[{sessionId:'deleted',minutes:15}],defaults:{workMinutes:50}};const out=normalizeArchive(old);assert.deepEqual(out.sessions.map(({areaId,area,...rest})=>rest),old.sessions);assert.equal(out.sessions[0].areaId,out.defaults.simple.areas.find(a=>a.name==='Studio').id);assert.deepEqual(out.tasks,old.tasks);assert.deepEqual(out.history,old.history);assert.equal(out.defaults.workMinutes,50);assert.ok(out.defaults.simple.areas.find(a=>a.name==='Studio'));assert.throws(()=>normalizeArchive({sessions:[{id:'bad'}]}));});
 test('observed focus excludes breaks, paused sessions and sleeping gaps',()=>{const from=new Date('2026-11-06T09:24:55'),to=new Date('2026-11-06T09:25:05');assert.equal(measuredFocus(session,from,to),5);assert.equal(measuredFocus({...session,paused:true},from,to),0);assert.equal(measuredFocus(session,from,new Date(+from+60000)),0);assert.equal(measuredFocus({...session,finished:true},from,to),0);});
 test('Dropbox merge keeps measured history after deleting its session and area descriptions',()=>{const archive=normalizeArchive({sessions:[],history:[{sessionId:'deleted',minutes:15,measured:true}]});archive.defaults.simple.areas[0].description='[Nota](obsidian://open?vault=V)';const merged=mergeSnapshots(archive,archive,archive).merged;assert.equal(merged.history.length,1);assert.equal(merged.defaults.simple.areas[0].description,archive.defaults.simple.areas[0].description);});
 test('immediate timer starts with exact second precision',()=>{const s={...session,timerStartedAt:'2026-11-06T09:00:53',timerEndsAt:'2026-11-06T09:30:53'};assert.equal(measuredFocus(s,new Date('2026-11-06T09:00:50'),new Date('2026-11-06T09:01:00')),7);});
@@ -225,17 +225,18 @@ test('text range generates independent gross sessions and preserves the old synt
   assert.equal(parseQuick('Studio @2h +14:00 -60m',areas)[0].cycleMinutes,60);
 });
 
-test('time range keeps a shorter last session and supports midnight',()=>{
+test('time range keeps full sessions, exposes unused minutes and supports midnight',()=>{
   const areas=[{name:'Studio'}];
   const short=parseQuick('Studio +14:00-15:40 -30m',areas);
-  assert.deepEqual(short.map(x=>x.minutes),[30,30,30,10]);
+  assert.deepEqual(short.map(x=>x.minutes),[30,30,30]);
+  assert.equal(short.at(-1).unusedMinutes,10);
   const crossing=parseQuick('Studio +23:50-01:00 -30m',areas);
   assert.deepEqual(crossing.map(x=>[x.start,x.minutes,x.dayOffset||0]),[
-    ['23:50',30,0],['00:20',30,1],['00:50',10,1]
+    ['23:50',30,0],['00:20',30,1]
   ]);
   const plan=planSessions(crossing,[],[],defaults,now,id,'2026-11-06');
   assert.deepEqual(plan.sessions.map(s=>[s.date,s.start,s.end]),[
-    ['2026-11-06','23:50','00:20'],['2026-11-07','00:20','00:50'],['2026-11-07','00:50','01:00']
+    ['2026-11-06','23:50','00:20'],['2026-11-07','00:20','00:50']
   ]);
 });
 
