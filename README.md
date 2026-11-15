@@ -195,7 +195,7 @@ La cartella `obsidian/` contiene l'integrazione iniziale per Obsidian. Il plugin
 
 In Obsidian apri **BRAT → Add Beta plugin** e inserisci `huliostiltskin95/pomo-wpa` (oppure l’URL del repository), quindi aggiungi e abilita **Tempo — Pomodoro**.
 
-La release **0.5.6** include la nuova interfaccia TEMPVS: avanzamento del timer, durate rapide, pianificazione guidata, pomodori lordi con `-60m` e pannelli interattivi. Se il plugin è già installato, esegui **BRAT: Check for updates to all beta plugins and UPDATE** e ricaricalo se richiesto.
+La release **0.5.7** include la pianificazione `Studio +14:00-16:00 -30m`, la gestione completa delle aree e i miglioramenti della sincronizzazione Dropbox. Conserva anche tutte le funzioni introdotte nella 0.5.6: timer, pianificazione guidata, pomodori lordi con `-60m` e pannelli interattivi. Se il plugin è già installato, esegui **BRAT: Check for updates to all beta plugins and UPDATE** e ricaricalo se richiesto.
 
 ### Build del plugin Obsidian
 
