@@ -62,7 +62,7 @@ export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus
       savedAt:new Date().toISOString(),data:{app:"TEMPVS",version:5,...local}
     });
   };
-  const status=(message,phase="idle")=>!disposed&&onStatus(message,{connected:Boolean(auth.refreshToken),dirty:meta.dirty,ready:meta.ready,lastSyncedAt:meta.lastSyncedAt||null,phase,busy:["checking","uploading","downloading","merging"].includes(phase)});
+  const status=(message,phase="idle")=>!disposed&&onStatus(message,{connected:Boolean(auth.refreshToken),dirty:meta.dirty,ready:meta.ready,lastSyncedAt:meta.lastSyncedAt||null,recoveryAvailable:Boolean(recovery()),phase,busy:["checking","uploading","downloading","merging"].includes(phase)});
   const storeMeta=()=>write(META_KEY,meta);
   const storeAuth=()=>write(AUTH_KEY,auth);
   const snapshot=(data=current())=>({app:"Tempo Pomodoro",version:5,
@@ -402,7 +402,7 @@ export function createDropboxSync({getState,applyRemote,normalizeRemote,onStatus
       eventsAttached=false;
     }
   }
-  function info(){return {connected:Boolean(auth.refreshToken),ready:meta.ready,dirty:meta.dirty,lastSyncedAt:meta.lastSyncedAt||null};}
+  function info(){return {connected:Boolean(auth.refreshToken),ready:meta.ready,dirty:meta.dirty,lastSyncedAt:meta.lastSyncedAt||null,recoveryAvailable:Boolean(recovery())};}
   async function init(){
     if(!eventsAttached){
       if(typeof window!=='undefined')window.addEventListener('online',onConnectionResume);
