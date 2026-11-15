@@ -231,13 +231,6 @@ function customPause(minutes2, grossMinutes) {
     throw Error("La pausa deve essere un numero intero di minuti, da 0 a meno della durata lorda.");
   return minutes2;
 }
-function sessionPauseLabel(session) {
-  if (session.customBreakMinutes !== void 0) {
-    const gross = Math.round((sessionBounds(session).end - sessionBounds(session).start) / 6e4);
-    return gross - session.customBreakMinutes + " min focus + " + session.customBreakMinutes + " min pausa finale \xB7 " + gross + " min lordi";
-  }
-  return session.workMinutes + " min focus" + (session.breakEnabled ? " / " + (session.cycleMinutes !== void 0 ? session.cycleMinutes - session.workMinutes : pauseMinutes(session.workMinutes)) + " min pausa automatica" : " \xB7 senza pause");
-}
 function manualSessionEnd(start, grossMinutes) {
   const startedAt = start instanceof Date ? start : new Date(start);
   const minutes2 = Number(grossMinutes);
@@ -504,15 +497,19 @@ var isLocked = (session, now = /* @__PURE__ */ new Date()) => session.finished |
 function daySessions(state, date, blockId) {
   return state.sessions.filter((s) => s.date === date || blockId && s.noteBlockId === blockId).sort((a, b) => sessionBounds(a).start - sessionBounds(b).start);
 }
-function serializeDailyPlan(sessions, date, blockId) {
-  const lines = ["<!-- tempvs-block:" + blockId + " -->", "date: " + date];
+function serializeDailyPlan(sessions, date) {
+  const groups = [];
   for (const s of [...sessions].sort((a, b) => sessionBounds(a).start - sessionBounds(b).start)) {
     if (s.date !== date && s.date !== dayAfter(date)) throw Error("Una sessione collegata \xE8 stata spostata fuori dalla giornata della nota.");
-    const gross = Math.round((sessionBounds(s).end - sessionBounds(s).start) / 6e4);
-    const instruction = gross === 1440 ? `${s.area || s.title} @1440m +${s.start}` : `${s.area || s.title} +${s.start}-${s.end} -${gross}m`;
-    lines.push(`${instruction}${s.date !== date ? " +1d" : ""} <!-- tempvs-session:${encodeURIComponent(s.id)} -->`);
+    const bounds = sessionBounds(s), gross = Math.round((bounds.end - bounds.start) / 6e4);
+    const key2 = JSON.stringify([s.areaId, s.area || s.title, gross, s.workMinutes, s.breakEnabled, s.customBreakMinutes, s.cycleMinutes]);
+    const last = groups.at(-1);
+    if (last && last.key === key2 && +last.until === +bounds.start && s.date === last.date && +bounds.end - last.from < 864e5) {
+      last.end = s.end;
+      last.until = bounds.end;
+    } else groups.push({ key: key2, date: s.date, area: s.area || s.title, start: s.start, end: s.end, gross, from: +bounds.start, until: bounds.end });
   }
-  return lines.join("\n");
+  return groups.map((g) => (g.gross === 1440 ? `${g.area} @1440m +${g.start}` : `${g.area} +${g.start}-${g.end} -${g.gross}m`) + (g.date !== date ? " +1d" : "")).join("\n");
 }
 function prepareDailyPlan({ source, date, blockId, state, now = /* @__PURE__ */ new Date(), id = () => globalThis.crypto?.randomUUID?.() || Date.now().toString(36) + "-" + Math.random().toString(36).slice(2) }) {
   if (!validDay(date)) throw Error("Data non valida.");
@@ -590,6 +587,9 @@ var DailyBlocks = class {
     this.chain = Promise.resolve();
     this.destroyed = false;
     this.applying = false;
+    this.timers = /* @__PURE__ */ new Map();
+    this.errors = /* @__PURE__ */ new Map();
+    this.detached = /* @__PURE__ */ new Set();
   }
   get bindings() {
     return this.plugin.dailyNotes;
@@ -599,7 +599,7 @@ var DailyBlocks = class {
     const vault = this.plugin.app.vault;
     if (vault?.on) {
       this.plugin.registerEvent(vault.on("modify", (file) => {
-        if (file.extension === "md" && !this.applying) this.refresh(file.path);
+        if (file.extension === "md") this.schedule(file.path);
       }));
       this.plugin.registerEvent(vault.on("rename", (file, oldPath) => {
         let changed = false;
@@ -611,12 +611,15 @@ var DailyBlocks = class {
         this.refresh();
       }));
     }
+    if (vault?.on) this.plugin.registerEvent(vault.on("create", (file) => {
+      if (file.extension === "md") this.schedule(file.path);
+    }));
     this.plugin.addCommand({ id: "unlink-daily-plan", name: "Scollega TEMPVS dalla nota attiva (conserva sessioni)", callback: () => {
       const file = this.plugin.app.workspace.getActiveFile();
       if (file) this.detach(file.path).catch((error) => new import_obsidian.Notice("TEMPVS: " + error.message));
     } });
     this.plugin.addCommand({ id: "insert-daily-plan", name: "Inserisci blocco TEMPVS nella nota", editorCallback: (editor) => editor.replaceSelection("```TEMPVS\n\n```\n") });
-    this.plugin.app.workspace.onLayoutReady?.(() => this.archiveChanged().catch((error) => new import_obsidian.Notice("TEMPVS: " + error.message)));
+    this.plugin.app.workspace.onLayoutReady?.(() => this.initialize().catch((error) => new import_obsidian.Notice("TEMPVS: " + error.message)));
   }
   queue(work) {
     const result = this.chain.catch(() => {
@@ -630,24 +633,67 @@ var DailyBlocks = class {
   refresh(path) {
     for (const child of this.children) if (!path || child.ctx.sourcePath === path) child.refresh();
   }
-  async locate(child) {
-    const file = this.plugin.app.vault.getAbstractFileByPath(child.ctx.sourcePath);
+  schedule(path) {
+    if (this.destroyed || this.detached.has(path)) return;
+    clearTimeout(this.timers.get(path));
+    this.timers.set(path, setTimeout(() => {
+      this.timers.delete(path);
+      this.syncFile(path).catch((error) => {
+        this.errors.set(path, error.message);
+        this.refresh(path);
+      });
+    }, 800));
+  }
+  async initialize() {
+    for (const file of this.plugin.app.vault.getMarkdownFiles()) {
+      if (this.destroyed) return;
+      try {
+        await this.syncFile(file.path);
+      } catch (error) {
+        this.errors.set(file.path, error.message);
+      }
+    }
+    await this.archiveChanged();
+  }
+  bindingId(path) {
+    return Object.keys(this.bindings).find((id) => this.bindings[id].path === path);
+  }
+  async context(path) {
+    const file = this.plugin.app.vault.getAbstractFileByPath(path);
     if (!file || file.extension !== "md") throw Error("La nota Markdown non \xE8 pi\xF9 disponibile.");
     const markdown2 = await this.plugin.app.vault.read(file), blocks = findDailyBlocks(markdown2);
-    let matches = child.blockId ? blocks.filter((b) => blockIdentity(b.source) === child.blockId) : [];
-    if (!matches.length && !child.blockId) {
-      const line = child.ctx.getSectionInfo(child.containerEl)?.lineStart;
-      matches = blocks.filter((b) => b.lineStart === line && b.source === child.source);
-      if (!matches.length) matches = blocks.filter((b) => b.source === child.source);
-    }
-    if (matches.length !== 1) throw Error("Blocco TEMPVS non identificabile: riapri la nota e mantieni un solo identificativo per blocco.");
-    const block = matches[0];
-    const date = resolveDailyDate(block.source, file, {
+    if (!blocks.length) return null;
+    if (blocks.length !== 1) throw Error("Usa un solo blocco TEMPVS per nota giornaliera.");
+    const block = blocks[0], date = resolveDailyDate(block.source, file, {
       moment: import_obsidian.moment,
       format: this.plugin.app.internalPlugins?.getPluginById("daily-notes")?.instance?.options?.format || "YYYY-MM-DD",
       frontmatter: this.plugin.app.metadataCache?.getFileCache(file)?.frontmatter
     });
     return { file, block, date, markdown: markdown2 };
+  }
+  async locate(child) {
+    const context = await this.context(child.ctx.sourcePath);
+    if (!context) throw Error("Blocco TEMPVS non trovato.");
+    return context;
+  }
+  syncFile(path) {
+    return this.queue(async () => {
+      if (this.detached.has(path)) return;
+      const context = await this.context(path);
+      if (!context) return;
+      const blockId = this.bindingId(path) || blockIdentity(context.block.source) || uid();
+      this.validateBinding(blockId, path, context.date);
+      const binding = this.bindings[blockId];
+      if (binding?.source === context.block.source) {
+        this.errors.delete(path);
+        this.refresh(path);
+        return;
+      }
+      const plan = prepareDailyPlan({ source: context.block.source, date: context.date, blockId, state: this.plugin.state });
+      await this.commit({ ...context, ...plan, originalSource: context.block.source, keepSource: true });
+      this.errors.delete(path);
+      this.refresh(path);
+    });
   }
   validateBinding(id, path, date) {
     const bound = this.bindings[id];
@@ -655,7 +701,7 @@ var DailyBlocks = class {
     if (Object.entries(this.bindings).some(([other, b]) => other !== id && b.date === date)) throw Error("Esiste gi\xE0 un blocco collegato a questa giornata. Usa il blocco originale.");
   }
   async preview(child, edited) {
-    const context = await this.locate(child), id = blockIdentity(context.block.source) || uid();
+    const context = await this.locate(child), id = this.bindingId(context.file.path) || blockIdentity(context.block.source) || uid();
     this.validateBinding(id, context.file.path, context.date);
     if (edited !== void 0 && context.block.source !== child.source) throw Error("La nota \xE8 cambiata mentre modificavi le righe. Riapri il blocco prima di riprovare.");
     const source = edited === void 0 ? context.block.source : restoreRowIds(context.block.source, edited);
@@ -667,6 +713,9 @@ var DailyBlocks = class {
   async writeSource(file, id, original, replacement, lineStart) {
     if (this.destroyed) throw Error("TEMPVS non \xE8 attivo.");
     await this.plugin.app.vault.process(file, (current) => {
+      for (const leaf of this.plugin.app.workspace.getLeavesOfType?.("markdown") || []) {
+        if (leaf.view?.file?.path === file.path && leaf.view.editor && leaf.view.editor.getValue() !== current) throw Error("Modifica in corso: attendo il salvataggio della nota.");
+      }
       const blocks = findDailyBlocks(current);
       let matches = blocks.filter((b) => blockIdentity(b.source) === id);
       if (!matches.length) matches = blocks.filter((b) => b.source === original && (lineStart === void 0 || b.lineStart === lineStart));
@@ -679,7 +728,8 @@ var DailyBlocks = class {
     this.validateBinding(prepared.blockId, prepared.file.path, prepared.date);
     const newIds = prepared.sessions.filter((s) => !this.plugin.state.sessions.some((current) => current.id === s.id)).map((s) => s.id);
     const fresh = prepareDailyPlan({ source: prepared.source, date: prepared.date, blockId: prepared.blockId, state: this.plugin.state, id: () => newIds.shift() || uid() });
-    const canonical = serializeDailyPlan(fresh.sessions, prepared.date, prepared.blockId);
+    const body = prepared.keepSource ? plain(prepared.source) : serializeDailyPlan(fresh.sessions, prepared.date);
+    const canonical = explicitDay(prepared.originalSource) && !explicitDay(body) ? "date: " + prepared.date + "\n" + body : body;
     const previousBinding = this.bindings[prepared.blockId];
     this.applying = true;
     try {
@@ -691,7 +741,7 @@ var DailyBlocks = class {
           const checked = prepareDailyPlan({ source: prepared.source, date: prepared.date, blockId: prepared.blockId, state: this.plugin.state, id: () => available.shift() || uid() });
           applyDailyPlan(this.plugin.state, checked);
           this.plugin.state = normalizeArchive(this.plugin.state);
-          this.bindings[prepared.blockId] = { path: prepared.file.path, date: prepared.date, source: canonical };
+          this.bindings[prepared.blockId] = { path: prepared.file.path, date: prepared.date, source: canonical, unusedMinutes: fresh.unusedMinutes };
         });
       } catch (error) {
         if (previousBinding) this.bindings[prepared.blockId] = previousBinding;
@@ -713,13 +763,15 @@ var DailyBlocks = class {
     return this.queue(() => this.commit(prepared));
   }
   async includeDay(child) {
-    const context = await this.locate(child), blockId = blockIdentity(context.block.source) || uid();
+    const context = await this.locate(child), blockId = this.bindingId(context.file.path) || blockIdentity(context.block.source) || uid();
     this.validateBinding(blockId, context.file.path, context.date);
     const source = serializeDailyPlan(daySessions(this.plugin.state, context.date, blockId), context.date, blockId);
     return { ...context, ...prepareDailyPlan({ source, date: context.date, blockId, state: this.plugin.state }), originalSource: context.block.source };
   }
   detach(path) {
     return this.queue(async () => {
+      this.detached.add(path);
+      clearTimeout(this.timers.get(path));
       const previous = JSON.parse(JSON.stringify(this.bindings));
       const ids = new Set(Object.keys(this.bindings).filter((id) => this.bindings[id].path === path));
       this.applying = true;
@@ -741,18 +793,39 @@ var DailyBlocks = class {
     if (this.applying || this.destroyed) return Promise.resolve();
     return this.queue(async () => {
       for (const [blockId, binding] of Object.entries(this.bindings)) {
-        const file = this.plugin.app.vault.getAbstractFileByPath(binding.path);
-        if (!file) continue;
+        if (this.detached.has(binding.path)) continue;
         try {
-          const markdown2 = await this.plugin.app.vault.read(file), blocks = findDailyBlocks(markdown2).filter((b) => blockIdentity(b.source) === blockId);
-          if (blocks.length !== 1 || blocks[0].source !== binding.source) continue;
+          const context = await this.context(binding.path);
+          if (!context) continue;
+          if (context.block.source !== binding.source) {
+            this.schedule(binding.path);
+            continue;
+          }
           const sessions = daySessions(this.plugin.state, binding.date, blockId);
-          const source = serializeDailyPlan(sessions, binding.date, blockId);
+          const body = serializeDailyPlan(sessions, binding.date);
+          const source = explicitDay(binding.source) ? "date: " + binding.date + "\n" + body : body;
           if (source === binding.source) continue;
-          const prepared = { file, block: blocks[0], ...prepareDailyPlan({ source, date: binding.date, blockId, state: this.plugin.state }), originalSource: binding.source };
-          await this.commit(prepared);
+          const key2 = archivePlanningKey(this.plugin.state), previousSource = binding.source;
+          this.applying = true;
+          try {
+            await this.writeSource(context.file, blockId, previousSource, source, context.block.lineStart);
+            try {
+              await this.plugin.change(() => {
+                if (archivePlanningKey(this.plugin.state) !== key2) throw Error("Le sessioni sono cambiate durante il salvataggio della nota.");
+                for (const session of this.plugin.state.sessions) if (sessions.some((s) => s.id === session.id)) session.noteBlockId = blockId;
+                this.bindings[blockId] = { ...binding, source, unusedMinutes: 0 };
+              });
+            } catch (error) {
+              this.bindings[blockId] = binding;
+              await this.writeSource(context.file, blockId, source, previousSource, context.block.lineStart);
+              throw error;
+            }
+          } finally {
+            this.applying = false;
+          }
+          this.errors.delete(binding.path);
         } catch (error) {
-          new import_obsidian.Notice("TEMPVS: nota non aggiornata, dati del plugin conservati. " + error.message);
+          this.errors.set(binding.path, error.message);
         }
       }
       this.refresh();
@@ -760,6 +833,8 @@ var DailyBlocks = class {
   }
   destroy() {
     this.destroyed = true;
+    for (const timer of this.timers.values()) clearTimeout(timer);
+    this.timers.clear();
     for (const child of this.children) child.disposed = true;
     this.children.clear();
   }
@@ -769,117 +844,36 @@ var DailyBlock = class extends import_obsidian.MarkdownRenderChild {
     super(el);
     this.controller = controller;
     this.ctx = ctx;
-    this.source = source.replace(/\r?\n$/, "");
+    this.source = source;
     this.disposed = false;
   }
   onload() {
     this.controller.children.add(this);
     this.refresh();
+    this.controller.schedule(this.ctx.sourcePath);
   }
   onunload() {
     this.disposed = true;
     this.controller.children.delete(this);
   }
-  async action(callback) {
-    if (this.busy) return;
-    this.busy = true;
-    try {
-      await callback();
-    } catch (error) {
-      this.message.textContent = error.message;
-      this.message.setAttribute("role", "alert");
-    } finally {
-      this.busy = false;
-    }
-  }
   async refresh() {
-    if (this.disposed || this.busy || this.editing || this.proposal) return;
     const version = this.version = (this.version || 0) + 1;
     try {
       const context = await this.controller.locate(this);
-      if (this.disposed || version !== this.version || this.busy || this.editing || this.proposal) return;
+      if (this.disposed || version !== this.version) return;
       this.source = context.block.source;
-      this.blockId = blockIdentity(this.source);
-      this.draw(context);
+      const el = this.containerEl;
+      el.empty();
+      el.addClass("tempvs-daily");
+      el.createEl("pre").createEl("code", { text: plain(this.source) });
+      const error = this.controller.errors.get(this.ctx.sourcePath);
+      const binding = this.controller.bindings[this.controller.bindingId(this.ctx.sourcePath)];
+      el.createEl("small", { text: error || (binding?.source === this.source ? "Programmazione sincronizzata" + (binding.unusedMinutes ? " \xB7 " + binding.unusedMinutes + " minuti finali liberi" : "") : "Aggiornamento automatico\u2026"), cls: error ? "tempvs-daily-error" : "tempvs-muted", attr: { role: error ? "alert" : "status" } });
     } catch (error) {
-      if (this.disposed || this.editing || this.proposal) return;
+      if (this.disposed || version !== this.version) return;
       this.containerEl.empty();
-      this.containerEl.createEl("p", { text: "TEMPVS: " + error.message, cls: "tempvs-daily-error" });
+      this.containerEl.createEl("p", { text: error.message, cls: "tempvs-daily-error" });
     }
-  }
-  draw(context) {
-    const el = this.containerEl;
-    el.empty();
-    el.addClass("tempvs-daily");
-    el.createEl("h4", { text: "TEMPVS \xB7 " + context.date });
-    this.message = el.createEl("p", { cls: "tempvs-help", attr: { role: "status" } });
-    const binding = this.controller.bindings[this.blockId];
-    this.message.textContent = binding && binding.source !== this.source ? "Testo modificato: prepara e conferma le modifiche prima di aggiornare le sessioni." : "Durate lorde, pause comprese. Le sessioni avviate e concluse sono protette.";
-    const sessions = daySessions(this.controller.plugin.state, context.date, this.blockId);
-    if (sessions.length) {
-      const table = el.createEl("table", { cls: "tempvs-daily-table" }), head = table.createEl("thead").createEl("tr");
-      for (const text of ["Area", "Orario", "Sessione"]) head.createEl("th", { text, attr: { scope: "col" } });
-      const body = table.createEl("tbody");
-      for (const session of sessions) {
-        const row = body.createEl("tr");
-        row.createEl("td", { text: session.area || session.title });
-        row.createEl("td", { text: session.start + "\u2013" + session.end + (session.date !== context.date ? " (+1 giorno)" : "") });
-        row.createEl("td", { text: (isLocked(session) ? "Protetta \xB7 " : "") + sessionPauseLabel(session) });
-      }
-    } else el.createEl("p", { text: "Nessuna sessione salvata per questa giornata.", cls: "tempvs-muted" });
-    this.editor = el.createEl("textarea", { cls: "tempvs-daily-editor", attr: { rows: "6", "aria-label": "Pianificazione TEMPVS della nota", spellcheck: "false" } });
-    this.editor.value = plain(this.source);
-    this.editor.hidden = true;
-    const controls = el.createDiv({ cls: "tempvs-daily-actions" });
-    const action = (text, callback) => {
-      const b = controls.createEl("button", { text, attr: { type: "button" } });
-      b.onclick = () => this.action(callback);
-      return b;
-    };
-    action("Modifica righe", () => {
-      this.editing = true;
-      this.editor.hidden = false;
-      this.editor.focus();
-    });
-    this.editor.addEventListener("input", () => {
-      this.proposal = null;
-      this.previewEl?.empty();
-      this.message.textContent = "Righe modificate: prepara nuovamente la preview.";
-    });
-    action("Prepara modifiche", async () => {
-      this.proposal = null;
-      this.previewEl.empty();
-      this.proposal = await this.controller.preview(this, this.editing ? this.editor.value : void 0);
-      this.showProposal();
-    });
-    action("Includi sessioni del giorno", async () => {
-      this.proposal = null;
-      this.previewEl.empty();
-      this.proposal = await this.controller.includeDay(this);
-      this.showProposal();
-    });
-    action("Annulla", () => {
-      this.editing = false;
-      this.proposal = null;
-      this.busy = false;
-      this.refresh();
-    });
-    this.previewEl = el.createDiv({ cls: "tempvs-daily-preview" });
-  }
-  showProposal() {
-    const plan = this.proposal, el = this.previewEl;
-    el.empty();
-    el.createEl("p", { text: plan.sessions.length + " sessioni \xB7 " + plan.removeIds.length + " da rimuovere." + (plan.unusedMinutes ? " " + plan.unusedMinutes + " minuti finali lasciati liberi: solo sessioni intere." : "") });
-    for (const s of plan.sessions) el.createEl("p", { text: (s.area || s.title) + " \xB7 " + s.date + " \xB7 " + s.start + "\u2013" + s.end + " \xB7 " + sessionPauseLabel(s) });
-    const confirm = el.createEl("button", { text: "Applica alla nota e al plugin", cls: "mod-cta", attr: { type: "button" } });
-    confirm.onclick = () => this.action(async () => {
-      await this.controller.apply(plan);
-      this.blockId = plan.blockId;
-      this.editing = false;
-      this.proposal = null;
-      this.busy = false;
-      await this.refresh();
-    });
   }
 };
 
