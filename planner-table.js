@@ -9,7 +9,9 @@ export function rowRequest(row, areas, defaultFocus) {
   if (!['windows','fixed'].includes(row.placement)) throw Error('Scegli come collocare la sessione.');
   if (row.placement==='fixed' && !/^([01]\d|2[0-3]):[0-5]\d$/.test(row.start)) throw Error('Indica l’orario di inizio.');
   if (row.placement==='fixed' && minutes>1440) throw Error('Con orario fisso la durata massima è 24 ore.');
-  const request={area:row.area,minutes,...(row.placement==='fixed'?{start:row.start}:{})};
+  const dayOffset=Number(row.dayOffset??0);
+  if(![0,1].includes(dayOffset))throw Error('Scegli il giorno di inizio.');
+  const request={area:row.area,minutes,...(row.placement==='fixed'?{start:row.start,...(dayOffset?{dayOffset}:{})}:{})};
   if(row.mode==='auto') request.focusMinutes=focusCycle(Number(row.focus||defaultFocus)).focusMinutes;
   else if(row.mode==='cycle'){grossCycle(Number(row.cycle));request.cycleMinutes=Number(row.cycle);}
   else if(row.mode==='custom') {
@@ -30,9 +32,11 @@ export function requestSummary(request, date) {
     text=request.start?focus+' min focus + '+(request.minutes-focus)+' min pause · cicli '+work+'/'+rest:'Cicli '+work+'/'+rest+' · '+request.minutes+' min lordi, pause comprese';
   }
   if(request.start){
-    const start=dateTime(date,request.start),end=new Date(+start+request.minutes*60000);
+    const start=dateTime(date,request.start);
+    if(request.dayOffset)start.setDate(start.getDate()+request.dayOffset);
+    const end=new Date(+start+request.minutes*60000);
     if(!Number.isFinite(+start))throw Error('Scegli il giorno.');
-    text+=' · fine '+formatTime(end)+(end.getDate()!==start.getDate()?' (+1 giorno)':'');
+    text+=' · '+(request.dayOffset?'inizio giorno successivo · ':'')+'fine '+formatTime(end)+(end.getDate()!==start.getDate()?' (+1 giorno)':'');
   }else text+=' · nelle fasce disponibili';
   return text;
 }
@@ -47,7 +51,7 @@ export function createPlannerTable({document,areas,defaults,checkPlan,invalidate
     const select=(name,label,options)=>'<select data-field="'+name+'" aria-label="'+label+' sessione '+id+'">'+options+'</select>';
     row.innerHTML=field('area','Area',select('area','Area',areas().map(a=>'<option>'+esc(a.name)+'</option>').join('')))
       +field('minutes','Durata lorda (min)','<input data-field="minutes" aria-label="Minuti lordi sessione '+id+'" type="number" min="1" max="10080" step="1" required value="45">')
-      +field('start','Inizio',select('placement','Collocazione','<option value="windows">Nelle fasce</option><option value="fixed">Orario fisso</option>')+'<input data-field="start" aria-label="Orario di inizio sessione '+id+'" type="time" hidden disabled>')
+      +field('start','Inizio',select('placement','Collocazione','<option value="windows">Nelle fasce</option><option value="fixed">Orario fisso</option>')+'<input data-field="start" aria-label="Orario di inizio sessione '+id+'" type="time" hidden disabled><select data-field="dayOffset" aria-label="Giorno di inizio sessione '+id+'" hidden disabled><option value="0">Giorno scelto</option><option value="1">Giorno successivo</option></select>')
       +field('mode','Pausa',select('mode','Modalità pausa','<option value="auto">Automatica</option><option value="cycle">Pomodoro lordo</option><option value="custom">Personalizzata</option><option value="none">Nessuna</option>')+'<details class="cycle-details"><summary>Ciclo</summary><label>Focus per ciclo (min)<input data-field="focus" type="number" min="1" max="240" placeholder="Predefinito"></label></details><input data-field="cycle" aria-label="Pomodoro lordo sessione '+id+'" type="number" min="2" max="288" value="60" hidden disabled>')
       +field('pause','Minuti pausa','<input data-field="pause" aria-label="Minuti pausa finale sessione '+id+'" type="number" min="0" max="10079" step="1" value="5" hidden disabled><span data-pause-label></span>')
       +field('summary','Riepilogo','<output class="row-summary" aria-live="polite"></output>')
@@ -55,7 +59,7 @@ export function createPlannerTable({document,areas,defaults,checkPlan,invalidate
     const set=(name,value)=>row.querySelector('[data-field="'+name+'"]').value=value;
     set('mode',mode);
     if(request?.cycleMinutes!==undefined)set('cycle',request.cycleMinutes);
-    if(request){set('area',request.area);set('minutes',request.minutes);set('placement',request.start?'fixed':'windows');set('start',request.start||'');set('focus',request.focusMinutes||'');if(mode==='custom')set('pause',request.customBreakMinutes);}
+    if(request){set('area',request.area);set('minutes',request.minutes);set('placement',request.start?'fixed':'windows');set('start',request.start||'');set('dayOffset',request.dayOffset||0);set('focus',request.focusMinutes||'');if(mode==='custom')set('pause',request.customBreakMinutes);}
     body.append(row);return row;
   }
   function values(row){return Object.fromEntries([...row.querySelectorAll('[data-field]')].map(el=>[el.dataset.field,el.value]));}
@@ -68,6 +72,7 @@ export function createPlannerTable({document,areas,defaults,checkPlan,invalidate
     for(const row of body.children){
       const v=values(row),get=name=>row.querySelector('[data-field="'+name+'"]');
       get('start').hidden=get('start').disabled=v.placement!=='fixed';get('start').required=v.placement==='fixed';
+      get('dayOffset').hidden=get('dayOffset').disabled=v.placement!=='fixed';
       get('cycle').hidden=get('cycle').disabled=v.mode!=='cycle';get('cycle').required=v.mode==='cycle';
       get('pause').hidden=get('pause').disabled=v.mode!=='custom';get('pause').required=v.mode==='custom';
       row.querySelector('.cycle-details').hidden=v.mode!=='auto';get('focus').disabled=v.mode!=='auto';
