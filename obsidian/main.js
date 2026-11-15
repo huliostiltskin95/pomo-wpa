@@ -1,3 +1,4 @@
+import {DailyBlocks} from './daily-blocks.js';
 import { Plugin, ItemView, Notice, Platform, PluginSettingTab, Setting, setIcon } from "obsidian";
 import { getActiveSession, getPhase, sessionBounds, hasSessionOverlaps, localDateString, formatTime, mmss } from "../core/tempo-core.js";
 import { normalizeArchive, manualSessionEnd, measuredFocus, parseQuick, planSessions, grossCycle } from "../core/tempo-simple.js";
@@ -484,6 +485,7 @@ export default class TempvsPlugin extends Plugin {
       if (data && !data.archive && !Array.isArray(data.sessions) && Object.keys(data).length)
         throw Error("Formato precedente non riconosciuto: nessun dato verrà sovrascritto.");
       this.state = normalizeArchive(data?.archive || (Array.isArray(data?.sessions) ? data : ZERO()));
+      this.dailyNotes=Object.assign(Object.create(null),data?.dailyNotes||{});
       this.cloudData = data?.cloudData && typeof data.cloudData === "object" ? data.cloudData : {};
       this.compact = typeof data?.ui?.compact === "boolean" ? data.ui.compact : Platform.isMobile;
       this.layout = ["auto","side","wide"].includes(data?.ui?.layout) ? data.ui.layout : "auto";
@@ -527,6 +529,7 @@ export default class TempvsPlugin extends Plugin {
         for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) leaf.view?.draw?.();
         this.syncAmbient();
         this.refresh(true);
+        await this.daily?.archiveChanged();
       },
       normalizeRemote: normalizeArchive,
       onStatus: (message, detail) => {
@@ -547,6 +550,7 @@ export default class TempvsPlugin extends Plugin {
         isOnline: () => navigator.onLine !== false
       }
     });
+    this.daily=new DailyBlocks(this);this.daily.start();
     this.registerView(VIEW_TYPE, leaf => new TempvsView(leaf, this));
     this.addSettingTab(new TempvsSettings(this.app,this));
     this.addCommand({ id: "open-tempvs", name: "Apri timer TEMPVS", callback: () => this.openView() });
@@ -667,6 +671,7 @@ export default class TempvsPlugin extends Plugin {
       this.status.setAttribute("aria-label", "Apri TEMPVS");
     }
     for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) leaf.view?.update?.(full);
+    if(full)this.daily?.refresh();
   }
   record() {
     const now = Date.now();
@@ -694,7 +699,8 @@ export default class TempvsPlugin extends Plugin {
     const cloudData = this.cloudStorage?.snapshot() || {};
     const audio={kind:this.audioKind,volume:this.audioVolume};
     const notifications={sound:this.chimeEnabled};
-    const write = this.writeChain.catch(() => {}).then(() => this.saveData({ archive, cloudData, ui:{compact:this.compact,layout:this.layout},audio,notifications }));
+    const dailyNotes=JSON.parse(JSON.stringify(this.dailyNotes||{}));
+    const write = this.writeChain.catch(() => {}).then(() => this.saveData({ archive, cloudData, ui:{compact:this.compact,layout:this.layout},audio,notifications,dailyNotes }));
     this.writeChain = write;
     await write;
     if (JSON.stringify(this.state) === JSON.stringify(archive)) this.dirty = false;
@@ -706,13 +712,14 @@ export default class TempvsPlugin extends Plugin {
     try {
       this.record();
       const previous=JSON.stringify(this.state);
-      try {mutator();await this.persist();}
+      try {mutator();this.state=normalizeArchive(this.state);await this.persist();}
       catch(error){this.state=JSON.parse(previous);this.refresh(true);throw error;}
       // Local save succeeded: failure to persist sync metadata must not undo it.
       try {this.cloud?.changed();await this.persist();}
       catch(error){new Notice('TEMPVS: dati salvati in locale; sincronizzazione da riprovare. '+error.message);}
       this.refresh(true);
     } finally {this.changing=false;}
+    await this.daily?.archiveChanged();
   }
   async setCompact(value){
     this.compact=Boolean(value);
@@ -764,7 +771,7 @@ export default class TempvsPlugin extends Plugin {
     if (!requests.length) throw Error("Inserisci almeno una sessione.");
     if (requests.some(r => !r.start)) throw Error("Per ora specifica +HH:MM per ogni sessione. Le fasce automatiche saranno aggiunte successivamente.");
     const result = planSessions(requests, [], this.state.sessions.filter(s => !s.finished),
-      { ...this.state.defaults, breakEnabled: true }, new Date(), uuid, date);
+      this.state.defaults, new Date(), uuid, date);
     if (result.remainder || !result.sessions?.length) throw Error("Programmazione incompleta.");
     await this.change(() => this.state.sessions.push(...result.sessions));
     new Notice("TEMPVS: " + result.sessions.length + " sessioni programmate.");
@@ -806,6 +813,8 @@ export default class TempvsPlugin extends Plugin {
     }
   }
   async onunload() {
+    this.daily?.destroy();
+    await this.daily?.chain.catch(()=>{});
     this.cloud?.destroy();
     this.chime?.destroy();
     this.ambient?.destroy();

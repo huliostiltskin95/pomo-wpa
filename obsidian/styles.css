@@ -120,3 +120,15 @@
 .tempvs-area-config details{margin:8px 0}
 .tempvs-area-config details summary{cursor:pointer;padding:6px 0;color:var(--text-muted)}
 .tempvs-area-config textarea{display:block;width:100%;min-height:90px;resize:vertical;margin-top:8px;font-family:var(--font-monospace)}
+
+/* Daily-note TEMPVS block: uses native theme colors and touch-sized controls. */
+.tempvs-daily{border:1px solid var(--background-modifier-border);border-radius:10px;padding:12px;margin:12px 0}
+.tempvs-daily h4{margin:0 0 8px}
+.tempvs-daily-table{width:100%;font-size:var(--font-ui-small);table-layout:fixed}
+.tempvs-daily-table th,.tempvs-daily-table td{padding:6px;overflow-wrap:anywhere;text-align:left}
+.tempvs-daily-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.tempvs-daily button{min-height:40px;white-space:normal}
+.tempvs-daily-editor{width:100%;box-sizing:border-box;min-height:130px;resize:vertical;font-family:var(--font-monospace);font-size:var(--font-ui-small)}
+.tempvs-daily-preview{font-size:var(--font-ui-small)}
+.tempvs-daily-preview p{margin:6px 0}
+.tempvs-daily-error,.tempvs-daily [role=alert]{color:var(--text-error)}

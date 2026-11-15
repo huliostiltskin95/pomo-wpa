@@ -1,4 +1,8 @@
-> Consolidamento PWA: [grammatica, aree e sincronizzazione](docs/PWA_CONSOLIDAMENTO.md). Il resoconto distingue verifiche automatiche e collaudi ancora necessari su dispositivi reali. Nessuna nuova release del plugin è stata pubblicata da questo intervento.
+## Plugin Obsidian 0.5.8 · pianificazione nelle daily note
+
+Inserisci un blocco `TEMPVS` con `Studio +10:00-12:00 -30m`, poi usa **Prepara modifiche → Applica alla nota e al plugin**. Il blocco mostra le sessioni del giorno e permette di modificarle riga per riga; dopo il collegamento le modifiche dal pannello aggiornano la nota senza sovrascrivere bozze non confermate. [Guida completa, date e protezioni dei dati](docs/OBSIDIAN_DAILY_TEMPVS.md).
+
+> Consolidamento PWA: [grammatica, aree e sincronizzazione](docs/PWA_CONSOLIDAMENTO.md). Il resoconto distingue verifiche automatiche e collaudi ancora necessari su dispositivi reali. Il plugin 0.5.8 aggiunge i [blocchi TEMPVS nelle daily note](docs/OBSIDIAN_DAILY_TEMPVS.md).
 
 ## Programmazione per intervalli, aree modificabili e Dropbox affidabile (novembre 2026)
 
@@ -197,7 +201,7 @@ La cartella `obsidian/` contiene l'integrazione iniziale per Obsidian. Il plugin
 
 In Obsidian apri **BRAT → Add Beta plugin** e inserisci `huliostiltskin95/pomo-wpa` (oppure l’URL del repository), quindi aggiungi e abilita **Tempo — Pomodoro**.
 
-La release **0.5.7** include la pianificazione `Studio +14:00-16:00 -30m`, la gestione completa delle aree e i miglioramenti della sincronizzazione Dropbox. Conserva anche tutte le funzioni introdotte nella 0.5.6: timer, pianificazione guidata, pomodori lordi con `-60m` e pannelli interattivi. Se il plugin è già installato, esegui **BRAT: Check for updates to all beta plugins and UPDATE** e ricaricalo se richiesto.
+La release **0.5.8** aggiunge i blocchi modificabili nelle daily note e conserva la pianificazione `Studio +14:00-16:00 -30m`, la gestione completa delle aree e i miglioramenti della sincronizzazione Dropbox. Conserva anche tutte le funzioni introdotte nella 0.5.6: timer, pianificazione guidata, pomodori lordi con `-60m` e pannelli interattivi. Se il plugin è già installato, esegui **BRAT: Check for updates to all beta plugins and UPDATE** e ricaricalo se richiesto.
 
 ### Build del plugin Obsidian
 

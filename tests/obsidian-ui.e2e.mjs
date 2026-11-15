@@ -33,13 +33,14 @@ try {
     class Plugin{
       constructor(){this.app={workspace:{getLeavesOfType:()=>leaves,getActiveFile:()=>null}}}
       async loadData(){return null} async saveData(data){this.saved=structuredClone(data)}
+      registerMarkdownCodeBlockProcessor(language,processor){(this.processors??={})[language]=processor} registerEvent(){}
       registerView(type,factory){this.factory=factory}
       addSettingTab(){} addCommand(){} addRibbonIcon(){} registerInterval(){} registerDomEvent(){}
     }
     class ItemView{constructor(){this.containerEl=document.querySelector('#view');this.containerEl.createDiv();this.containerEl.createDiv()}}
     const setIcon=(el,name)=>{el.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4" y="4" width="16" height="16" rx="4"/><path d="M8 12h8M12 8v8"/></svg>';el.dataset.icon=name};
     window.notices=[];
-    window.require=()=>({Plugin,ItemView,Modal:class{},PluginSettingTab:class{},Setting:class{},Platform:{isMobile:true},setIcon,Notice:class{constructor(message){window.notices.push(message)}}});
+    window.require=()=>({Plugin,ItemView,MarkdownRenderChild:class{constructor(el){this.containerEl=el}},Modal:class{},PluginSettingTab:class{},Setting:class{},Platform:{isMobile:true},setIcon,Notice:class{constructor(message){window.notices.push(message)}}});
     window.module={exports:{}};
     window.mount=async()=>{const plugin=new module.exports.default();await plugin.onload();const view=plugin.factory({});leaves.push({view});await view.onOpen();window.plugin=plugin;window.view=view;};
   });
@@ -105,6 +106,41 @@ try {
     for(const [key,value]of Object.entries({'background-primary':'#202027','background-secondary':'#292931','background-modifier-border':'#40404c','text-normal':'#ededf4','text-muted':'#b0b0c2','text-accent':'#b6a1ff'}))document.documentElement.style.setProperty('--'+key,value);
   });
   await page.screenshot({path:'/tmp/tempvs-ui-dark.png',fullPage:true});
+  // Exercise the actual TEMPVS Markdown code-block processor with a vault adapter.
+  await page.evaluate(()=>{
+    window.dailyText='# Daily\n\n```TEMPVS\nStudio +10:00-12:00 -30m\n```\n\nAltre note.';
+    const file={path:'Daily/2099-11-06.md',basename:'2099-11-06',extension:'md'};
+    plugin.app.vault={getAbstractFileByPath:path=>path===file.path?file:null,read:async()=>dailyText,process:async(file,update)=>{window.dailyText=update(window.dailyText);}};
+    const root=document.body.createDiv({cls:'daily-container'});
+    plugin.processors.TEMPVS('Studio +10:00-12:00 -30m\n',root,{sourcePath:file.path,getSectionInfo:()=>({lineStart:2}),addChild:child=>{window.dailyChild=child;child.onload();}});
+  });
+  const daily=page.locator('.daily-container');
+  await daily.getByRole('button',{name:'Prepara modifiche',exact:true}).click();
+  await page.waitForFunction(()=>document.querySelector('.tempvs-daily-preview')?.textContent.includes('4 sessioni'));
+  assert.match(await daily.locator('.tempvs-daily-preview').textContent(),/4 sessioni/);
+  await daily.getByRole('button',{name:'Applica alla nota e al plugin',exact:true}).click();
+  await page.waitForFunction(()=>plugin.state.sessions.filter(s=>s.date==='2099-11-06').length===4);
+  await page.waitForFunction(()=>document.querySelectorAll('.daily-container tbody tr').length===4);
+  const ids=await page.evaluate(()=>plugin.state.sessions.filter(s=>s.date==='2099-11-06').map(s=>s.id));
+  await daily.getByRole('button',{name:'Modifica righe',exact:true}).click();
+  const editor=daily.getByRole('textbox',{name:'Pianificazione TEMPVS della nota'});
+  assert.doesNotMatch(await editor.inputValue(),/tempvs-session/);
+  await editor.fill((await editor.inputValue()).replace('Studio +10:00-10:30','Lavoro +14:00-14:30'));
+  await daily.getByRole('button',{name:'Prepara modifiche',exact:true}).click();
+  await daily.getByRole('button',{name:'Applica alla nota e al plugin',exact:true}).click();
+  await page.waitForFunction(()=>plugin.state.sessions.some(s=>s.date==='2099-11-06'&&s.area==='Lavoro'&&s.start==='14:00'));
+  assert.equal(await page.evaluate(id=>plugin.state.sessions.find(s=>s.start==='14:00'&&s.date==='2099-11-06').id,ids[0]),ids[0]);
+  await page.evaluate(async id=>{await plugin.removeSession(id);await plugin.schedule('Personale +16:00-17:00 -1h','2099-11-06');},ids[0]);
+  await page.waitForFunction(()=>dailyText.includes('Personale +16:00-17:00'));
+  assert(!await page.evaluate(()=>dailyText.includes('Lavoro +14:00-14:30')));
+  await page.waitForFunction(()=>document.querySelectorAll('.daily-container tbody tr').length===4);
+  for(const width of [280,390,768]){
+    await page.setViewportSize({width,height:900});
+    assert(await daily.evaluate(el=>el.scrollWidth<=el.clientWidth),'daily block overflow at '+width);
+  }
+  await page.setViewportSize({width:390,height:844});
+  await daily.screenshot({path:'/tmp/tempvs-daily-note.png'});
+  console.log('Daily block: uppercase fence, source edits, stable IDs, panel-to-note updates and mobile layout passed.');
   assert.deepEqual(errors,[]);
   assert.deepEqual(await page.evaluate(()=>notices.filter(n=>/errore|invalid|sovrappost/i.test(n))),[]);
   console.log('Obsidian UI: creation, planning, pause/resume, finish, volume, Escape, drafts and responsive layouts passed.');

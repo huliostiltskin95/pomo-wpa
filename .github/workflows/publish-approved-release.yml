@@ -22,6 +22,7 @@ jobs:
       - run: npm run build:all
       - run: node tests/obsidian-runtime.smoke.mjs
       - name: Verify release intent and version
+        if: github.event_name == 'push'
         run: |
           node --input-type=module -e '
           import fs from "node:fs";

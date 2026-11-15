@@ -23,7 +23,49 @@ __export(main_exports, {
   default: () => TempvsPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian2 = require("obsidian");
+
+// obsidian/daily-blocks.js
+var import_obsidian = require("obsidian");
+
+// core/tempo-areas.js
+var key = (name) => name.trim().replace(/\s+/g, " ").toLocaleLowerCase();
+var legacyId = (name) => "area:" + encodeURIComponent(key(name));
+function normalizeAreaLinks(data, areas) {
+  const names = /* @__PURE__ */ new Set(), ids = /* @__PURE__ */ new Set();
+  const normalized = areas.map((area) => {
+    const name = area.name.trim(), id = area.id ?? legacyId(name);
+    if (!name || name.length > 80 || names.has(key(name)) || typeof id !== "string" || !id || ids.has(id))
+      throw Error("Aree con nomi o identificativi duplicati/non validi.");
+    names.add(key(name));
+    ids.add(id);
+    return { ...area, id, name };
+  });
+  const collections = { sessions: data.sessions || [], tasks: data.tasks || [], history: data.history || [] };
+  const linked = {}, sessionById = new Map((data.sessions || []).map((s) => [s.id, s]));
+  for (const [collection, items] of Object.entries(collections)) {
+    linked[collection] = items.map((item) => {
+      let area = item.areaId ? normalized.find((a) => a.id === item.areaId) : null;
+      if (item.areaId && !area) area = normalized.find((a) => a.name === item.area);
+      if (item.areaId && !area) throw Error("Associazione area mancante: " + item.areaId + ". Ripristina o risolvi il conflitto tra le aree.");
+      const name = item.area || (collection === "sessions" ? item.title : collection === "history" ? sessionById.get(item.sessionId)?.area || (normalized.some((a) => a.name === item.title) ? item.title : "") : "");
+      if (!area && name) {
+        area = normalized.find((a) => key(a.name) === key(name));
+        if (!area) {
+          area = { id: legacyId(name), name: name.trim(), description: "" };
+          normalized.push(area);
+        }
+      }
+      if (!area) return { ...item };
+      return {
+        ...item,
+        areaId: area.id,
+        area: area.name,
+        ...item.title === item.area && item.area !== area.name ? { title: area.name } : {}
+      };
+    });
+  }
+  return { areas: normalized, ...linked };
+}
 
 // core/tempo-core.js
 var DEFAULTS = Object.freeze({ workMinutes: 25, breakEnabled: true });
@@ -164,46 +206,6 @@ function getAmbientFocusMode(sessions, now = /* @__PURE__ */ new Date()) {
   return getNextSession(sessions, now) ? "waiting" : "finished";
 }
 
-// core/tempo-areas.js
-var key = (name) => name.trim().replace(/\s+/g, " ").toLocaleLowerCase();
-var legacyId = (name) => "area:" + encodeURIComponent(key(name));
-function normalizeAreaLinks(data, areas) {
-  const names = /* @__PURE__ */ new Set(), ids = /* @__PURE__ */ new Set();
-  const normalized = areas.map((area) => {
-    const name = area.name.trim(), id = area.id ?? legacyId(name);
-    if (!name || name.length > 80 || names.has(key(name)) || typeof id !== "string" || !id || ids.has(id))
-      throw Error("Aree con nomi o identificativi duplicati/non validi.");
-    names.add(key(name));
-    ids.add(id);
-    return { ...area, id, name };
-  });
-  const collections = { sessions: data.sessions || [], tasks: data.tasks || [], history: data.history || [] };
-  const linked = {}, sessionById = new Map((data.sessions || []).map((s) => [s.id, s]));
-  for (const [collection, items] of Object.entries(collections)) {
-    linked[collection] = items.map((item) => {
-      let area = item.areaId ? normalized.find((a) => a.id === item.areaId) : null;
-      if (item.areaId && !area) area = normalized.find((a) => a.name === item.area);
-      if (item.areaId && !area) throw Error("Associazione area mancante: " + item.areaId + ". Ripristina o risolvi il conflitto tra le aree.");
-      const name = item.area || (collection === "sessions" ? item.title : collection === "history" ? sessionById.get(item.sessionId)?.area || (normalized.some((a) => a.name === item.title) ? item.title : "") : "");
-      if (!area && name) {
-        area = normalized.find((a) => key(a.name) === key(name));
-        if (!area) {
-          area = { id: legacyId(name), name: name.trim(), description: "" };
-          normalized.push(area);
-        }
-      }
-      if (!area) return { ...item };
-      return {
-        ...item,
-        areaId: area.id,
-        area: area.name,
-        ...item.title === item.area && item.area !== area.name ? { title: area.name } : {}
-      };
-    });
-  }
-  return { areas: normalized, ...linked };
-}
-
 // core/tempo-simple.js
 var DEFAULT_AREA_COLORS = Object.freeze({
   Studio: "#D65B56",
@@ -228,6 +230,13 @@ function customPause(minutes2, grossMinutes) {
   if (!Number.isInteger(minutes2) || minutes2 < 0 || minutes2 >= grossMinutes)
     throw Error("La pausa deve essere un numero intero di minuti, da 0 a meno della durata lorda.");
   return minutes2;
+}
+function sessionPauseLabel(session) {
+  if (session.customBreakMinutes !== void 0) {
+    const gross = Math.round((sessionBounds(session).end - sessionBounds(session).start) / 6e4);
+    return gross - session.customBreakMinutes + " min focus + " + session.customBreakMinutes + " min pausa finale \xB7 " + gross + " min lordi";
+  }
+  return session.workMinutes + " min focus" + (session.breakEnabled ? " / " + (session.cycleMinutes !== void 0 ? session.cycleMinutes - session.workMinutes : pauseMinutes(session.workMinutes)) + " min pausa automatica" : " \xB7 senza pause");
 }
 function manualSessionEnd(start, grossMinutes) {
   const startedAt = start instanceof Date ? start : new Date(start);
@@ -400,6 +409,482 @@ function measuredFocus(session, from, to) {
   }
   return total / 1e3;
 }
+
+// obsidian/daily-plan.js
+var blockPattern = /^\s*<!-- tempvs-block:([^\s>]+) -->\s*$/;
+var rowPattern = /\s*<!-- tempvs-session:([^\s>]+)(?: day:([01]))? -->\s*$/;
+var datePattern = /^\s*date:\s*(\d{4}-\d{2}-\d{2})\s*$/i;
+function validDay(day) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day || "")) return false;
+  const d = /* @__PURE__ */ new Date(day + "T12:00:00");
+  return Number.isFinite(+d) && localDateString(d) === day;
+}
+function blockIdentity(source) {
+  const ids = source.split(/\r?\n/).map((line) => line.match(blockPattern)?.[1]).filter(Boolean);
+  if (ids.length > 1) throw Error("Il blocco contiene pi\xF9 identificativi TEMPVS.");
+  if (ids[0] && !/^[A-Za-z0-9-]{1,100}$/.test(ids[0])) throw Error("Identificativo del blocco TEMPVS non valido.");
+  return ids[0] || null;
+}
+function explicitDay(source) {
+  const dates = source.split(/\r?\n/).map((line) => line.match(datePattern)?.[1]).filter(Boolean);
+  if (dates.length > 1) throw Error("Indica una sola data nel blocco TEMPVS.");
+  if (dates[0] && !validDay(dates[0])) throw Error("Data TEMPVS non valida.");
+  return dates[0] || null;
+}
+function resolveDailyDate(source, file, { format = "YYYY-MM-DD", moment: moment2, frontmatter } = {}) {
+  const explicit = explicitDay(source);
+  if (explicit) return explicit;
+  if (validDay(file.basename)) return file.basename;
+  const raw = frontmatter?.date;
+  if (typeof raw === "string" && validDay(raw.slice(0, 10))) return raw.slice(0, 10);
+  if (raw instanceof Date && Number.isFinite(+raw)) return localDateString(raw);
+  if (moment2) {
+    const parsed = moment2(file.basename, format, true);
+    if (parsed.isValid()) return parsed.format("YYYY-MM-DD");
+  }
+  throw Error("Data della daily note non riconosciuta. Aggiungi \xABdate: YYYY-MM-DD\xBB al blocco TEMPVS.");
+}
+function findDailyBlocks(markdown2) {
+  const lines = markdown2.match(/[^\n]*\n|[^\n]+$/g) || [];
+  let fence = null, offset = 0;
+  const blocks = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].replace(/\r?\n$/, "");
+    if (!fence) {
+      const match = line.match(/^ {0,3}(`{3,}|~{3,})([^\r\n]*)$/);
+      if (match) {
+        fence = { char: match[1][0], length: match[1].length, start: offset + lines[i].length, line: i, isTempvs: match[2].trim().toLowerCase() === "tempvs" };
+      }
+    } else if (new RegExp("^ {0,3}" + fence.char + "{" + fence.length + ",}\\s*$").test(line)) {
+      if (fence.isTempvs) blocks.push({ start: fence.start, end: offset, lineStart: fence.line, source: markdown2.slice(fence.start, offset).replace(/\r?\n$/, "") });
+      fence = null;
+    }
+    offset += lines[i].length;
+  }
+  return blocks;
+}
+function replaceDailyBlock(markdown2, block, source) {
+  const newline = markdown2.includes("\r\n") ? "\r\n" : "\n";
+  return markdown2.slice(0, block.start) + source.replace(/\r?\n/g, newline) + newline + markdown2.slice(block.end);
+}
+function parseDailySource(source, areas) {
+  blockIdentity(source);
+  explicitDay(source);
+  const requests = [];
+  const used = /* @__PURE__ */ new Set();
+  for (const [index, line] of source.split(/\r?\n/).entries()) {
+    if (!line.trim() || blockPattern.test(line) || datePattern.test(line)) continue;
+    try {
+      const metadata = line.match(rowPattern), raw = metadata ? line.slice(0, metadata.index) : line;
+      const nextDay = /\s+\+1d\s*$/i.test(raw), input = raw.replace(/\s+\+1d\s*$/i, "");
+      const rows = parseQuick(input, areas);
+      const id = metadata ? decodeURIComponent(metadata[1]) : null;
+      if (id && (used.has(id) || rows.length !== 1)) throw Error("Ogni identificativo deve riferirsi a una sola sessione, senza duplicati.");
+      if (id) used.add(id);
+      for (const row of rows) {
+        if (!row.start) throw Error("Indica una fascia +HH:MM-HH:MM oppure un inizio +HH:MM.");
+        const dayOffset = (row.dayOffset || 0) + Number(nextDay ? 1 : metadata?.[2] || 0);
+        if (dayOffset > 1) throw Error("La sessione deve iniziare nella giornata della nota o in quella successiva.");
+        requests.push({ ...row, ...id ? { sessionId: id } : {}, ...dayOffset ? { dayOffset } : {} });
+      }
+    } catch (error) {
+      throw Error("Riga " + (index + 1) + ": " + error.message.replace(/^Riga 1: /, ""));
+    }
+  }
+  return requests;
+}
+var dayAfter = (day) => {
+  const d = /* @__PURE__ */ new Date(day + "T12:00:00");
+  d.setDate(d.getDate() + 1);
+  return localDateString(d);
+};
+var planningKey = (session) => JSON.stringify([session.id, session.areaId, session.area, session.title, session.date, session.start, session.end, session.workMinutes, session.breakEnabled, session.customBreakMinutes, session.cycleMinutes, session.noteBlockId, Boolean(session.finished), Boolean(session.timerStartedAt)]);
+var archivePlanningKey = (state) => JSON.stringify({ sessions: state.sessions.map(planningKey), defaults: state.defaults });
+var isLocked = (session, now = /* @__PURE__ */ new Date()) => session.finished || session.actualSeconds > 0 || session.timerStartedAt || sessionBounds(session).start <= now;
+function daySessions(state, date, blockId) {
+  return state.sessions.filter((s) => s.date === date || blockId && s.noteBlockId === blockId).sort((a, b) => sessionBounds(a).start - sessionBounds(b).start);
+}
+function serializeDailyPlan(sessions, date, blockId) {
+  const lines = ["<!-- tempvs-block:" + blockId + " -->", "date: " + date];
+  for (const s of [...sessions].sort((a, b) => sessionBounds(a).start - sessionBounds(b).start)) {
+    if (s.date !== date && s.date !== dayAfter(date)) throw Error("Una sessione collegata \xE8 stata spostata fuori dalla giornata della nota.");
+    const gross = Math.round((sessionBounds(s).end - sessionBounds(s).start) / 6e4);
+    const instruction = gross === 1440 ? `${s.area || s.title} @1440m +${s.start}` : `${s.area || s.title} +${s.start}-${s.end} -${gross}m`;
+    lines.push(`${instruction}${s.date !== date ? " +1d" : ""} <!-- tempvs-session:${encodeURIComponent(s.id)} -->`);
+  }
+  return lines.join("\n");
+}
+function prepareDailyPlan({ source, date, blockId, state, now = /* @__PURE__ */ new Date(), id = () => globalThis.crypto?.randomUUID?.() || Date.now().toString(36) + "-" + Math.random().toString(36).slice(2) }) {
+  if (!validDay(date)) throw Error("Data non valida.");
+  const requests = parseDailySource(source, state.defaults.simple.areas), owned = state.sessions.filter((s) => s.noteBlockId === blockId);
+  const candidates = [], claimed = /* @__PURE__ */ new Set();
+  for (const request of requests) {
+    const dateOf = request.dayOffset ? dayAfter(date) : date;
+    let existing = request.sessionId ? state.sessions.find((s) => s.id === request.sessionId) : null;
+    if (request.sessionId && !existing) {
+      if (state.syncDeleted?.sessions?.includes(request.sessionId)) throw Error("La nota contiene una sessione eliminata dal plugin. Aggiorna prima il blocco dalle sessioni.");
+      throw Error("Identificativo sessione non presente nel plugin. Rimuovi il commento identificativo per creare una nuova sessione.");
+    }
+    const exact = (s) => s.date === dateOf && s.start === request.start && (s.areaId ? s.areaId === request.areaId : s.area === request.area) && Math.round((sessionBounds(s).end - sessionBounds(s).start) / 6e4) === request.minutes;
+    if (!existing) existing = state.sessions.find((s) => !claimed.has(s.id) && (!s.noteBlockId || s.noteBlockId === blockId) && exact(s));
+    if (existing?.noteBlockId && existing.noteBlockId !== blockId) throw Error("Una sessione appartiene gi\xE0 a un altro blocco TEMPVS.");
+    if (existing && claimed.has(existing.id)) throw Error("La stessa sessione compare due volte nel blocco.");
+    if (existing && isLocked(existing, now)) {
+      if (!exact(existing) || request.cycleMinutes !== void 0 && request.cycleMinutes !== existing.cycleMinutes || request.focusMinutes !== void 0 && request.focusMinutes !== existing.workMinutes || request.customBreakMinutes !== void 0 && request.customBreakMinutes !== existing.customBreakMinutes)
+        throw Error("Le sessioni gi\xE0 avviate o concluse non possono essere riprogrammate dalla nota.");
+      candidates.push({ ...existing, noteBlockId: blockId });
+      claimed.add(existing.id);
+      continue;
+    }
+    const result = planSessions([request], [], [], state.defaults, now, () => existing?.id || id(), date);
+    let session = result.sessions[0];
+    if (existing) {
+      session = { ...existing, ...session };
+      if (request.cycleMinutes !== void 0) delete session.customBreakMinutes;
+      if (request.focusMinutes !== void 0 || request.customBreakMinutes !== void 0) delete session.cycleMinutes;
+      if (request.cycleMinutes === void 0 && request.focusMinutes === void 0 && request.customBreakMinutes === void 0) {
+        for (const key2 of ["workMinutes", "breakEnabled", "cycleMinutes", "customBreakMinutes"]) if (existing[key2] !== void 0) session[key2] = existing[key2];
+      }
+    }
+    session.noteBlockId = blockId;
+    candidates.push(session);
+    claimed.add(session.id);
+  }
+  const removed = owned.filter((s) => !claimed.has(s.id));
+  if (removed.some((s) => isLocked(s, now))) throw Error("Non puoi rimuovere dal blocco una sessione gi\xE0 avviata o conclusa.");
+  const other = state.sessions.filter((s) => !claimed.has(s.id) && !removed.some((r) => r.id === s.id));
+  if (hasSessionOverlaps([...other, ...candidates].filter((s) => !s.finished))) throw Error("Le righe si sovrappongono a una sessione della giornata.");
+  normalizeArchive({ ...state, sessions: [...other, ...candidates] });
+  return { date, blockId, sessions: candidates, removeIds: removed.map((s) => s.id), unusedMinutes: requests.reduce((n, r) => n + (r.unusedMinutes || 0), 0), planningKey: archivePlanningKey(state), source };
+}
+function applyDailyPlan(state, proposal) {
+  const affected = /* @__PURE__ */ new Set([...proposal.sessions.map((s) => s.id), ...proposal.removeIds]);
+  const current = new Map(state.sessions.map((s) => [s.id, s]));
+  state.sessions = state.sessions.filter((s) => !affected.has(s.id)).concat(proposal.sessions.map((s) => ({ ...s, ...current.has(s.id) ? { actualSeconds: current.get(s.id).actualSeconds || 0, paused: current.get(s.id).paused } : {} })));
+  state.syncDeleted.sessions = [.../* @__PURE__ */ new Set([...state.syncDeleted.sessions, ...proposal.removeIds])];
+}
+
+// obsidian/daily-blocks.js
+var uid = () => globalThis.crypto?.randomUUID?.() || Date.now().toString(36) + "-" + Math.random().toString(36).slice(2);
+var plain = (source) => source.split(/\r?\n/).filter((line) => !/^\s*<!-- tempvs-block:/.test(line)).map((line) => line.replace(/\s*<!-- tempvs-session:[^>]+-->\s*$/, "")).join("\n");
+function restoreRowIds(original, edited) {
+  const rows = original.split(/\r?\n/).filter((line) => line.trim() && !/^\s*(?:date:|<!-- tempvs-block:)/i.test(line));
+  const next = edited.split(/\r?\n/);
+  const actual = next.filter((line) => line.trim() && !/^\s*date:/i.test(line));
+  const used = /* @__PURE__ */ new Set();
+  let at = 0;
+  return next.map((line) => {
+    if (!line.trim() || /^\s*date:/i.test(line)) return line;
+    const same2 = rows.findIndex((row, i) => !used.has(i) && plain(row) === line);
+    const index = same2 >= 0 ? same2 : actual.length === rows.length && !used.has(at) ? at : -1;
+    at++;
+    if (index < 0) return line;
+    used.add(index);
+    return line + (rows[index].match(/\s*<!-- tempvs-session:[^>]+-->\s*$/)?.[0] || "");
+  }).join("\n");
+}
+var DailyBlocks = class {
+  constructor(plugin) {
+    this.plugin = plugin;
+    this.children = /* @__PURE__ */ new Set();
+    this.chain = Promise.resolve();
+    this.destroyed = false;
+    this.applying = false;
+  }
+  get bindings() {
+    return this.plugin.dailyNotes;
+  }
+  start() {
+    for (const language of ["TEMPVS", "tempvs"]) this.plugin.registerMarkdownCodeBlockProcessor(language, (source, el, ctx) => ctx.addChild(new DailyBlock(el, this, ctx, source)));
+    const vault = this.plugin.app.vault;
+    if (vault?.on) {
+      this.plugin.registerEvent(vault.on("modify", (file) => {
+        if (file.extension === "md" && !this.applying) this.refresh(file.path);
+      }));
+      this.plugin.registerEvent(vault.on("rename", (file, oldPath) => {
+        let changed = false;
+        for (const binding of Object.values(this.bindings)) if (binding.path === oldPath || binding.path.startsWith(oldPath + "/")) {
+          binding.path = file.path + binding.path.slice(oldPath.length);
+          changed = true;
+        }
+        if (changed) this.plugin.persist().catch((e) => new import_obsidian.Notice("TEMPVS: " + e.message));
+        this.refresh();
+      }));
+    }
+    this.plugin.addCommand({ id: "unlink-daily-plan", name: "Scollega TEMPVS dalla nota attiva (conserva sessioni)", callback: () => {
+      const file = this.plugin.app.workspace.getActiveFile();
+      if (file) this.detach(file.path).catch((error) => new import_obsidian.Notice("TEMPVS: " + error.message));
+    } });
+    this.plugin.addCommand({ id: "insert-daily-plan", name: "Inserisci blocco TEMPVS nella nota", editorCallback: (editor) => editor.replaceSelection("```TEMPVS\n\n```\n") });
+    this.plugin.app.workspace.onLayoutReady?.(() => this.archiveChanged().catch((error) => new import_obsidian.Notice("TEMPVS: " + error.message)));
+  }
+  queue(work) {
+    const result = this.chain.catch(() => {
+    }).then(() => {
+      if (this.destroyed) throw Error("TEMPVS non \xE8 attivo.");
+      return work();
+    });
+    this.chain = result;
+    return result;
+  }
+  refresh(path) {
+    for (const child of this.children) if (!path || child.ctx.sourcePath === path) child.refresh();
+  }
+  async locate(child) {
+    const file = this.plugin.app.vault.getAbstractFileByPath(child.ctx.sourcePath);
+    if (!file || file.extension !== "md") throw Error("La nota Markdown non \xE8 pi\xF9 disponibile.");
+    const markdown2 = await this.plugin.app.vault.read(file), blocks = findDailyBlocks(markdown2);
+    let matches = child.blockId ? blocks.filter((b) => blockIdentity(b.source) === child.blockId) : [];
+    if (!matches.length && !child.blockId) {
+      const line = child.ctx.getSectionInfo(child.containerEl)?.lineStart;
+      matches = blocks.filter((b) => b.lineStart === line && b.source === child.source);
+      if (!matches.length) matches = blocks.filter((b) => b.source === child.source);
+    }
+    if (matches.length !== 1) throw Error("Blocco TEMPVS non identificabile: riapri la nota e mantieni un solo identificativo per blocco.");
+    const block = matches[0];
+    const date = resolveDailyDate(block.source, file, {
+      moment: import_obsidian.moment,
+      format: this.plugin.app.internalPlugins?.getPluginById("daily-notes")?.instance?.options?.format || "YYYY-MM-DD",
+      frontmatter: this.plugin.app.metadataCache?.getFileCache(file)?.frontmatter
+    });
+    return { file, block, date, markdown: markdown2 };
+  }
+  validateBinding(id, path, date) {
+    const bound = this.bindings[id];
+    if (bound && (bound.path !== path || bound.date !== date)) throw Error("Questo blocco TEMPVS \xE8 gi\xE0 collegato a un\u2019altra nota o data. Non copiare i commenti identificativi.");
+    if (Object.entries(this.bindings).some(([other, b]) => other !== id && b.date === date)) throw Error("Esiste gi\xE0 un blocco collegato a questa giornata. Usa il blocco originale.");
+  }
+  async preview(child, edited) {
+    const context = await this.locate(child), id = blockIdentity(context.block.source) || uid();
+    this.validateBinding(id, context.file.path, context.date);
+    if (edited !== void 0 && context.block.source !== child.source) throw Error("La nota \xE8 cambiata mentre modificavi le righe. Riapri il blocco prima di riprovare.");
+    const source = edited === void 0 ? context.block.source : restoreRowIds(context.block.source, edited);
+    const date = explicitDay(source) || context.date;
+    if (date !== context.date) throw Error("Per cambiare giorno usa una daily note diversa.");
+    const plan = prepareDailyPlan({ source, date, blockId: id, state: this.plugin.state });
+    return { ...context, ...plan, originalSource: context.block.source };
+  }
+  async writeSource(file, id, original, replacement, lineStart) {
+    if (this.destroyed) throw Error("TEMPVS non \xE8 attivo.");
+    await this.plugin.app.vault.process(file, (current) => {
+      const blocks = findDailyBlocks(current);
+      let matches = blocks.filter((b) => blockIdentity(b.source) === id);
+      if (!matches.length) matches = blocks.filter((b) => b.source === original && (lineStart === void 0 || b.lineStart === lineStart));
+      if (matches.length !== 1 || matches[0].source !== original) throw Error("La nota \xE8 cambiata durante la preview. Prepara nuovamente le modifiche.");
+      return replaceDailyBlock(current, matches[0], replacement);
+    });
+  }
+  async commit(prepared) {
+    if (archivePlanningKey(this.plugin.state) !== prepared.planningKey) throw Error("Le sessioni sono cambiate durante la preview. Prepara nuovamente le modifiche.");
+    this.validateBinding(prepared.blockId, prepared.file.path, prepared.date);
+    const newIds = prepared.sessions.filter((s) => !this.plugin.state.sessions.some((current) => current.id === s.id)).map((s) => s.id);
+    const fresh = prepareDailyPlan({ source: prepared.source, date: prepared.date, blockId: prepared.blockId, state: this.plugin.state, id: () => newIds.shift() || uid() });
+    const canonical = serializeDailyPlan(fresh.sessions, prepared.date, prepared.blockId);
+    const previousBinding = this.bindings[prepared.blockId];
+    this.applying = true;
+    try {
+      await this.writeSource(prepared.file, prepared.blockId, prepared.originalSource, canonical, prepared.block.lineStart);
+      try {
+        if (archivePlanningKey(this.plugin.state) !== fresh.planningKey) throw Error("Le sessioni sono cambiate durante il salvataggio. Prepara nuovamente le modifiche.");
+        await this.plugin.change(() => {
+          const available = fresh.sessions.filter((s) => !this.plugin.state.sessions.some((current) => current.id === s.id)).map((s) => s.id);
+          const checked = prepareDailyPlan({ source: prepared.source, date: prepared.date, blockId: prepared.blockId, state: this.plugin.state, id: () => available.shift() || uid() });
+          applyDailyPlan(this.plugin.state, checked);
+          this.plugin.state = normalizeArchive(this.plugin.state);
+          this.bindings[prepared.blockId] = { path: prepared.file.path, date: prepared.date, source: canonical };
+        });
+      } catch (error) {
+        if (previousBinding) this.bindings[prepared.blockId] = previousBinding;
+        else delete this.bindings[prepared.blockId];
+        try {
+          await this.writeSource(prepared.file, prepared.blockId, canonical, prepared.originalSource);
+        } catch {
+          throw Error("Salvataggio sessioni fallito e nota modificata nel frattempo. Le righe restano nella nota: verifica e riprepara la preview. " + error.message);
+        }
+        throw error;
+      }
+    } finally {
+      this.applying = false;
+      this.refresh(prepared.file.path);
+    }
+    return canonical;
+  }
+  apply(prepared) {
+    return this.queue(() => this.commit(prepared));
+  }
+  async includeDay(child) {
+    const context = await this.locate(child), blockId = blockIdentity(context.block.source) || uid();
+    this.validateBinding(blockId, context.file.path, context.date);
+    const source = serializeDailyPlan(daySessions(this.plugin.state, context.date, blockId), context.date, blockId);
+    return { ...context, ...prepareDailyPlan({ source, date: context.date, blockId, state: this.plugin.state }), originalSource: context.block.source };
+  }
+  detach(path) {
+    return this.queue(async () => {
+      const previous = JSON.parse(JSON.stringify(this.bindings));
+      const ids = new Set(Object.keys(this.bindings).filter((id) => this.bindings[id].path === path));
+      this.applying = true;
+      try {
+        await this.plugin.change(() => {
+          for (const id of ids) delete this.bindings[id];
+          for (const session of this.plugin.state.sessions) if (ids.has(session.noteBlockId)) delete session.noteBlockId;
+        });
+      } catch (error) {
+        this.plugin.dailyNotes = Object.assign(/* @__PURE__ */ Object.create(null), previous);
+        throw error;
+      } finally {
+        this.applying = false;
+        this.refresh(path);
+      }
+    });
+  }
+  archiveChanged() {
+    if (this.applying || this.destroyed) return Promise.resolve();
+    return this.queue(async () => {
+      for (const [blockId, binding] of Object.entries(this.bindings)) {
+        const file = this.plugin.app.vault.getAbstractFileByPath(binding.path);
+        if (!file) continue;
+        try {
+          const markdown2 = await this.plugin.app.vault.read(file), blocks = findDailyBlocks(markdown2).filter((b) => blockIdentity(b.source) === blockId);
+          if (blocks.length !== 1 || blocks[0].source !== binding.source) continue;
+          const sessions = daySessions(this.plugin.state, binding.date, blockId);
+          const source = serializeDailyPlan(sessions, binding.date, blockId);
+          if (source === binding.source) continue;
+          const prepared = { file, block: blocks[0], ...prepareDailyPlan({ source, date: binding.date, blockId, state: this.plugin.state }), originalSource: binding.source };
+          await this.commit(prepared);
+        } catch (error) {
+          new import_obsidian.Notice("TEMPVS: nota non aggiornata, dati del plugin conservati. " + error.message);
+        }
+      }
+      this.refresh();
+    });
+  }
+  destroy() {
+    this.destroyed = true;
+    for (const child of this.children) child.disposed = true;
+    this.children.clear();
+  }
+};
+var DailyBlock = class extends import_obsidian.MarkdownRenderChild {
+  constructor(el, controller, ctx, source) {
+    super(el);
+    this.controller = controller;
+    this.ctx = ctx;
+    this.source = source.replace(/\r?\n$/, "");
+    this.disposed = false;
+  }
+  onload() {
+    this.controller.children.add(this);
+    this.refresh();
+  }
+  onunload() {
+    this.disposed = true;
+    this.controller.children.delete(this);
+  }
+  async action(callback) {
+    if (this.busy) return;
+    this.busy = true;
+    try {
+      await callback();
+    } catch (error) {
+      this.message.textContent = error.message;
+      this.message.setAttribute("role", "alert");
+    } finally {
+      this.busy = false;
+    }
+  }
+  async refresh() {
+    if (this.disposed || this.busy || this.editing || this.proposal) return;
+    const version = this.version = (this.version || 0) + 1;
+    try {
+      const context = await this.controller.locate(this);
+      if (this.disposed || version !== this.version || this.busy || this.editing || this.proposal) return;
+      this.source = context.block.source;
+      this.blockId = blockIdentity(this.source);
+      this.draw(context);
+    } catch (error) {
+      if (this.disposed || this.editing || this.proposal) return;
+      this.containerEl.empty();
+      this.containerEl.createEl("p", { text: "TEMPVS: " + error.message, cls: "tempvs-daily-error" });
+    }
+  }
+  draw(context) {
+    const el = this.containerEl;
+    el.empty();
+    el.addClass("tempvs-daily");
+    el.createEl("h4", { text: "TEMPVS \xB7 " + context.date });
+    this.message = el.createEl("p", { cls: "tempvs-help", attr: { role: "status" } });
+    const binding = this.controller.bindings[this.blockId];
+    this.message.textContent = binding && binding.source !== this.source ? "Testo modificato: prepara e conferma le modifiche prima di aggiornare le sessioni." : "Durate lorde, pause comprese. Le sessioni avviate e concluse sono protette.";
+    const sessions = daySessions(this.controller.plugin.state, context.date, this.blockId);
+    if (sessions.length) {
+      const table = el.createEl("table", { cls: "tempvs-daily-table" }), head = table.createEl("thead").createEl("tr");
+      for (const text of ["Area", "Orario", "Sessione"]) head.createEl("th", { text, attr: { scope: "col" } });
+      const body = table.createEl("tbody");
+      for (const session of sessions) {
+        const row = body.createEl("tr");
+        row.createEl("td", { text: session.area || session.title });
+        row.createEl("td", { text: session.start + "\u2013" + session.end + (session.date !== context.date ? " (+1 giorno)" : "") });
+        row.createEl("td", { text: (isLocked(session) ? "Protetta \xB7 " : "") + sessionPauseLabel(session) });
+      }
+    } else el.createEl("p", { text: "Nessuna sessione salvata per questa giornata.", cls: "tempvs-muted" });
+    this.editor = el.createEl("textarea", { cls: "tempvs-daily-editor", attr: { rows: "6", "aria-label": "Pianificazione TEMPVS della nota", spellcheck: "false" } });
+    this.editor.value = plain(this.source);
+    this.editor.hidden = true;
+    const controls = el.createDiv({ cls: "tempvs-daily-actions" });
+    const action = (text, callback) => {
+      const b = controls.createEl("button", { text, attr: { type: "button" } });
+      b.onclick = () => this.action(callback);
+      return b;
+    };
+    action("Modifica righe", () => {
+      this.editing = true;
+      this.editor.hidden = false;
+      this.editor.focus();
+    });
+    this.editor.addEventListener("input", () => {
+      this.proposal = null;
+      this.previewEl?.empty();
+      this.message.textContent = "Righe modificate: prepara nuovamente la preview.";
+    });
+    action("Prepara modifiche", async () => {
+      this.proposal = null;
+      this.previewEl.empty();
+      this.proposal = await this.controller.preview(this, this.editing ? this.editor.value : void 0);
+      this.showProposal();
+    });
+    action("Includi sessioni del giorno", async () => {
+      this.proposal = null;
+      this.previewEl.empty();
+      this.proposal = await this.controller.includeDay(this);
+      this.showProposal();
+    });
+    action("Annulla", () => {
+      this.editing = false;
+      this.proposal = null;
+      this.busy = false;
+      this.refresh();
+    });
+    this.previewEl = el.createDiv({ cls: "tempvs-daily-preview" });
+  }
+  showProposal() {
+    const plan = this.proposal, el = this.previewEl;
+    el.empty();
+    el.createEl("p", { text: plan.sessions.length + " sessioni \xB7 " + plan.removeIds.length + " da rimuovere." + (plan.unusedMinutes ? " " + plan.unusedMinutes + " minuti finali lasciati liberi: solo sessioni intere." : "") });
+    for (const s of plan.sessions) el.createEl("p", { text: (s.area || s.title) + " \xB7 " + s.date + " \xB7 " + s.start + "\u2013" + s.end + " \xB7 " + sessionPauseLabel(s) });
+    const confirm = el.createEl("button", { text: "Applica alla nota e al plugin", cls: "mod-cta", attr: { type: "button" } });
+    confirm.onclick = () => this.action(async () => {
+      await this.controller.apply(plan);
+      this.blockId = plan.blockId;
+      this.editing = false;
+      this.proposal = null;
+      this.busy = false;
+      await this.refresh();
+    });
+  }
+};
+
+// obsidian/main.js
+var import_obsidian3 = require("obsidian");
 
 // core/tempo-merge.js
 var absent = Symbol("missing");
@@ -1157,7 +1642,7 @@ function createDropboxSync({ getState, applyRemote, normalizeRemote, onStatus, r
 }
 
 // obsidian/cloud-adapter.js
-var import_obsidian = require("obsidian");
+var import_obsidian2 = require("obsidian");
 async function dropboxRequest(url, options = {}) {
   const headers = { ...options.headers || {} };
   let body = options.body;
@@ -1165,7 +1650,7 @@ async function dropboxRequest(url, options = {}) {
     body = body.toString();
     headers["Content-Type"] = "application/x-www-form-urlencoded";
   }
-  const response = await (0, import_obsidian.requestUrl)({
+  const response = await (0, import_obsidian2.requestUrl)({
     url,
     method: options.method || "GET",
     headers,
@@ -1199,7 +1684,7 @@ function createCloudStorage(initial = {}, onMutation = () => {
     snapshot: () => Object.fromEntries(map)
   };
 }
-var TempvsConflictModal = class extends import_obsidian.Modal {
+var TempvsConflictModal = class extends import_obsidian2.Modal {
   constructor(app, conflicts, finish) {
     super(app);
     this.conflicts = conflicts;
@@ -1225,7 +1710,7 @@ var TempvsConflictModal = class extends import_obsidian.Modal {
     const ok = controls.createEl("button", { text: "Conferma l'unione", cls: "mod-cta" });
     ok.addEventListener("click", () => {
       if (selects.some((item) => !item.select.value)) {
-        new import_obsidian.Notice("Seleziona una versione per ogni conflitto.");
+        new import_obsidian2.Notice("Seleziona una versione per ogni conflitto.");
         return;
       }
       this.complete(Object.fromEntries(selects.map((item) => [item.key, item.select.value])));
@@ -1251,7 +1736,7 @@ function chooseTempvsConflicts(app, conflicts) {
 }
 function confirmTempvs(app, title, description) {
   return new Promise((resolve) => {
-    class Confirmation extends import_obsidian.Modal {
+    class Confirmation extends import_obsidian2.Modal {
       onOpen() {
         this.setTitle(title);
         this.contentEl.createEl("p", { text: description });
@@ -1579,7 +2064,7 @@ var uuid = () => globalThis.crypto?.randomUUID?.() || String(Date.now()) + "-" +
 var minutes = (seconds) => Math.round(seconds / 60);
 var button = (parent, label, action) => {
   const el = parent.createEl("button", { text: label });
-  el.addEventListener("click", () => Promise.resolve().then(action).catch((e) => new import_obsidian2.Notice(e.message)));
+  el.addEventListener("click", () => Promise.resolve().then(action).catch((e) => new import_obsidian3.Notice(e.message)));
   return el;
 };
 var today = () => localDateString();
@@ -1591,8 +2076,8 @@ var shiftDate = (value, change) => {
 };
 var iconButton = (parent, icon, label, action) => {
   const el = parent.createEl("button", { cls: "tempvs-icon-button", attr: { "aria-label": label, "title": label } });
-  (0, import_obsidian2.setIcon)(el, icon);
-  el.addEventListener("click", () => Promise.resolve().then(action).catch((e) => new import_obsidian2.Notice(e.message)));
+  (0, import_obsidian3.setIcon)(el, icon);
+  el.addEventListener("click", () => Promise.resolve().then(action).catch((e) => new import_obsidian3.Notice(e.message)));
   return el;
 };
 var setPanel = (el, show) => {
@@ -1614,7 +2099,7 @@ function renderCloudSettings(parent, plugin) {
     link.href = url;
     link.hidden = false;
     await plugin.persist();
-    new import_obsidian2.Notice("Autorizza TEMPVS su Dropbox e copia il codice mostrato.");
+    new import_obsidian3.Notice("Autorizza TEMPVS su Dropbox e copia il codice mostrato.");
   });
   const code = cloud.createEl("input", { attr: { "aria-label": "Codice autorizzazione Dropbox", placeholder: "Incolla il codice Dropbox", autocomplete: "off" } });
   button(cloud, "2. Completa collegamento", async () => {
@@ -1631,7 +2116,7 @@ function renderCloudSettings(parent, plugin) {
     if (!copy?.data) throw Error("Nessuna copia di recupero disponibile.");
     const filename = "tempvs-recupero-" + Date.now() + ".json";
     await plugin.app.vault.create(filename, JSON.stringify(copy.data, null, 2));
-    new import_obsidian2.Notice("Copia di recupero salvata nel vault: " + filename);
+    new import_obsidian3.Notice("Copia di recupero salvata nel vault: " + filename);
   });
   const initial = cloud.createDiv({ cls: "tempvs-controls" });
   button(initial, "Prima unione", () => plugin.cloudOperation("firstSync", "merge"));
@@ -1653,7 +2138,7 @@ function renderCloudSettings(parent, plugin) {
     }
   });
 }
-var TempvsView = class extends import_obsidian2.ItemView {
+var TempvsView = class extends import_obsidian3.ItemView {
   constructor(leaf, plugin) {
     super(leaf);
     this.plugin = plugin;
@@ -1783,7 +2268,7 @@ var TempvsView = class extends import_obsidian2.ItemView {
       form.dataset.busy = "true";
       const submit = form.querySelector('[type="submit"]');
       submit.disabled = true;
-      plugin.start(area.value, Number(gross.value), Number(focus.value), pause.value === "" ? void 0 : Number(pause.value)).then(() => this.togglePanel(null, true)).catch((err) => new import_obsidian2.Notice(err.message)).finally(() => {
+      plugin.start(area.value, Number(gross.value), Number(focus.value), pause.value === "" ? void 0 : Number(pause.value)).then(() => this.togglePanel(null, true)).catch((err) => new import_obsidian3.Notice(err.message)).finally(() => {
         delete form.dataset.busy;
         submit.disabled = false;
       });
@@ -1830,7 +2315,7 @@ var TempvsView = class extends import_obsidian2.ItemView {
         this.day = dateInput.value;
         this.togglePanel(null, true);
         this.update(true);
-      }).catch((err) => new import_obsidian2.Notice(err.message)).finally(() => {
+      }).catch((err) => new import_obsidian3.Notice(err.message)).finally(() => {
         delete plan.dataset.busy;
         submit.disabled = false;
       });
@@ -1842,15 +2327,15 @@ var TempvsView = class extends import_obsidian2.ItemView {
     const soundChoice = sounds.createEl("select", { cls: "tempvs-sound-choice", attr: { "aria-label": "Rumore ambientale" } });
     for (const [value, label] of [["white", "Rumore bianco"], ["brown", "Rumore marrone"], ["rain", "Pioggia"], ["fire", "Caminetto"]]) soundChoice.createEl("option", { value, text: label });
     soundChoice.value = plugin.audioKind;
-    soundChoice.addEventListener("change", () => void plugin.selectAmbient(soundChoice.value).catch((e) => new import_obsidian2.Notice(e.message)));
+    soundChoice.addEventListener("change", () => void plugin.selectAmbient(soundChoice.value).catch((e) => new import_obsidian3.Notice(e.message)));
     const soundVolume = sounds.createDiv({ cls: "tempvs-sound-volume" });
     soundVolume.createEl("label", { text: "Volume", attr: { for: "tempvs-volume" } });
     const slider = soundVolume.createEl("input", { cls: "tempvs-volume-slider", attr: { type: "range", id: "tempvs-volume", min: "0", max: "100", step: "1", "aria-label": "Volume audio" } });
     slider.value = String(plugin.audioVolume);
     slider.addEventListener("input", () => plugin.adjustAmbientVolume(Number(slider.value)));
-    slider.addEventListener("change", () => void plugin.persist().catch((e) => new import_obsidian2.Notice(e.message)));
+    slider.addEventListener("change", () => void plugin.persist().catch((e) => new import_obsidian3.Notice(e.message)));
     const soundToggle = sounds.createEl("button", { cls: "tempvs-sound-toggle mod-cta", text: "Avvia suono" });
-    soundToggle.addEventListener("click", () => void plugin.toggleAmbient().catch((e) => new import_obsidian2.Notice(e.message)));
+    soundToggle.addEventListener("click", () => void plugin.toggleAmbient().catch((e) => new import_obsidian3.Notice(e.message)));
     sounds.createDiv({ cls: "tempvs-sound-status", attr: { role: "status", "aria-live": "polite" } });
     const volumeValue = soundVolume.createEl("output", { text: slider.value + "%", "attr": { "aria-label": "Volume selezionato" } });
     slider.addEventListener("input", () => {
@@ -2015,14 +2500,14 @@ var TempvsView = class extends import_obsidian2.ItemView {
     }
     if (!sessions.length) {
       const empty = list.createDiv({ cls: "tempvs-empty" });
-      (0, import_obsidian2.setIcon)(empty.createDiv({ cls: "tempvs-empty-icon" }), "calendar-check");
+      (0, import_obsidian3.setIcon)(empty.createDiv({ cls: "tempvs-empty-icon" }), "calendar-check");
       empty.createEl("strong", { text: "Spazio per i tuoi progetti" });
       empty.createEl("p", { text: "Nessuna sessione in agenda. Avvia un focus o pianifica un momento per questa giornata." });
     }
     if (this.panel === "notes") this.renderNotes();
   }
 };
-var TempvsSettings = class extends import_obsidian2.PluginSettingTab {
+var TempvsSettings = class extends import_obsidian3.PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.plugin = plugin;
@@ -2031,36 +2516,36 @@ var TempvsSettings = class extends import_obsidian2.PluginSettingTab {
     const el = this.containerEl;
     el.empty();
     el.createEl("h2", { text: "TEMPVS \u2014 Impostazioni" });
-    new import_obsidian2.Setting(el).setName("Layout del timer").setDesc("Automatico, pannello laterale oppure scheda ampia su iPad e desktop.").addDropdown((d) => d.addOptions({ auto: "Automatico", side: "Pannello laterale", wide: "Scheda ampia" }).setValue(this.plugin.layout).onChange(async (v) => {
+    new import_obsidian3.Setting(el).setName("Layout del timer").setDesc("Automatico, pannello laterale oppure scheda ampia su iPad e desktop.").addDropdown((d) => d.addOptions({ auto: "Automatico", side: "Pannello laterale", wide: "Scheda ampia" }).setValue(this.plugin.layout).onChange(async (v) => {
       this.plugin.layout = v;
       await this.plugin.persist();
       await this.plugin.openView(true);
     }));
-    new import_obsidian2.Setting(el).setName("Minuti focus predefiniti").addText((t) => t.setValue(String(this.plugin.state.defaults.workMinutes)).onChange(async (v) => {
+    new import_obsidian3.Setting(el).setName("Minuti focus predefiniti").addText((t) => t.setValue(String(this.plugin.state.defaults.workMinutes)).onChange(async (v) => {
       const n = Number(v);
       if (Number.isInteger(n) && n >= 1 && n <= 240)
         await this.plugin.change(() => {
           this.plugin.state.defaults.workMinutes = n;
         });
     }));
-    new import_obsidian2.Setting(el).setName("Pause automatiche").addToggle((t) => t.setValue(Boolean(this.plugin.state.defaults.breakEnabled)).onChange(async (v) => this.plugin.change(() => {
+    new import_obsidian3.Setting(el).setName("Pause automatiche").addToggle((t) => t.setValue(Boolean(this.plugin.state.defaults.breakEnabled)).onChange(async (v) => this.plugin.change(() => {
       this.plugin.state.defaults.breakEnabled = v;
     })));
-    new import_obsidian2.Setting(el).setName("Avvisi sonori").setDesc("Segnale udibile ai cambi tra concentrazione e pausa, quando Obsidian \xE8 in primo piano.").addToggle((t) => t.setValue(this.plugin.chimeEnabled).onChange(async (value) => {
+    new import_obsidian3.Setting(el).setName("Avvisi sonori").setDesc("Segnale udibile ai cambi tra concentrazione e pausa, quando Obsidian \xE8 in primo piano.").addToggle((t) => t.setValue(this.plugin.chimeEnabled).onChange(async (value) => {
       this.plugin.chimeEnabled = value;
       if (value) this.plugin.chime.arm();
       await this.plugin.persist();
     }));
-    new import_obsidian2.Setting(el).setName("Prova avviso").setDesc("Tocca per attivare e verificare l'audio su questo dispositivo.").addButton((b) => b.setButtonText("Riproduci").onClick(() => {
+    new import_obsidian3.Setting(el).setName("Prova avviso").setDesc("Tocca per attivare e verificare l'audio su questo dispositivo.").addButton((b) => b.setButtonText("Riproduci").onClick(() => {
       void this.plugin.chime.play("break").then((ok) => {
-        if (!ok) new import_obsidian2.Notice("Audio non disponibile: controlla il volume e riprova toccando Riproduci.");
+        if (!ok) new import_obsidian3.Notice("Audio non disponibile: controlla il volume e riprova toccando Riproduci.");
       });
     }));
     el.createEl("h3", { text: "Aree" });
     el.createEl("p", { cls: "tempvs-muted", text: "Rinomina, riordina o elimina le aree senza perdere sessioni e statistiche. La descrizione Markdown resta associata all'area." });
     for (const [index, area] of this.plugin.config.areas.entries()) {
       const section = el.createDiv({ cls: "tempvs-area-config" });
-      const heading = new import_obsidian2.Setting(section).setName(area.name);
+      const heading = new import_obsidian3.Setting(section).setName(area.name);
       const nameInput = section.createEl("input", { attr: { type: "text", maxlength: "80", "aria-label": "Nuovo nome area " + area.name, value: area.name } });
       const colorInput = section.createEl("input", { attr: { type: "color", "aria-label": "Colore area " + area.name, value: area.color || "#54769b" } });
       const details = section.createEl("details");
@@ -2081,9 +2566,9 @@ var TempvsSettings = class extends import_obsidian2.PluginSettingTab {
             if (next !== previous) this.plugin.remapArea(previous, next);
           });
           this.display();
-          new import_obsidian2.Notice("Area aggiornata.");
+          new import_obsidian3.Notice("Area aggiornata.");
         } catch (e) {
-          new import_obsidian2.Notice(e.message);
+          new import_obsidian3.Notice(e.message);
         }
       }));
       heading.addButton((b) => b.setButtonText("\u2191").setTooltip("Sposta in alto").setDisabled(index === 0).onClick(async () => {
@@ -2094,7 +2579,7 @@ var TempvsSettings = class extends import_obsidian2.PluginSettingTab {
           });
           this.display();
         } catch (e) {
-          new import_obsidian2.Notice(e.message);
+          new import_obsidian3.Notice(e.message);
         }
       }));
       heading.addButton((b) => b.setButtonText("\u2193").setTooltip("Sposta in basso").setDisabled(index === this.plugin.config.areas.length - 1).onClick(async () => {
@@ -2105,7 +2590,7 @@ var TempvsSettings = class extends import_obsidian2.PluginSettingTab {
           });
           this.display();
         } catch (e) {
-          new import_obsidian2.Notice(e.message);
+          new import_obsidian3.Notice(e.message);
         }
       }));
       if (this.plugin.config.areas.length > 1) {
@@ -2121,27 +2606,27 @@ var TempvsSettings = class extends import_obsidian2.PluginSettingTab {
               this.plugin.config.areas = this.plugin.config.areas.filter((a) => a.name !== area.name);
             });
             this.display();
-            new import_obsidian2.Notice("Area eliminata e dati trasferiti.");
+            new import_obsidian3.Notice("Area eliminata e dati trasferiti.");
           } catch (e) {
-            new import_obsidian2.Notice(e.message);
+            new import_obsidian3.Notice(e.message);
           }
         }));
       }
     }
-    const addArea = new import_obsidian2.Setting(el).setName("Nuova area");
+    const addArea = new import_obsidian3.Setting(el).setName("Nuova area");
     let addName = "";
     addArea.addText((t) => t.setPlaceholder("Nome della nuova area").onChange((v) => {
       addName = v;
     }));
     addArea.addButton((b) => b.setButtonText("Aggiungi").onClick(async () => {
       const name = addName.trim();
-      if (!name || name.length > 80 || this.plugin.config.areas.some((a) => a.name.toLocaleLowerCase() === name.toLocaleLowerCase())) return new import_obsidian2.Notice("Nome area non valido o gi\xE0 utilizzato.");
+      if (!name || name.length > 80 || this.plugin.config.areas.some((a) => a.name.toLocaleLowerCase() === name.toLocaleLowerCase())) return new import_obsidian3.Notice("Nome area non valido o gi\xE0 utilizzato.");
       try {
         await this.plugin.change(() => this.plugin.config.areas.push({ name, description: "", color: "#54769B" }));
         this.display();
-        new import_obsidian2.Notice("Area aggiunta.");
+        new import_obsidian3.Notice("Area aggiunta.");
       } catch (e) {
-        new import_obsidian2.Notice(e.message);
+        new import_obsidian3.Notice(e.message);
       }
     }));
     el.createEl("h3", { text: "Dropbox" });
@@ -2149,22 +2634,23 @@ var TempvsSettings = class extends import_obsidian2.PluginSettingTab {
     el.createEl("p", { cls: "tempvs-muted", text: "Lo storico delle sessioni rimane salvato per statistiche, backup e sincronizzazione, ma non \xE8 mostrato nel timer." });
   }
 };
-var TempvsPlugin = class extends import_obsidian2.Plugin {
+var TempvsPlugin = class extends import_obsidian3.Plugin {
   async onload() {
     try {
       const data = await this.loadData();
       if (data && !data.archive && !Array.isArray(data.sessions) && Object.keys(data).length)
         throw Error("Formato precedente non riconosciuto: nessun dato verr\xE0 sovrascritto.");
       this.state = normalizeArchive(data?.archive || (Array.isArray(data?.sessions) ? data : ZERO()));
+      this.dailyNotes = Object.assign(/* @__PURE__ */ Object.create(null), data?.dailyNotes || {});
       this.cloudData = data?.cloudData && typeof data.cloudData === "object" ? data.cloudData : {};
-      this.compact = typeof data?.ui?.compact === "boolean" ? data.ui.compact : import_obsidian2.Platform.isMobile;
+      this.compact = typeof data?.ui?.compact === "boolean" ? data.ui.compact : import_obsidian3.Platform.isMobile;
       this.layout = ["auto", "side", "wide"].includes(data?.ui?.layout) ? data.ui.layout : "auto";
       this.audioKind = ["white", "brown", "rain", "fire"].includes(data?.audio?.kind) ? data.audio.kind : "brown";
       const savedVolume = Number(data?.audio?.volume);
       this.audioVolume = data?.audio?.volume !== void 0 && Number.isFinite(savedVolume) ? Math.max(0, Math.min(100, Math.round(savedVolume))) : 25;
       this.chimeEnabled = data?.notifications?.sound !== false;
     } catch (error) {
-      new import_obsidian2.Notice("TEMPVS: dati non validi, archivio lasciato intatto. " + error.message, 1e4);
+      new import_obsidian3.Notice("TEMPVS: dati non validi, archivio lasciato intatto. " + error.message, 1e4);
       throw error;
     }
     this.ambient = new TempoAmbientAudio(() => this.refreshAudioControls());
@@ -2179,7 +2665,7 @@ var TempvsPlugin = class extends import_obsidian2.Plugin {
     this.cloudStorage = createCloudStorage(this.cloudData, () => {
       this.cloudDirty = true;
       clearTimeout(this.cloudSaveTimer);
-      this.cloudSaveTimer = window.setTimeout(() => this.persist().catch((e) => new import_obsidian2.Notice("TEMPVS: errore nel salvataggio Dropbox: " + e.message)), 150);
+      this.cloudSaveTimer = window.setTimeout(() => this.persist().catch((e) => new import_obsidian3.Notice("TEMPVS: errore nel salvataggio Dropbox: " + e.message)), 150);
     });
     this.cloud = createDropboxSync({
       getState: () => this.state,
@@ -2200,6 +2686,7 @@ var TempvsPlugin = class extends import_obsidian2.Plugin {
         for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) leaf.view?.draw?.();
         this.syncAmbient();
         this.refresh(true);
+        await this.daily?.archiveChanged();
       },
       normalizeRemote: normalizeArchive,
       onStatus: (message, detail) => {
@@ -2220,23 +2707,25 @@ var TempvsPlugin = class extends import_obsidian2.Plugin {
         isOnline: () => navigator.onLine !== false
       }
     });
+    this.daily = new DailyBlocks(this);
+    this.daily.start();
     this.registerView(VIEW_TYPE, (leaf) => new TempvsView(leaf, this));
     this.addSettingTab(new TempvsSettings(this.app, this));
     this.addCommand({ id: "open-tempvs", name: "Apri timer TEMPVS", callback: () => this.openView() });
-    this.addCommand({ id: "pause-tempvs", name: "Pausa o riprendi TEMPVS", callback: () => this.togglePause().catch((e) => new import_obsidian2.Notice(e.message)) });
-    this.addCommand({ id: "finish-tempvs", name: "Concludi sessione TEMPVS", callback: () => this.finish().catch((e) => new import_obsidian2.Notice(e.message)) });
+    this.addCommand({ id: "pause-tempvs", name: "Pausa o riprendi TEMPVS", callback: () => this.togglePause().catch((e) => new import_obsidian3.Notice(e.message)) });
+    this.addCommand({ id: "finish-tempvs", name: "Concludi sessione TEMPVS", callback: () => this.finish().catch((e) => new import_obsidian3.Notice(e.message)) });
     this.addCommand({ id: "link-current-note", name: "Collega nota attiva all'area della sessione", callback: async () => {
       const area = this.active()?.area;
       if (!area) {
         await this.openView();
-        new import_obsidian2.Notice("Apri i dettagli TEMPVS e scegli l'area della nota.");
+        new import_obsidian3.Notice("Apri i dettagli TEMPVS e scegli l'area della nota.");
         return;
       }
-      await this.attachActiveNote(area).catch((e) => new import_obsidian2.Notice(e.message));
+      await this.attachActiveNote(area).catch((e) => new import_obsidian3.Notice(e.message));
     } });
     this.addCommand({ id: "toggle-compact-view", name: "Espandi o compatta il pannello TEMPVS", callback: () => this.setCompact(!this.compact) });
     this.addRibbonIcon("timer", "Apri TEMPVS", () => this.openView());
-    if (!import_obsidian2.Platform.isMobile) {
+    if (!import_obsidian3.Platform.isMobile) {
       this.status = this.addStatusBarItem();
       this.status.addClass("tempvs-status");
       this.status.setAttribute("role", "button");
@@ -2286,7 +2775,7 @@ var TempvsPlugin = class extends import_obsidian2.Plugin {
     this.lastNoticeCheck = nowMs;
     if (!current || !previous || current.id !== previous.id || current.kind === previous.kind || gap < 0 || gap > 8e3 || nowMs - current.start < 0 || nowMs - current.start > 8e3 || document.hidden) return;
     const message = current.kind === "break" ? "TEMPVS \xB7 Inizia la pausa \u2014 " + current.area : "TEMPVS \xB7 Riprende la concentrazione \u2014 " + current.area;
-    new import_obsidian2.Notice(message, 6500);
+    new import_obsidian3.Notice(message, 6500);
     if (this.chimeEnabled) void this.chime.play(current.kind).catch((error) => console.warn("TEMPVS: avviso acustico non disponibile", error));
   }
   refreshAudioControls() {
@@ -2310,11 +2799,11 @@ var TempvsPlugin = class extends import_obsidian2.Plugin {
     }
     const active = this.active();
     if (!active || active.paused || getPhase(active).kind !== "work") {
-      new import_obsidian2.Notice("Avvia il suono durante una sessione di concentrazione non in pausa.");
+      new import_obsidian3.Notice("Avvia il suono durante una sessione di concentrazione non in pausa.");
       return;
     }
     const started = this.ambient.start(this.audioKind, this.audioVolume / 100, true);
-    if (!await started) new import_obsidian2.Notice("Impossibile avviare l'audio: verifica i permessi su Obsidian e iPadOS.");
+    if (!await started) new import_obsidian3.Notice("Impossibile avviare l'audio: verifica i permessi su Obsidian e iPadOS.");
     else this.syncAmbient();
   }
   async selectAmbient(kind) {
@@ -2325,7 +2814,7 @@ var TempvsPlugin = class extends import_obsidian2.Plugin {
       this.audioVolume / 100,
       getAmbientFocusMode(this.state.sessions.filter((s) => !s.finished)) === "focus" && !this.active()?.paused
     ) : null;
-    if (restarted && !await restarted) new import_obsidian2.Notice("Impossibile cambiare il rumore ambientale.");
+    if (restarted && !await restarted) new import_obsidian3.Notice("Impossibile cambiare il rumore ambientale.");
     this.syncAmbient();
     await this.persist();
   }
@@ -2364,6 +2853,7 @@ var TempvsPlugin = class extends import_obsidian2.Plugin {
       this.status.setAttribute("aria-label", "Apri TEMPVS");
     }
     for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) leaf.view?.update?.(full);
+    if (full) this.daily?.refresh();
   }
   record() {
     const now = Date.now();
@@ -2387,7 +2877,7 @@ var TempvsPlugin = class extends import_obsidian2.Plugin {
     if (this.dirty && now - this.lastSave >= 15e3) {
       this.persist().then(() => {
         this.cloud?.changed();
-      }).catch((e) => new import_obsidian2.Notice("TEMPVS: salvataggio fallito: " + e.message));
+      }).catch((e) => new import_obsidian3.Notice("TEMPVS: salvataggio fallito: " + e.message));
       this.lastSave = now;
     }
     this.refresh(Math.floor(now / 6e4) !== Math.floor((now - 1e3) / 6e4));
@@ -2397,8 +2887,9 @@ var TempvsPlugin = class extends import_obsidian2.Plugin {
     const cloudData = this.cloudStorage?.snapshot() || {};
     const audio = { kind: this.audioKind, volume: this.audioVolume };
     const notifications = { sound: this.chimeEnabled };
+    const dailyNotes = JSON.parse(JSON.stringify(this.dailyNotes || {}));
     const write = this.writeChain.catch(() => {
-    }).then(() => this.saveData({ archive, cloudData, ui: { compact: this.compact, layout: this.layout }, audio, notifications }));
+    }).then(() => this.saveData({ archive, cloudData, ui: { compact: this.compact, layout: this.layout }, audio, notifications, dailyNotes }));
     this.writeChain = write;
     await write;
     if (JSON.stringify(this.state) === JSON.stringify(archive)) this.dirty = false;
@@ -2412,6 +2903,7 @@ var TempvsPlugin = class extends import_obsidian2.Plugin {
       const previous = JSON.stringify(this.state);
       try {
         mutator();
+        this.state = normalizeArchive(this.state);
         await this.persist();
       } catch (error) {
         this.state = JSON.parse(previous);
@@ -2422,12 +2914,13 @@ var TempvsPlugin = class extends import_obsidian2.Plugin {
         this.cloud?.changed();
         await this.persist();
       } catch (error) {
-        new import_obsidian2.Notice("TEMPVS: dati salvati in locale; sincronizzazione da riprovare. " + error.message);
+        new import_obsidian3.Notice("TEMPVS: dati salvati in locale; sincronizzazione da riprovare. " + error.message);
       }
       this.refresh(true);
     } finally {
       this.changing = false;
     }
+    await this.daily?.archiveChanged();
   }
   async setCompact(value) {
     this.compact = Boolean(value);
@@ -2441,13 +2934,13 @@ var TempvsPlugin = class extends import_obsidian2.Plugin {
     if (!area) throw Error("Area TEMPVS non valida.");
     const updated = appendNoteLink(area.description, file.path);
     if (updated === area.description) {
-      new import_obsidian2.Notice("Nota gi\xE0 collegata all'area.");
+      new import_obsidian3.Notice("Nota gi\xE0 collegata all'area.");
       return;
     }
     await this.change(() => {
       area.description = updated;
     });
-    new import_obsidian2.Notice("Nota collegata all'area " + areaName + ".");
+    new import_obsidian3.Notice("Nota collegata all'area " + areaName + ".");
   }
   remapArea(from, to) {
     for (const session of this.state.sessions) {
@@ -2497,14 +2990,14 @@ var TempvsPlugin = class extends import_obsidian2.Plugin {
       requests,
       [],
       this.state.sessions.filter((s) => !s.finished),
-      { ...this.state.defaults, breakEnabled: true },
+      this.state.defaults,
       /* @__PURE__ */ new Date(),
       uuid,
       date
     );
     if (result.remainder || !result.sessions?.length) throw Error("Programmazione incompleta.");
     await this.change(() => this.state.sessions.push(...result.sessions));
-    new import_obsidian2.Notice("TEMPVS: " + result.sessions.length + " sessioni programmate.");
+    new import_obsidian3.Notice("TEMPVS: " + result.sessions.length + " sessioni programmate.");
   }
   async togglePause() {
     const s = this.active();
@@ -2548,6 +3041,9 @@ var TempvsPlugin = class extends import_obsidian2.Plugin {
     }
   }
   async onunload() {
+    this.daily?.destroy();
+    await this.daily?.chain.catch(() => {
+    });
     this.cloud?.destroy();
     this.chime?.destroy();
     this.ambient?.destroy();

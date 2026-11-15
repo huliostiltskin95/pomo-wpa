@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   release:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Check out Obsidian plugin sources
         uses: actions/checkout@v4
@@ -31,6 +31,11 @@ jobs:
         run: |
           npm test
           node --test tests/obsidian-runtime.smoke.mjs
+      - name: Verify Obsidian UI and daily-note block
+        run: |
+          npm install --no-save --no-package-lock playwright
+          npx playwright install --with-deps chromium
+          node tests/obsidian-ui.e2e.mjs
       - name: Validate packaged files and version
         id: version
         shell: bash
@@ -64,4 +69,4 @@ jobs:
             obsidian/styles.css#styles.css \
             --target "${{ github.sha }}" \
             --title "TEMPVS $VERSION" \
-            --notes "TEMPVS Obsidian: build unificata, protezione dei dati salvati in caso di errore cloud, blocco dei salvataggi sovrapposti e annullamento delle risposte Dropbox dopo scollegamento o unload. Mantiene pomodori lordi e pianificazione guidata. Aggiornamento tramite BRAT."
+            --notes "TEMPVS 0.5.8: pianificazione e sessioni modificabili nelle daily note tramite blocchi TEMPVS, preview con conferma, sincronizzazione bidirezionale con il pannello, identificativi stabili e protezione dello storico. Aggiornamento tramite BRAT."

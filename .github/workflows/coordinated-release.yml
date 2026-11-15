@@ -62,10 +62,15 @@ jobs:
         with:
           name: tempvs-pwa
           path: dist/pwa
+      - uses: actions/download-artifact@v4
+        with:
+          name: tempvs-obsidian
+          path: obsidian/dist
       - name: Browser smoke against staged PWA
         run: |
           python3 -m http.server 8123 --bind 127.0.0.1 --directory dist/pwa >/tmp/tempvs-http.log 2>&1 &
           sleep 2
+          node tests/obsidian-ui.e2e.mjs
           node tests/simple.e2e.mjs
           node tests/pwa-consolidation.e2e.mjs
           node tests/timer-pip.e2e.mjs
