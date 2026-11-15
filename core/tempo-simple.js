@@ -72,6 +72,8 @@ export function planSessions(requests, windows, existing, defaults, now=new Date
     if(!request || typeof request.area!=='string' || !request.area.trim() ||
        !Number.isInteger(request.minutes) || request.minutes<1 || request.minutes>10080)
       throw Error('Indica area e durata lorda da 1 a 10080 minuti interi.');
+    if(request.dayOffset!==undefined && ![0,1].includes(request.dayOffset))
+      throw Error('Il giorno della sessione deve essere quello selezionato o il successivo.');
     if(request.start!==undefined && !/^([01]\d|2[0-3]):[0-5]\d$/.test(request.start))
       throw Error('Orario fisso non valido: usa HH:MM.');
     cycleFor(request);
@@ -97,8 +99,10 @@ export function planSessions(requests, windows, existing, defaults, now=new Date
   // Reserve explicit times first so automatic rows cannot occupy them.
   for(const request of requests.filter(r=>r.start)){
     if(request.minutes>1440)throw Error('Una sessione con orario fisso può durare al massimo 24 ore.');
-    const start=dateTime(selectedDate,request.start),end=new Date(+start+request.minutes*60000);
-    const session={id:id(),title:request.area,area:request.area,date:selectedDate,start:request.start,end:formatTime(end),workMinutes:cycleFor(request),breakEnabled:defaults.breakEnabled!==false,...cycleSettings(request),actualSeconds:0};
+    const start=dateTime(selectedDate,request.start);
+    if(request.dayOffset)start.setDate(start.getDate()+request.dayOffset);
+    const end=new Date(+start+request.minutes*60000);
+    const session={id:id(),title:request.area,area:request.area,date:localDateString(start),start:request.start,end:formatTime(end),workMinutes:cycleFor(request),breakEnabled:defaults.breakEnabled!==false,...cycleSettings(request),actualSeconds:0};
     if(!validSession(session))throw Error('Data o orario non valido.');
     if(+start<+now)throw Error('L’orario '+request.start+' è già passato nel giorno scelto. Cambia giorno o orario.');
     applyPause(request,[session]);
@@ -123,10 +127,30 @@ export function planSessions(requests, windows, existing, defaults, now=new Date
   if(hasSessionOverlaps([...existing,...result]))throw Error('Le sessioni si sovrappongono.');
   return {sessions:result,remainder};
 }
+// The legacy form keeps "-60m" as the Pomodoro gross cycle.
+// A fixed range uses "-30m" as the gross duration of each separate session.
 export function parseQuick(text,areas) {
-  return text.trim().split('\n').filter(s=>s.trim()).map(line=>{
-    const match=line.trim().match(/^(.+?)\s+@(\d+(?:[.,]\d+)?)\s*(h|min|m)(.*)$/i);
-    if(!match)throw Error('Usa: Studio @2h +14:00 -60m (orario e ciclo facoltativi).');
+  return text.trim().split('\n').filter(s=>s.trim()).flatMap(line=>{
+    const input=line.trim();
+    const range=input.match(/^(.+?)\s+\+((?:[01]\d|2[0-3]):[0-5]\d)-((?:[01]\d|2[0-3]):[0-5]\d)\s+-([1-9]\d{0,3})m$/i);
+    if(range){
+      const area=areas.find(a=>a.name.toLocaleLowerCase()===range[1].trim().toLocaleLowerCase());
+      if(!area)throw Error('Area sconosciuta: '+range[1].trim()+'.');
+      const minutesOf=time=>{const [hours,minutes]=time.split(':').map(Number);return hours*60+minutes;};
+      const timeOf=minutes=>String(Math.floor((minutes%1440)/60)).padStart(2,'0')+':'+String(minutes%60).padStart(2,'0');
+      const from=minutesOf(range[2]),until=minutesOf(range[3]);
+      const total=(until-from+1440)%1440,each=Number(range[4]);
+      if(!total)throw Error('La fascia deve avere inizio e fine diversi.');
+      if(!Number.isInteger(each)||each<1||each>1439)throw Error('La durata lorda di una sessione deve essere da 1 a 1439 minuti.');
+      const sessions=[];
+      for(let consumed=0;consumed<total;consumed+=each){
+        const at=from+consumed;
+        sessions.push({area:area.name,minutes:Math.min(each,total-consumed),start:timeOf(at),...(at>=1440?{dayOffset:1}:{})});
+      }
+      return sessions;
+    }
+    const match=input.match(/^(.+?)\s+@(\d+(?:[.,]\d+)?)\s*(h|min|m)(.*)$/i);
+    if(!match)throw Error('Usa: Studio +14:00-16:00 -30m oppure Studio @2h +14:00 -60m.');
     const area=areas.find(a=>a.name.toLocaleLowerCase()===match[1].trim().toLocaleLowerCase());
     const minutes=Math.round(Number(match[2].replace(',','.'))*(match[3].toLowerCase()==='h'?60:1));
     if(!area || minutes<1 || minutes>10080)throw Error('Controlla area e durata lorda (da 1 minuto a 168 ore).');
@@ -146,7 +170,7 @@ export function parseQuick(text,areas) {
     }
     if(cycleMinutes!==undefined&&(focusMinutes!==undefined||customBreakMinutes!==undefined))
       throw Error('Non combinare -minuti con ~focus o !pausa finale.');
-    return {area:area.name,minutes,...(cycleMinutes!==undefined?{cycleMinutes}:{}),...(start?{start}:{}),...(focusMinutes!==undefined?{focusMinutes}:{}),...(customBreakMinutes!==undefined?{customBreakMinutes}:{})};
+    return [{area:area.name,minutes,...(cycleMinutes!==undefined?{cycleMinutes}:{}),...(start?{start}:{}),...(focusMinutes!==undefined?{focusMinutes}:{}),...(customBreakMinutes!==undefined?{customBreakMinutes}:{})}];
   });
 }
 // Only observable time counts. Long suspended/offline gaps never become completed work.
