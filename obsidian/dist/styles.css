@@ -145,3 +145,15 @@
 .tempvs-session-resource { display: block; padding: 7px 10px; border: 1px solid var(--background-modifier-border); border-radius: 8px; background: var(--background-secondary); line-height: 1.4; overflow-wrap: anywhere; text-decoration: none; font-size: var(--font-small); }
 .tempvs-session-resource:hover { background: var(--background-modifier-hover); text-decoration: underline; }
 .tempvs-session-resource:focus-visible { outline: 2px solid var(--interactive-accent); outline-offset: 2px; }
+
+/* Unified note cards: vertical content, compact groups, no second selector. */
+.tempvs-session-group { align-items: flex-start; }
+.tempvs-session-group .tempvs-session-info { display: flex; flex-direction: column; align-items: stretch; gap: 6px; }
+.tempvs-session-heading { display:flex; flex-wrap:wrap; gap:6px 14px; align-items:baseline; }
+.tempvs-session-group .tempvs-session-resources { flex-direction: row; flex-wrap: wrap; margin: 2px 0; }
+.tempvs-session-note { display:flex; align-items:center; gap:4px; max-width:100%; min-width:0; }
+.tempvs-session-note .tempvs-session-resource { min-width:0; padding:4px 8px; }
+.tempvs-session-note-editor summary,.tempvs-session-cycles summary { cursor:pointer; color:var(--text-muted); font-size:var(--font-ui-small); }
+.tempvs-session-note-editor form { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+.tempvs-session-note-editor input { flex:1; min-width:120px; }
+.tempvs-session-cycle { padding:8px 0; border-top:1px solid var(--background-modifier-border); display:flex; flex-wrap:wrap; gap:8px; align-items:center; }

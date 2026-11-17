@@ -24,9 +24,6 @@ __export(main_exports, {
 });
 module.exports = __toCommonJS(main_exports);
 
-// obsidian/note-estimates.js
-var import_obsidian = require("obsidian");
-
 // core/tempo-core.js
 var DEFAULTS = Object.freeze({ workMinutes: 25, breakEnabled: true });
 function localDateString(date = /* @__PURE__ */ new Date()) {
@@ -143,8 +140,8 @@ function getPhase(session, now = /* @__PURE__ */ new Date()) {
 }
 function mmss(seconds) {
   const total = Math.max(0, Math.floor(Number(seconds) || 0));
-  const minutes2 = Math.floor(total / 60), remainder = total % 60;
-  return `${String(minutes2).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`;
+  const minutes = Math.floor(total / 60), remainder = total % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`;
 }
 function sessionsOverlap(a, b) {
   const aa = sessionBounds(a), bb = sessionBounds(b);
@@ -170,6 +167,72 @@ function getAmbientFocusMode(sessions, now = /* @__PURE__ */ new Date()) {
   return getNextSession(sessions, now) ? "waiting" : "finished";
 }
 
+// obsidian/notes-integration.js
+var wiki = /!?\[\[([^\]\n]+)\]\]/g;
+var markdown = /\[([^\]\n]+)\]\(([^)\n]+)\)/g;
+function noteLinks(description = "") {
+  const found = [], seen = /* @__PURE__ */ new Set();
+  const add = (target, label) => {
+    target = String(target || "").trim();
+    if (!target || /^(?:https?:|javascript:|data:|file:)/i.test(target)) return;
+    if (target.startsWith("obsidian://open?")) {
+      try {
+        const url = new URL(target);
+        target = url.searchParams.get("file") || "";
+      } catch {
+        return;
+      }
+    } else if (target.includes("://")) return;
+    if (!target) return;
+    const key2 = target.toLowerCase();
+    if (seen.has(key2)) return;
+    seen.add(key2);
+    found.push({ path: target, label: String(label || target).trim() || target });
+  };
+  for (const m of String(description).matchAll(wiki)) {
+    const [path, alias] = m[1].split("|");
+    add(path, alias || path);
+  }
+  for (const m of String(description).matchAll(markdown)) add(m[2], m[1]);
+  return found;
+}
+function appendNoteLink(description = "", path) {
+  path = String(path || "").trim();
+  if (!path || path.includes("]]") || path.includes("\n")) throw Error("Percorso nota non valido.");
+  if (noteLinks(description).some((link) => link.path.toLowerCase() === path.toLowerCase())) return String(description);
+  return String(description).trimEnd() + (String(description).trim() ? "\n" : "") + "- [[" + path + "]]";
+}
+
+// obsidian/session-notes.js
+function sessionNotes(session, estimates = []) {
+  if (session.linkedNotes?.length) return session.linkedNotes;
+  const legacy = estimates.find((n) => n.id === session.noteEstimateId);
+  return legacy ? [{ path: legacy.path, label: legacy.title }] : [];
+}
+function updatedSessionNotes(session, input, { removePath, estimates = [] } = {}) {
+  const previous = sessionNotes(session, estimates);
+  if (removePath !== void 0) return previous.filter((n) => n.path !== removePath);
+  const text = input.trim();
+  if (!text) return previous.slice(1);
+  const links = noteLinks(text.startsWith("[[") ? text : "[[" + text + "]]");
+  if (links.length !== 1 || /[\r\n]/.test(text) || text.startsWith("[[") && !/^\[\[[^\]\n]+\]\]$/.test(text)) throw Error("Scegli una sola nota: [[nota|titolo]].");
+  return [links[0], ...previous.slice(1).filter((n) => n.path !== links[0].path)];
+}
+function groupSessions(sessions, estimates = []) {
+  const groups = [];
+  for (const session of sessions) {
+    const notes = sessionNotes(session, estimates);
+    const key2 = JSON.stringify([session.areaId || session.area || session.title, session.noteBlockId || "", session.date, notes]);
+    const last = groups.at(-1);
+    if (last && last.key === key2 && +sessionBounds(last.sessions.at(-1)).end === +sessionBounds(session).start) last.sessions.push(session);
+    else groups.push({ key: key2, notes, sessions: [session] });
+  }
+  return groups;
+}
+
+// obsidian/note-estimates.js
+var import_obsidian = require("obsidian");
+
 // core/tempo-estimates.js
 var isEstimateSource = (source) => /^\s*@/m.test(source);
 function parseEstimate(source, areas) {
@@ -180,9 +243,9 @@ function parseEstimate(source, areas) {
     if (!m) throw Error(`Riga ${i + 1}: usa @Studio 20 -30m (numero di sessioni e durata lorda).`);
     const area = areas.find((a) => a.name.trim().toLocaleLowerCase() === m[1].trim().toLocaleLowerCase());
     if (!area) throw Error(`Riga ${i + 1}: area sconosciuta: ${m[1]}.`);
-    const count = Number(m[2]), minutes2 = Number(m[3].replace(",", ".")) * (m[4].toLowerCase() === "h" ? 60 : 1);
-    if (!Number.isSafeInteger(count) || count < 1 || count > 1e5 || !Number.isInteger(minutes2) || minutes2 < 1 || minutes2 > 1439) throw Error(`Riga ${i + 1}: indica 1\u2013100000 sessioni da 1\u20131439 minuti lordi interi.`);
-    rows.push({ areaId: area.id, area: area.name, count, minutes: minutes2 });
+    const count = Number(m[2]), minutes = Number(m[3].replace(",", ".")) * (m[4].toLowerCase() === "h" ? 60 : 1);
+    if (!Number.isSafeInteger(count) || count < 1 || count > 1e5 || !Number.isInteger(minutes) || minutes < 1 || minutes > 1439) throw Error(`Riga ${i + 1}: indica 1\u2013100000 sessioni da 1\u20131439 minuti lordi interi.`);
+    rows.push({ areaId: area.id, area: area.name, count, minutes });
   }
   if (!rows.length) throw Error("Inserisci almeno una stima.");
   return rows;
@@ -196,10 +259,6 @@ function validateEstimates(value) {
 }
 var estimatesOf = (state) => Object.values(state.defaults?.simple?.noteEstimates || {});
 var matchesArea = (entry, session) => entry.areaId && session.areaId ? entry.areaId === session.areaId : entry.area === (session.area || session.title);
-function recordNoteWork(session, seconds) {
-  if (!session.noteEstimateId || !(seconds > 0)) return;
-  session.noteWork = { ...session.noteWork, [session.noteEstimateId]: (session.noteWork?.[session.noteEstimateId] || 0) + seconds };
-}
 function remainingFocus(session, now = /* @__PURE__ */ new Date()) {
   if (session.finished) return 0;
   const { start, end } = sessionBounds(session);
@@ -305,17 +364,17 @@ function grossCycle(cycleMinutes) {
   const focusMinutes = cycleMinutes * 5 / 6;
   return { focusMinutes, breakMinutes: cycleMinutes - focusMinutes };
 }
-function customPause(minutes2, grossMinutes) {
-  if (!Number.isInteger(minutes2) || minutes2 < 0 || minutes2 >= grossMinutes)
+function customPause(minutes, grossMinutes) {
+  if (!Number.isInteger(minutes) || minutes < 0 || minutes >= grossMinutes)
     throw Error("La pausa deve essere un numero intero di minuti, da 0 a meno della durata lorda.");
-  return minutes2;
+  return minutes;
 }
 function manualSessionEnd(start, grossMinutes) {
   const startedAt = start instanceof Date ? start : new Date(start);
-  const minutes2 = Number(grossMinutes);
-  if (!Number.isFinite(+startedAt) || !Number.isInteger(minutes2) || minutes2 < 1 || minutes2 > 1439)
+  const minutes = Number(grossMinutes);
+  if (!Number.isFinite(+startedAt) || !Number.isInteger(minutes) || minutes < 1 || minutes > 1439)
     throw Error("La durata lorda deve essere compresa tra 1 e 1439 minuti.");
-  return new Date(startedAt.getTime() + minutes2 * 6e4);
+  return new Date(startedAt.getTime() + minutes * 6e4);
 }
 function normalizeArchive(data) {
   if (!data || !Array.isArray(data.sessions) || data.sessions.some((s) => !validSession(s)) || new Set(data.sessions.map((s) => s.id)).size !== data.sessions.length) throw Error("Archivio sessioni non valido.");
@@ -400,11 +459,11 @@ function planSessions(requests, windows, existing, defaults, now = /* @__PURE__ 
       }
       if (cursor < +bounds.end) gaps.push([cursor, +bounds.end]);
       for (const [start, end] of gaps) {
-        const minutes2 = Math.min(left, Math.floor((end - start) / 6e4), 1439);
-        if (minutes2 <= 0) continue;
-        const finish = new Date(start + minutes2 * 6e4);
+        const minutes = Math.min(left, Math.floor((end - start) / 6e4), 1439);
+        if (minutes <= 0) continue;
+        const finish = new Date(start + minutes * 6e4);
         result.push({ id: id(), title: request.area, area: request.area, ...request.areaId ? { areaId: request.areaId } : {}, date: localDateString(new Date(start)), start: formatTime(new Date(start)), end: formatTime(finish), workMinutes: cycleFor(request), breakEnabled: defaults.breakEnabled !== false, ...cycleSettings(request), actualSeconds: 0 });
-        left -= minutes2;
+        left -= minutes;
         if (!left) break;
       }
       if (!left) break;
@@ -425,10 +484,10 @@ function parseQuick(text, areas) {
         const area2 = areas.find((a) => a.name.trim().replace(/\s+/g, " ").toLocaleLowerCase() === range[1].trim().replace(/\s+/g, " ").toLocaleLowerCase());
         if (!area2) throw Error("Area sconosciuta: " + range[1].trim() + ".");
         const minutesOf = (time) => {
-          const [hours, minutes3] = time.split(":").map(Number);
-          return hours * 60 + minutes3;
+          const [hours, minutes2] = time.split(":").map(Number);
+          return hours * 60 + minutes2;
         };
-        const timeOf = (minutes3) => String(Math.floor(minutes3 % 1440 / 60)).padStart(2, "0") + ":" + String(minutes3 % 60).padStart(2, "0");
+        const timeOf = (minutes2) => String(Math.floor(minutes2 % 1440 / 60)).padStart(2, "0") + ":" + String(minutes2 % 60).padStart(2, "0");
         const from = minutesOf(range[2]), until = minutesOf(range[3]);
         const total = (until - from + 1440) % 1440, value = Number(range[4].replace(",", ".")) * (range[5].toLowerCase() === "h" ? 60 : 1);
         const each = Math.round(value);
@@ -447,8 +506,8 @@ function parseQuick(text, areas) {
       const match = input.match(/^(.+?)\s+@(\d+(?:[.,]\d+)?)\s*(h|min|m)(.*)$/i);
       if (!match) throw Error("Usa: Studio +14:00-16:00 -30m oppure Studio @2h +14:00 -60m.");
       const area = areas.find((a) => a.name.toLocaleLowerCase() === match[1].trim().toLocaleLowerCase());
-      const minutes2 = Math.round(Number(match[2].replace(",", ".")) * (match[3].toLowerCase() === "h" ? 60 : 1));
-      if (!area || minutes2 < 1 || minutes2 > 10080) throw Error("Controlla area e durata lorda (da 1 minuto a 168 ore).");
+      const minutes = Math.round(Number(match[2].replace(",", ".")) * (match[3].toLowerCase() === "h" ? 60 : 1));
+      if (!area || minutes < 1 || minutes > 10080) throw Error("Controlla area e durata lorda (da 1 minuto a 168 ore).");
       let start, focusMinutes, customBreakMinutes, cycleMinutes;
       for (const token of match[4].trim().split(/\s+/).filter(Boolean)) {
         if (/^\+([01]\d|2[0-3]):[0-5]\d$/.test(token) && !start)
@@ -459,12 +518,12 @@ function parseQuick(text, areas) {
           cycleMinutes = Number(token.slice(1).replace(/m$/i, ""));
           grossCycle(cycleMinutes);
         } else if (/^!\d{1,4}m?$/i.test(token) && customBreakMinutes === void 0)
-          customBreakMinutes = customPause(Number(token.slice(1).replace(/m$/i, "")), minutes2);
+          customBreakMinutes = customPause(Number(token.slice(1).replace(/m$/i, "")), minutes);
         else throw Error("Opzione non valida: " + token + ". Usa +HH:MM, -60m (pomodoro lordo), ~40m (focus) o !5m (pausa finale).");
       }
       if (cycleMinutes !== void 0 && (focusMinutes !== void 0 || customBreakMinutes !== void 0))
         throw Error("Non combinare -minuti con ~focus o !pausa finale.");
-      return [{ area: area.name, ...area.id ? { areaId: area.id } : {}, minutes: minutes2, ...cycleMinutes !== void 0 ? { cycleMinutes } : {}, ...start ? { start } : {}, ...focusMinutes !== void 0 ? { focusMinutes } : {}, ...customBreakMinutes !== void 0 ? { customBreakMinutes } : {} }];
+      return [{ area: area.name, ...area.id ? { areaId: area.id } : {}, minutes, ...cycleMinutes !== void 0 ? { cycleMinutes } : {}, ...start ? { start } : {}, ...focusMinutes !== void 0 ? { focusMinutes } : {}, ...customBreakMinutes !== void 0 ? { customBreakMinutes } : {} }];
     } catch (error) {
       throw Error("Riga " + (index + 1) + ": " + error.message);
     }
@@ -536,34 +595,23 @@ var NoteEstimates = class {
     return this.notes.filter((n) => !n.archived && !n.completed && n.entries.some((e) => matchesArea(e, session)));
   }
   async assign(sessionId, noteId) {
-    await this.plugin.change(() => {
-      const s = this.plugin.state.sessions.find((s2) => s2.id === sessionId), note = this.notes.find((n) => n.id === noteId);
-      if (!s || s.finished || sessionBounds(s).end <= /* @__PURE__ */ new Date()) throw Error("Sessione non pi\xF9 disponibile.");
-      if (noteId && (!note || !this.available(s).some((n) => n.id === noteId))) throw Error("Nota non disponibile per questa area.");
-      if (noteId) s.noteEstimateId = noteId;
-      else delete s.noteEstimateId;
-    });
+    const note = this.notes.find((n) => n.id === noteId);
+    await this.plugin.setSessionNote([sessionId], note ? "[[" + note.path + "|" + note.title + "]]" : "");
   }
   async assignDay(note, day) {
-    let count = 0;
-    await this.plugin.change(() => {
-      for (const s of this.plugin.state.sessions) {
-        if (s.date === day && !s.noteEstimateId && !s.finished && sessionBounds(s).start > /* @__PURE__ */ new Date() && note.entries.some((e) => matchesArea(e, s))) {
-          s.noteEstimateId = note.id;
-          count++;
-        }
-      }
-    });
-    new import_obsidian.Notice(count ? `${count} sessioni assegnate a ${note.title}.` : "Nessuna sessione futura libera nelle aree della nota per questo giorno.");
+    const sessions = this.plugin.state.sessions.filter((s) => s.date === day && !s.linkedNotes?.length && !s.noteEstimateId && !s.finished && sessionBounds(s).start > /* @__PURE__ */ new Date() && note.entries.some((e) => matchesArea(e, s)));
+    for (const s of sessions) await this.assign(s.id, note.id);
+    new import_obsidian.Notice(sessions.length ? `${sessions.length} sessioni collegate a ${note.title}.` : "Nessuna sessione futura libera.");
   }
   async start(note, entry) {
     const plugin = this.plugin, now = /* @__PURE__ */ new Date(), end = manualSessionEnd(now, entry.minutes), cycle = grossCycle(entry.minutes);
-    const session = { id: uid(), title: entry.area, area: entry.area, areaId: entry.areaId, date: localDateString(now), start: formatTime(now), end: formatTime(end), timerStartedAt: now.toISOString(), timerEndsAt: end.toISOString(), workMinutes: cycle.focusMinutes, cycleMinutes: entry.minutes, breakEnabled: true, actualSeconds: 0, noteEstimateId: note.id };
+    const session = { id: uid(), title: entry.area, area: entry.area, areaId: entry.areaId, date: localDateString(now), start: formatTime(now), end: formatTime(end), timerStartedAt: now.toISOString(), timerEndsAt: end.toISOString(), workMinutes: cycle.focusMinutes, cycleMinutes: entry.minutes, breakEnabled: true, actualSeconds: 0, linkedNotes: [{ path: note.path, label: note.title }] };
     if (plugin.state.sessions.some((s) => !s.finished && sessionBounds(s).start < end && sessionBounds(s).end > now)) throw Error("Questo intervallo \xE8 gi\xE0 occupato. Assegna la nota alla sessione in agenda.");
     await plugin.change(() => plugin.state.sessions.push(session));
   }
   render(parent, note, day = localDateString()) {
     const p = estimateProgress(note, this.plugin.state, { day }), box = parent.createDiv({ cls: "tempvs-estimate" });
+    box.createEl("p", { cls: "tempvs-muted", text: "Il tempo delle nuove sessioni viene registrato nell\u2019area. L\u2019avanzamento qui conserva i dati storici della nota." });
     action(box, note.title, () => this.plugin.app.workspace.openLinkText(note.path, "", false));
     box.createEl("p", { text: "Stima: " + note.entries.map((e) => `${e.count} \xD7 ${e.minutes} min (${e.area})`).join(" + ") + ` \xB7 ${note.entries.reduce((n, e) => n + e.count, 0)} sessioni \xB7 ${estimateTime(p.estimated * 6 / 5)} lordi.` });
     box.createEl("p", { text: `${note.completed ? "Completata \xB7 " : ""}${Math.round(p.percent)}% \xB7 Lavoro registrato: ${estimateTime(p.done)} / ${estimateTime(p.estimated)}` });
@@ -575,7 +623,7 @@ var NoteEstimates = class {
     }
     box.createEl("p", { cls: "tempvs-muted", text: `Gi\xE0 assegnati nel giorno: ${estimateTime(p.planned)} di lavoro previsto. Il tempo previsto non aumenta l\u2019avanzamento.` });
     if (!note.archived && !note.completed) {
-      action(box, "Assegna alle sessioni libere del giorno", () => this.assignDay(note, day));
+      action(box, "Collega alle sessioni libere del giorno", () => this.assignDay(note, day));
       const seen = /* @__PURE__ */ new Set();
       for (const e of note.entries) {
         const key2 = (e.areaId || e.area) + ":" + e.minutes;
@@ -617,42 +665,6 @@ var NoteEstimates = class {
 
 // obsidian/daily-blocks.js
 var import_obsidian2 = require("obsidian");
-
-// obsidian/notes-integration.js
-var wiki = /!?\[\[([^\]\n]+)\]\]/g;
-var markdown = /\[([^\]\n]+)\]\(([^)\n]+)\)/g;
-function noteLinks(description = "") {
-  const found = [], seen = /* @__PURE__ */ new Set();
-  const add = (target, label) => {
-    target = String(target || "").trim();
-    if (!target || /^(?:https?:|javascript:|data:|file:)/i.test(target)) return;
-    if (target.startsWith("obsidian://open?")) {
-      try {
-        const url = new URL(target);
-        target = url.searchParams.get("file") || "";
-      } catch {
-        return;
-      }
-    } else if (target.includes("://")) return;
-    if (!target) return;
-    const key2 = target.toLowerCase();
-    if (seen.has(key2)) return;
-    seen.add(key2);
-    found.push({ path: target, label: String(label || target).trim() || target });
-  };
-  for (const m of String(description).matchAll(wiki)) {
-    const [path, alias] = m[1].split("|");
-    add(path, alias || path);
-  }
-  for (const m of String(description).matchAll(markdown)) add(m[2], m[1]);
-  return found;
-}
-function appendNoteLink(description = "", path) {
-  path = String(path || "").trim();
-  if (!path || path.includes("]]") || path.includes("\n")) throw Error("Percorso nota non valido.");
-  if (noteLinks(description).some((link) => link.path.toLowerCase() === path.toLowerCase())) return String(description);
-  return String(description).trimEnd() + (String(description).trim() ? "\n" : "") + "- [[" + path + "]]";
-}
 
 // obsidian/daily-plan.js
 var blockPattern = /^\s*<!-- tempvs-block:([^\s>]+) -->\s*$/;
@@ -844,10 +856,12 @@ function prepareDailyPlan({ source, date, blockId, state, previousSource, protec
     if (!existing) existing = state.sessions.find((s) => !claimed.has(s.id) && !s.manualSuperseded && !s.dailyRetired && !foreign(s) && exact(s));
     if (existing && foreign(existing)) throw Error("Una sessione appartiene gi\xE0 a un altro blocco TEMPVS.");
     if (existing && claimed.has(existing.id)) throw Error("La stessa sessione compare due volte nel blocco.");
+    const legacy = existing?.linkedNotes === void 0 && state.defaults.simple.noteEstimates?.[existing?.noteEstimateId];
+    if (legacy && !request.linkedNotes.length) request.linkedNotes = [{ path: legacy.path, label: legacy.title }];
     const samePause = existing && (!request.cycleMinutes || request.rangeSession || request.cycleMinutes === existing.cycleMinutes) && (request.focusMinutes === void 0 || request.focusMinutes === existing.workMinutes) && (request.customBreakMinutes === void 0 || request.customBreakMinutes === existing.customBreakMinutes);
     const correction = elapsed && (!existing || !exact(existing) || !samePause || changes.changedRows.has(request.sourceRow) || changes.addedRows.has(request.sourceRow));
     if (existing && isLocked(existing, now) && !correction && exact(existing) && samePause) {
-      candidates.push({ ...existing, noteBlockId: blockId, linkedNotes: request.linkedNotes });
+      candidates.push({ ...existing, noteBlockId: blockId, linkedNotes: request.linkedNotes, noteEstimateId: void 0 });
       claimed.add(existing.id);
       continue;
     }
@@ -868,6 +882,7 @@ function prepareDailyPlan({ source, date, blockId, state, previousSource, protec
     delete session.dailyRetired;
     session.noteBlockId = blockId;
     session.linkedNotes = request.linkedNotes;
+    delete session.noteEstimateId;
     if (correction) {
       delete session.manualSuperseded;
       session = manualRecord(session, now);
@@ -1194,6 +1209,20 @@ var DailyBlocks = class {
   }
   apply(prepared) {
     return this.queue(() => this.commit(prepared));
+  }
+  updateSessionNotes(blockId, updates) {
+    return this.queue(async () => {
+      const binding = this.bindings[blockId];
+      if (!binding) throw Error("Nota giornaliera non collegata.");
+      const context = await this.context(binding.path);
+      if (!context || context.block.source !== binding.source) throw Error("La nota giornaliera sta cambiando: attendi la sincronizzazione e riprova.");
+      const sessions = daySessions(this.plugin.state, binding.date, blockId).filter((s) => !binding.hiddenSessionIds?.includes(s.id)).map((s) => updates.has(s.id) ? { ...s, linkedNotes: updates.get(s.id) } : s);
+      const body = serializeDailyPlan(sessions, binding.date);
+      const source = explicitDay(binding.source) ? "date: " + binding.date + "\n" + body : body;
+      const plan = prepareDailyPlan({ source, date: binding.date, blockId, state: this.plugin.state, previousSource: binding.source, protectedBlockIds: this.protectedBlocks(blockId) });
+      for (const session of plan.sessions) if (updates.has(session.id)) delete session.noteEstimateId;
+      await this.commit({ ...context, ...plan, originalSource: context.block.source, keepSource: true });
+    });
   }
   async includeDay(child) {
     const context = await this.locate(child), blockId = this.bindingId(context.file.path) || blockIdentity(context.block.source) || uid2();
@@ -2465,7 +2494,6 @@ var FocusEndChime = class {
 var VIEW_TYPE = "tempvs-timer";
 var ZERO = () => normalizeArchive({ sessions: [] });
 var uuid = () => globalThis.crypto?.randomUUID?.() || String(Date.now()) + "-" + Math.random().toString(36).slice(2);
-var minutes = (seconds) => Math.round(seconds / 60);
 var button = (parent, label, action2) => {
   const el = parent.createEl("button", { text: label });
   el.addEventListener("click", () => Promise.resolve().then(action2).catch((e) => new import_obsidian4.Notice(e.message)));
@@ -2833,6 +2861,37 @@ var TempvsView = class extends import_obsidian4.ItemView {
     const status = root.querySelector(".tempvs-sound-status");
     if (status) status.textContent = plugin.ambient.playing ? plugin.ambient.audible ? "Suono attivo" : "In attesa della concentrazione" : eligible ? "Pronto" : "Disponibile durante la concentrazione";
   }
+  renderNoteEditor(parent, ids, notes) {
+    const editor = parent.createEl("details", { cls: "tempvs-session-note-editor" });
+    editor.createEl("summary", { text: notes.length ? "Cambia nota" : "Collega nota" });
+    const form = editor.createEl("form");
+    const input = form.createEl("input", { attr: { type: "text", "aria-label": "Nota da collegare", placeholder: "Percorso nota oppure [[nota|titolo]]" } });
+    input.value = notes[0] ? "[[" + notes[0].path + "|" + notes[0].label + "]]" : "";
+    const listId = "tempvs-note-options-" + uuid();
+    input.setAttribute("list", listId);
+    const options = form.createEl("datalist", { attr: { id: listId } });
+    for (const file of this.plugin.app.vault?.getMarkdownFiles?.() || []) options.createEl("option", { value: file.path });
+    form.createEl("button", { text: "Salva", attr: { type: "submit" } });
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      void this.plugin.setSessionNote(ids, input.value).catch((e) => new import_obsidian4.Notice(e.message));
+    });
+  }
+  renderSessionNotes(parent, notes, session, ids) {
+    const resources = parent.createDiv({ cls: "tempvs-session-resources", attr: { "aria-label": "Nota e risorse della sessione" } });
+    const source = this.plugin.dailyNotes?.[session.noteBlockId]?.path || "";
+    for (const [index, note] of notes.entries()) {
+      const row = resources.createDiv({ cls: "tempvs-session-note" });
+      const link = row.createEl("a", { cls: "internal-link tempvs-session-resource", text: note.label || note.path, attr: { href: note.path, title: note.path } });
+      link.addEventListener("click", (event) => {
+        event.preventDefault();
+        void this.plugin.app.workspace.openLinkText(note.path, source, event.metaKey || event.ctrlKey).catch((e) => new import_obsidian4.Notice(e.message));
+      });
+      if (index > 0) row.createEl("small", { text: "Risorsa", cls: "tempvs-muted" });
+      iconButton(row, "x", "Scollega " + (note.label || note.path), () => this.plugin.setSessionNote(ids, "", note.path));
+    }
+    this.renderNoteEditor(parent, ids, notes);
+  }
   renderNotes() {
     const root = this.containerEl.children[1];
     const area = root.querySelector(".tempvs-note-area")?.value;
@@ -2902,29 +2961,37 @@ var TempvsView = class extends import_obsidian4.ItemView {
       if (s.dailyRetired || s.manualSuperseded) return false;
       return s.date === this.day || this.day === today() && sessionBounds(s).start <= now && sessionBounds(s).end > now;
     }).sort((a, b) => sessionBounds(a).start - sessionBounds(b).start);
-    for (const s of sessions) {
-      const item = list.createDiv({ cls: "tempvs-session" });
+    const expanded = this.expandedGroups ?? (this.expandedGroups = /* @__PURE__ */ new Set());
+    for (const group of groupSessions(sessions, plugin.estimates?.notes || [])) {
+      const first = group.sessions[0], last = group.sessions.at(-1), ids = group.sessions.map((s) => s.id);
+      const item = list.createDiv({ cls: "tempvs-session tempvs-session-group" });
       const info = item.createDiv({ cls: "tempvs-session-info" });
-      info.createEl("strong", { text: s.start + "\u2013" + s.end });
-      const details = info.createDiv({ cls: "tempvs-session-details" });
-      details.createSpan({ text: s.area || s.title });
-      if (s.linkedNotes?.length) {
-        const resources = info.createDiv({ cls: "tempvs-session-resources", attr: { "aria-label": "Note della sessione" } });
-        const sourcePath = plugin.dailyNotes?.[s.noteBlockId]?.path || "";
-        for (const note of s.linkedNotes) {
-          const link = resources.createEl("a", { cls: "internal-link tempvs-session-resource", text: note.label || note.path, attr: { href: note.path, "data-href": note.path, title: note.path } });
-          link.addEventListener("click", (event) => {
-            event.preventDefault();
-            void this.app.workspace.openLinkText(note.path, sourcePath, event.metaKey || event.ctrlKey).catch((error) => new import_obsidian4.Notice(error.message));
-          });
+      const heading = info.createDiv({ cls: "tempvs-session-heading" });
+      heading.createEl("strong", { text: first.start + "\u2013" + last.end });
+      heading.createSpan({ text: first.area || first.title });
+      const current = group.sessions.find((s) => s.id === active?.id);
+      item.toggleClass("is-current", Boolean(current));
+      const done = group.sessions.filter((s) => s.finished || sessionBounds(s).end <= now).length;
+      info.createEl("small", { cls: "tempvs-muted", text: `${ids.length} ${ids.length === 1 ? "sessione" : "sessioni"} \xB7 ${Math.round((sessionBounds(last).end - sessionBounds(first).start) / 6e4)} min \xB7 ${done} concluse` + (current ? " \xB7 " + (current.paused ? "Focus sospeso" : "In corso") : "") });
+      this.renderSessionNotes(info, group.notes, first, ids);
+      if (ids.length > 1) {
+        const detail = info.createEl("details", { cls: "tempvs-session-cycles" });
+        const key2 = ids.join("|");
+        detail.open = expanded.has(key2);
+        detail.addEventListener("toggle", () => {
+          if (detail.open) expanded.add(key2);
+          else expanded.delete(key2);
+        });
+        detail.createEl("summary", { text: "Singole sessioni" });
+        for (const s of group.sessions) {
+          const row = detail.createDiv({ cls: "tempvs-session-cycle" });
+          row.createEl("span", { text: s.start + "\u2013" + s.end + " \xB7 " + (s.finished || sessionBounds(s).end <= now ? "Conclusa" : s.id === active?.id ? "In corso" : "Programmata") + (s.cycleMinutes ? ` \xB7 ${s.workMinutes}/${s.cycleMinutes - s.workMinutes}` : "") });
+          this.renderNoteEditor(row, [s.id], sessionNotes(s, plugin.estimates?.notes || []));
+          if (!s.finished && sessionBounds(s).start > now) iconButton(row, "trash-2", "Elimina sessione " + s.start, () => plugin.removeSession(s.id));
         }
+      } else if (!first.finished && sessionBounds(first).start > now) {
+        iconButton(item, "trash-2", "Elimina sessione " + (first.area || first.title), () => plugin.removeSession(first.id));
       }
-      if (!s.finished && sessionBounds(s).end > now) plugin.estimates?.selector(info, s);
-      const isActive = active?.id === s.id;
-      item.toggleClass("is-current", isActive);
-      details.createEl("small", { cls: "tempvs-muted", text: s.finished ? "Conclusa \xB7 " + minutes(s.actualSeconds || 0) + " min effettivi" : sessionBounds(s).end <= now ? ((s.actualSeconds || 0) > 0 ? "Svolta" : "Trascorsa") + " \xB7 " + minutes(s.actualSeconds || 0) + " min effettivi" : isActive ? s.paused ? "Focus sospeso" : "In corso" : minutes((sessionBounds(s).end - sessionBounds(s).start) / 1e3) + " min \xB7 Programmata" + (s.cycleMinutes !== void 0 ? ` \xB7 ${s.workMinutes}/${s.cycleMinutes - s.workMinutes}` : "") });
-      if (!s.finished && sessionBounds(s).start > now)
-        iconButton(item, "trash-2", "Elimina sessione " + (s.area || s.title), () => plugin.removeSession(s.id));
     }
     if (!sessions.length) {
       const empty = list.createDiv({ cls: "tempvs-empty" });
@@ -3295,7 +3362,6 @@ var TempvsPlugin = class extends import_obsidian4.Plugin {
       const elapsed = measuredFocus(s, this.lastTick, now);
       if (elapsed > 0) {
         s.actualSeconds = (s.actualSeconds || 0) + elapsed;
-        recordNoteWork(s, elapsed);
         this.dirty = true;
       }
     }
@@ -3353,6 +3419,25 @@ var TempvsPlugin = class extends import_obsidian4.Plugin {
       this.changing = false;
     }
     await this.daily?.archiveChanged();
+  }
+  async setSessionNote(ids, input, removePath) {
+    const updates = /* @__PURE__ */ new Map();
+    for (const id of ids) {
+      const session = this.state.sessions.find((s) => s.id === id);
+      if (!session) throw Error("La sessione non \xE8 pi\xF9 disponibile.");
+      updates.set(id, updatedSessionNotes(session, input, { removePath, estimates: this.estimates?.notes || [] }));
+    }
+    const bindings = new Set(ids.map((id) => this.state.sessions.find((s) => s.id === id).noteBlockId).filter(Boolean));
+    if (bindings.size) {
+      if (bindings.size !== 1) throw Error("Modifica una giornata alla volta.");
+      await this.daily.updateSessionNotes([...bindings][0], updates);
+    } else await this.change(() => {
+      for (const [id, notes] of updates) {
+        const s = this.state.sessions.find((s2) => s2.id === id);
+        s.linkedNotes = notes;
+        delete s.noteEstimateId;
+      }
+    });
   }
   async setCompact(value) {
     this.compact = Boolean(value);
