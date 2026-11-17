@@ -2757,7 +2757,7 @@ var TempvsView = class extends import_obsidian4.ItemView {
     const sounds = panels.createDiv({ cls: "tempvs-panel tempvs-sound-panel" });
     sounds.hidden = true;
     sounds.createEl("h4", { text: "Suoni di sottofondo" });
-    sounds.createEl("p", { cls: "tempvs-help", text: "Il suono parte con un tocco durante il focus, si silenzia nelle pause e termina con una dissolvenza." });
+    sounds.createEl("p", { cls: "tempvs-help", text: "Attiva il sottofondo in anticipo: partir\xE0 alla concentrazione, anche come avviso. Resta silenzioso nelle pause. Tieni Obsidian aperto; dopo la riapertura, attivalo di nuovo." });
     const soundChoice = sounds.createEl("select", { cls: "tempvs-sound-choice", attr: { "aria-label": "Rumore ambientale" } });
     for (const [value, label] of [["white", "Rumore bianco"], ["brown", "Rumore marrone"], ["rain", "Pioggia"], ["fire", "Caminetto"]]) soundChoice.createEl("option", { value, text: label });
     soundChoice.value = plugin.audioKind;
@@ -2855,11 +2855,11 @@ var TempvsView = class extends import_obsidian4.ItemView {
     const eligible = Boolean(active && !active.paused && getPhase(active).kind === "work");
     const toggle = root.querySelector(".tempvs-sound-toggle");
     if (toggle) {
-      toggle.disabled = !plugin.ambient.playing && !eligible;
-      toggle.textContent = plugin.ambient.playing ? "Ferma suono" : "Avvia suono";
+      toggle.disabled = false;
+      toggle.textContent = plugin.ambient.playing ? "Disattiva sottofondo" : eligible ? "Avvia suono" : "Attiva per le sessioni";
     }
     const status = root.querySelector(".tempvs-sound-status");
-    if (status) status.textContent = plugin.ambient.playing ? plugin.ambient.audible ? "Suono attivo" : "In attesa della concentrazione" : eligible ? "Pronto" : "Disponibile durante la concentrazione";
+    if (status) status.textContent = plugin.ambient.playing ? plugin.ambient.audible ? "Suono attivo" : "Audio pronto \xB7 in attesa della concentrazione" : eligible ? "Pronto" : "Attiva ora per sentire il sottofondo all\u2019inizio delle sessioni";
   }
   renderNoteEditor(parent, ids, notes) {
     const editor = parent.createEl("details", { cls: "tempvs-session-note-editor" });
@@ -3282,12 +3282,9 @@ var TempvsPlugin = class extends import_obsidian4.Plugin {
     if (!this.ambient?.playing) return;
     const pending = this.state.sessions.filter((s) => !s.finished);
     const mode = getAmbientFocusMode(pending, now);
-    if (mode === "finished") {
-      this.ambient.stop(0.9);
-      return;
-    }
     const active = getActiveSession(pending, now);
     this.ambient.setAudible(mode === "focus" && !active?.paused);
+    this.refreshAudioControls();
   }
   async toggleAmbient() {
     if (this.ambient.playing) {
@@ -3295,11 +3292,8 @@ var TempvsPlugin = class extends import_obsidian4.Plugin {
       return;
     }
     const active = this.active();
-    if (!active || active.paused || getPhase(active).kind !== "work") {
-      new import_obsidian4.Notice("Avvia il suono durante una sessione di concentrazione non in pausa.");
-      return;
-    }
-    const started = this.ambient.start(this.audioKind, this.audioVolume / 100, true);
+    const audible = Boolean(active && !active.paused && getPhase(active).kind === "work");
+    const started = this.ambient.start(this.audioKind, this.audioVolume / 100, audible);
     if (!await started) new import_obsidian4.Notice("Impossibile avviare l'audio: verifica i permessi su Obsidian e iPadOS.");
     else this.syncAmbient();
   }
