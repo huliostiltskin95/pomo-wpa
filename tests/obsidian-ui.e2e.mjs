@@ -229,6 +229,17 @@ try {
   assert.match(await page.locator('.tempvs-timer-hint').textContent(),/21:00/);
   assert.equal(await page.locator('.tempvs-primary-controls').isVisible(),false);
   console.log('Screenshot regression: note overrides old calendar, shows all daily slots, current 5-minute break and next 50-minute focus.');
+  await page.evaluate(async()=>{
+    view.app=plugin.app;
+    plugin.app.workspace.openLinkText=async(...args)=>{window.openedResource=args;};
+    window.screenshotNote=screenshotNote.replace('Studio +21:00-23:00 -60m','Studio +21:00-23:00 -60m [[personal-management#Serie TV|Serie TV]] [[Appunti|Seconda nota]]');
+    await plugin.daily.syncFile('agenda/15 novembre 2026.md');plugin.refresh(true);
+  });
+  assert.equal(await page.locator('.tempvs-session-resource').count(),4);
+  await page.locator('.tempvs-session-resource').first().click();
+  assert.deepEqual(await page.evaluate(()=>openedResource),['personal-management#Serie TV','agenda/15 novembre 2026.md',false]);
+  await page.setViewportSize({width:320,height:800});
+  assert(await page.locator('.tempvs-session-resource').first().isVisible());
   assert.deepEqual(errors,[]);
   assert.deepEqual(await page.evaluate(()=>notices.filter(n=>/errore|invalid|sovrappost/i.test(n))),[]);
   console.log('Obsidian UI: creation, planning, pause/resume, finish, volume, Escape, drafts and responsive layouts passed.');

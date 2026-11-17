@@ -381,6 +381,14 @@ class TempvsView extends ItemView {
       info.createEl("strong",{text:s.start+"–"+s.end});
       const details=info.createDiv({cls:"tempvs-session-details"});
       details.createSpan({text:s.area||s.title});
+      if(s.linkedNotes?.length){
+        const resources=info.createDiv({cls:"tempvs-session-resources",attr:{"aria-label":"Note della sessione"}});
+        const sourcePath=plugin.dailyNotes?.[s.noteBlockId]?.path||"";
+        for(const note of s.linkedNotes){
+          const link=resources.createEl("a",{cls:"internal-link tempvs-session-resource",text:note.label||note.path,attr:{href:note.path,"data-href":note.path,title:note.path}});
+          link.addEventListener("click",event=>{event.preventDefault();void this.app.workspace.openLinkText(note.path,sourcePath,event.metaKey||event.ctrlKey).catch(error=>new Notice(error.message));});
+        }
+      }
       if(!s.finished&&sessionBounds(s).end>now)plugin.estimates?.selector(info,s);
       const isActive=active?.id===s.id;
       item.toggleClass("is-current",isActive);

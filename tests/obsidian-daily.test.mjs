@@ -93,3 +93,28 @@ test('timer observations do not invalidate previews and measured focus is never 
  applyDailyPlan(state,plan);assert.equal(state.sessions[0].actualSeconds,10);
 });
 
+
+test('daily session resources preserve multiple aliases, headings and block targets through normalization and serialization',()=>{
+ const source='Studio +11:15-12:15 -30m [[jzaefjxs-conte|Conte et al. (1995): p. 444-447]] [[personal-management#Serie TV|Serie TV]] [[Appunti#^passo]]';
+ const plan=prepare(source);assert.equal(plan.sessions.length,2);
+ const state=apply(empty(),plan);
+ for(const session of state.sessions)assert.deepEqual(session.linkedNotes,[{path:'jzaefjxs-conte',label:'Conte et al. (1995): p. 444-447'},{path:'personal-management#Serie TV',label:'Serie TV'},{path:'Appunti#^passo',label:'Appunti#^passo'}]);
+ assert.equal(serializeDailyPlan(state.sessions,date),source);
+ const changed=prepare(source.replace('[[jzaefjxs-conte|Conte et al. (1995): p. 444-447]]',''),state);
+ assert.deepEqual(changed.sessions.map(s=>s.id),state.sessions.map(s=>s.id));
+ assert.equal(changed.sessions[0].linkedNotes.length,2);
+ const removed=prepare('Studio +11:15-12:15 -30m',state);
+ assert.deepEqual(removed.sessions[0].linkedNotes,[]);
+});
+test('link edits in an active session do not change measured work or reprogram it',()=>{
+ const state=apply(empty(),prepare('Studio +11:15-12:15 -30m'));
+ state.sessions[0].actualSeconds=123;
+ const plan=prepare('Studio +11:15-12:15 -30m [[Nota#Sezione|Risorsa]]',state,{now:new Date(date+'T11:20:00'),previousSource:'Studio +11:15-12:15 -30m'});
+ assert.equal(plan.sessions[0].actualSeconds,123);assert.equal(plan.correctionIds.length,0);
+ assert.equal(plan.sessions[0].linkedNotes[0].path,'Nota#Sezione');
+});
+test('sessions with different resources do not collapse and overnight links roundtrip',()=>{
+ const source='Studio +23:00-00:00 -60m [[Uno]]\nStudio +00:00-01:00 -60m [[Due]] +1d';
+ assert.equal(serializeDailyPlan(prepare(source).sessions,date),source);
+ assert.throws(()=>prepare('Studio +11:15-12:15 -30m [[incompleto'),/Collegamento/);
+});

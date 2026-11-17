@@ -1,3 +1,4 @@
+import {noteLinks} from './notes-integration.js';
 import {parseQuick,planSessions,normalizeArchive} from '../core/tempo-simple.js';
 import {localDateString,sessionBounds,dateTime,getPhase,sessionsOverlap,hasSessionOverlaps} from '../core/tempo-core.js';
 
@@ -56,7 +57,10 @@ export function parseDailySource(source,areas){
   if(!line.trim()||blockPattern.test(line)||datePattern.test(line))continue;
   try{
    const metadata=line.match(rowPattern),raw=metadata?line.slice(0,metadata.index):line;
-   const nextDay=/\s+\+1d\s*$/i.test(raw),input=raw.replace(/\s+\+1d\s*$/i,'');
+   const linkedNotes=noteLinks(raw.match(/\[\[[^\]\n]+\]\]/g)?.join(' ')||'');
+   const planning=raw.replace(/\[\[[^\]\n]+\]\]/g,'').trim();
+   if(/\[\[|\]\]/.test(planning))throw Error('Collegamento nota non valido: usa [[nota|titolo]].');
+   const nextDay=/\s+\+1d\s*$/i.test(planning),input=planning.replace(/\s+\+1d\s*$/i,'');
    const rows=parseQuick(input,areas);
    const id=metadata?decodeURIComponent(metadata[1]):null;
    if(id&&(used.has(id)||rows.length!==1))throw Error('Ogni identificativo deve riferirsi a una sola sessione, senza duplicati.');
@@ -65,14 +69,14 @@ export function parseDailySource(source,areas){
     if(!row.start)throw Error('Indica una fascia +HH:MM-HH:MM oppure un inizio +HH:MM.');
     const dayOffset=(row.dayOffset||0)+Number(nextDay?1:metadata?.[2]||0);
     if(dayOffset>1)throw Error('La sessione deve iniziare nella giornata della nota o in quella successiva.');
-    requests.push({...row,sourceRow:index,...(id?{sessionId:id}:{}),...(dayOffset?{dayOffset}:{})});
+    requests.push({...row,linkedNotes,sourceRow:index,...(id?{sessionId:id}:{}),...(dayOffset?{dayOffset}:{})});
    }
   }catch(error){throw Error('Riga '+(index+1)+': '+error.message.replace(/^Riga 1: /,''));}
  }
  return requests;
 }
 const dayAfter=day=>{const d=new Date(day+'T12:00:00');d.setDate(d.getDate()+1);return localDateString(d);};
-export const planningKey=session=>JSON.stringify([session.id,session.areaId,session.area,session.title,session.date,session.start,session.end,session.workMinutes,session.breakEnabled,session.customBreakMinutes,session.cycleMinutes,session.noteBlockId,Boolean(session.finished),session.timerStartedAt,session.timerEndsAt,session.manualRecordedAt,Boolean(session.manualSuperseded),Boolean(session.dailyRetired)]);
+export const planningKey=session=>JSON.stringify([session.id,session.areaId,session.area,session.title,session.date,session.start,session.end,session.workMinutes,session.breakEnabled,session.customBreakMinutes,session.cycleMinutes,session.noteBlockId,session.linkedNotes,Boolean(session.finished),session.timerStartedAt,session.timerEndsAt,session.manualRecordedAt,Boolean(session.manualSuperseded),Boolean(session.dailyRetired)]);
 export const archivePlanningKey=state=>JSON.stringify({sessions:state.sessions.map(planningKey),defaults:state.defaults});
 export const isLocked=(session,now=new Date())=>session.finished||session.actualSeconds>0||session.timerStartedAt||sessionBounds(session).start<=now;
 export function daySessions(state,date,blockId){
@@ -84,12 +88,12 @@ export function serializeDailyPlan(sessions,date){
  for(const s of [...sessions].sort((a,b)=>sessionBounds(a).start-sessionBounds(b).start)){
   if(s.date!==date&&s.date!==dayAfter(date))throw Error('Una sessione collegata è stata spostata fuori dalla giornata della nota.');
   const bounds=sessionBounds(s),gross=Math.round((bounds.end-bounds.start)/60000);
-  const key=JSON.stringify([s.areaId,s.area||s.title,gross,s.workMinutes,s.breakEnabled,s.customBreakMinutes,s.cycleMinutes]);
+  const key=JSON.stringify([s.areaId,s.area||s.title,gross,s.workMinutes,s.breakEnabled,s.customBreakMinutes,s.cycleMinutes,s.linkedNotes||[]]);
   const last=groups.at(-1);
   if(last&&last.key===key&&+last.until===+bounds.start&&s.date===last.date&&+bounds.end-last.from<86400000){last.end=s.end;last.until=bounds.end;}
-  else groups.push({key,date:s.date,area:s.area||s.title,start:s.start,end:s.end,gross,from:+bounds.start,until:bounds.end});
+  else groups.push({key,linkedNotes:s.linkedNotes||[],date:s.date,area:s.area||s.title,start:s.start,end:s.end,gross,from:+bounds.start,until:bounds.end});
  }
- return groups.map(g=>(g.gross===1440?`${g.area} @1440m +${g.start}`:`${g.area} +${g.start}-${g.end} -${g.gross}m`)+(g.date!==date?' +1d':'')).join('\n');
+ return groups.map(g=>(g.gross===1440?`${g.area} @1440m +${g.start}`:`${g.area} +${g.start}-${g.end} -${g.gross}m`)+g.linkedNotes.map(n=>' [['+n.path+(n.label&&n.label!==n.path?'|'+n.label:'')+']]').join('')+(g.date!==date?' +1d':'')).join('\n');
 }
 // Compare source rows before expanding ranges: correcting one range must update
 // its original sessions, while removing a historical row still preserves history.
@@ -152,7 +156,7 @@ export function prepareDailyPlan({source,date,blockId,state,previousSource,prote
   if(existing&&claimed.has(existing.id))throw Error('La stessa sessione compare due volte nel blocco.');
   const samePause=existing&&(!request.cycleMinutes||request.rangeSession||request.cycleMinutes===existing.cycleMinutes)&&(request.focusMinutes===undefined||request.focusMinutes===existing.workMinutes)&&(request.customBreakMinutes===undefined||request.customBreakMinutes===existing.customBreakMinutes);
   const correction=elapsed&&(!existing||!exact(existing)||!samePause||changes.changedRows.has(request.sourceRow)||changes.addedRows.has(request.sourceRow));
-  if(existing&&isLocked(existing,now)&&!correction&&exact(existing)&&samePause){candidates.push({...existing,noteBlockId:blockId});claimed.add(existing.id);continue;}
+  if(existing&&isLocked(existing,now)&&!correction&&exact(existing)&&samePause){candidates.push({...existing,noteBlockId:blockId,linkedNotes:request.linkedNotes});claimed.add(existing.id);continue;}
   // Retrospective reservations are allowed only here; future planning elsewhere
   // continues to reject past starts. The timer still uses the corrected bounds.
   const result=planSessions([request],[],[],state.defaults,new Date(Math.min(+now,+start)),()=>existing?.id||id(),date);
@@ -165,7 +169,7 @@ export function prepareDailyPlan({source,date,blockId,state,previousSource,prote
    // Otherwise sessionBounds would continue reading the old immediate timer.
    if(!exact(existing)||correction){delete session.timerStartedAt;delete session.timerEndsAt;}
   }
-  delete session.dailyRetired;session.noteBlockId=blockId;
+  delete session.dailyRetired;session.noteBlockId=blockId;session.linkedNotes=request.linkedNotes;
   if(correction){delete session.manualSuperseded;session=manualRecord(session,now);if(existing)session.manualOriginal=originalRecord(existing);correctionIds.push(session.id);correctedRows.add(request.sourceRow);}
   candidates.push(session);claimed.add(session.id);
  }

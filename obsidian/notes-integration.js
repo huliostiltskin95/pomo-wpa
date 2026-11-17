@@ -23,7 +23,7 @@ export function noteLinks(description = "") {
   };
   for(const m of String(description).matchAll(wiki)) {
     const [path, alias] = m[1].split("|");
-    add(path?.split("#")[0],alias || path);
+    add(path,alias || path);
   }
   for(const m of String(description).matchAll(markdown))add(m[2],m[1]);
   return found;

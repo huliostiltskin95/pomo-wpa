@@ -1,7 +1,7 @@
 {
   "id": "tempo-pomodoro",
   "name": "Tempo — Pomodoro",
-  "version": "0.5.14",
+  "version": "0.5.15",
   "minAppVersion": "1.5.0",
   "description": "TEMPVS: timer, pianificazione giornaliera, stime e avanzamento delle note, sincronizzazione Dropbox.",
   "author": "Tempo",

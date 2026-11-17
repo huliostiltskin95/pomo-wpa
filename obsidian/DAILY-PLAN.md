@@ -1,3 +1,13 @@
+## 0.5.15 · note collegate alle sessioni
+
+Nel blocco TEMPVS della nota quotidiana aggiungi uno o più wikilink dopo gli orari:
+
+```TEMPVS
+Studio +11:15-12:15 -30m [[Appunti|Lettura]] [[personal-management#Serie TV|Serie TV]]
+```
+
+Le note collegate non richiedono un blocco TEMPVS né una stima. Ogni sessione generata dalla riga conserva tutti i link, alias e riferimenti a sezioni o blocchi. Nel pannello laterale i titoli sono cliccabili; Ctrl/Cmd-clic apre in una nuova scheda. Aggiungere o rimuovere soltanto link conserva il tempo già misurato. I collegamenti sono risorse: non assegnano automaticamente credito alle stime delle note.
+
 ## 0.5.14 · la nota quotidiana guida l’agenda
 
 Il blocco della daily note è il riferimento per la pianificazione di quella giornata. Al salvataggio, all’avvio e dopo un ripristino Dropbox il plugin riconcilia gli intervalli della nota con l’archivio: le vecchie prenotazioni della stessa giornata non possono bloccare un blocco valido con il messaggio «Le righe si sovrappongono a una sessione della giornata».
