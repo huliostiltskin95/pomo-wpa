@@ -138,3 +138,10 @@
 .tempvs-daily pre code { white-space: inherit; }
 
 .tempvs-estimate{padding:10px 0;overflow-wrap:anywhere}.tempvs-estimate p{margin:8px 0}.tempvs-estimate progress{width:100%;accent-color:var(--interactive-accent)}.tempvs-estimate button{margin:4px 6px 4px 0;white-space:normal;max-width:100%}.tempvs-estimate-details{border-top:1px solid var(--background-modifier-border);padding:8px 0}.tempvs-note-assignment{width:100%;max-width:100%;margin-top:6px}.tempvs-estimate small{display:block}
+
+/* Session resources remain readable in narrow sidebars and on touch screens. */
+.tempvs-session-info { min-width: 0; flex: 1; }
+.tempvs-session-resources { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
+.tempvs-session-resource { display: block; padding: 7px 10px; border: 1px solid var(--background-modifier-border); border-radius: 8px; background: var(--background-secondary); line-height: 1.4; overflow-wrap: anywhere; text-decoration: none; font-size: var(--font-small); }
+.tempvs-session-resource:hover { background: var(--background-modifier-hover); text-decoration: underline; }
+.tempvs-session-resource:focus-visible { outline: 2px solid var(--interactive-accent); outline-offset: 2px; }

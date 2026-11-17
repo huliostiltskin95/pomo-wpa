@@ -618,6 +618,42 @@ var NoteEstimates = class {
 // obsidian/daily-blocks.js
 var import_obsidian2 = require("obsidian");
 
+// obsidian/notes-integration.js
+var wiki = /!?\[\[([^\]\n]+)\]\]/g;
+var markdown = /\[([^\]\n]+)\]\(([^)\n]+)\)/g;
+function noteLinks(description = "") {
+  const found = [], seen = /* @__PURE__ */ new Set();
+  const add = (target, label) => {
+    target = String(target || "").trim();
+    if (!target || /^(?:https?:|javascript:|data:|file:)/i.test(target)) return;
+    if (target.startsWith("obsidian://open?")) {
+      try {
+        const url = new URL(target);
+        target = url.searchParams.get("file") || "";
+      } catch {
+        return;
+      }
+    } else if (target.includes("://")) return;
+    if (!target) return;
+    const key2 = target.toLowerCase();
+    if (seen.has(key2)) return;
+    seen.add(key2);
+    found.push({ path: target, label: String(label || target).trim() || target });
+  };
+  for (const m of String(description).matchAll(wiki)) {
+    const [path, alias] = m[1].split("|");
+    add(path, alias || path);
+  }
+  for (const m of String(description).matchAll(markdown)) add(m[2], m[1]);
+  return found;
+}
+function appendNoteLink(description = "", path) {
+  path = String(path || "").trim();
+  if (!path || path.includes("]]") || path.includes("\n")) throw Error("Percorso nota non valido.");
+  if (noteLinks(description).some((link) => link.path.toLowerCase() === path.toLowerCase())) return String(description);
+  return String(description).trimEnd() + (String(description).trim() ? "\n" : "") + "- [[" + path + "]]";
+}
+
 // obsidian/daily-plan.js
 var blockPattern = /^\s*<!-- tempvs-block:([^\s>]+) -->\s*$/;
 var rowPattern = /\s*<!-- tempvs-session:([^\s>]+)(?: day:([01]))? -->\s*$/;
@@ -684,7 +720,10 @@ function parseDailySource(source, areas) {
     if (!line.trim() || blockPattern.test(line) || datePattern.test(line)) continue;
     try {
       const metadata = line.match(rowPattern), raw = metadata ? line.slice(0, metadata.index) : line;
-      const nextDay = /\s+\+1d\s*$/i.test(raw), input = raw.replace(/\s+\+1d\s*$/i, "");
+      const linkedNotes = noteLinks(raw.match(/\[\[[^\]\n]+\]\]/g)?.join(" ") || "");
+      const planning = raw.replace(/\[\[[^\]\n]+\]\]/g, "").trim();
+      if (/\[\[|\]\]/.test(planning)) throw Error("Collegamento nota non valido: usa [[nota|titolo]].");
+      const nextDay = /\s+\+1d\s*$/i.test(planning), input = planning.replace(/\s+\+1d\s*$/i, "");
       const rows = parseQuick(input, areas);
       const id = metadata ? decodeURIComponent(metadata[1]) : null;
       if (id && (used.has(id) || rows.length !== 1)) throw Error("Ogni identificativo deve riferirsi a una sola sessione, senza duplicati.");
@@ -693,7 +732,7 @@ function parseDailySource(source, areas) {
         if (!row.start) throw Error("Indica una fascia +HH:MM-HH:MM oppure un inizio +HH:MM.");
         const dayOffset = (row.dayOffset || 0) + Number(nextDay ? 1 : metadata?.[2] || 0);
         if (dayOffset > 1) throw Error("La sessione deve iniziare nella giornata della nota o in quella successiva.");
-        requests.push({ ...row, sourceRow: index, ...id ? { sessionId: id } : {}, ...dayOffset ? { dayOffset } : {} });
+        requests.push({ ...row, linkedNotes, sourceRow: index, ...id ? { sessionId: id } : {}, ...dayOffset ? { dayOffset } : {} });
       }
     } catch (error) {
       throw Error("Riga " + (index + 1) + ": " + error.message.replace(/^Riga 1: /, ""));
@@ -706,7 +745,7 @@ var dayAfter = (day) => {
   d.setDate(d.getDate() + 1);
   return localDateString(d);
 };
-var planningKey = (session) => JSON.stringify([session.id, session.areaId, session.area, session.title, session.date, session.start, session.end, session.workMinutes, session.breakEnabled, session.customBreakMinutes, session.cycleMinutes, session.noteBlockId, Boolean(session.finished), session.timerStartedAt, session.timerEndsAt, session.manualRecordedAt, Boolean(session.manualSuperseded), Boolean(session.dailyRetired)]);
+var planningKey = (session) => JSON.stringify([session.id, session.areaId, session.area, session.title, session.date, session.start, session.end, session.workMinutes, session.breakEnabled, session.customBreakMinutes, session.cycleMinutes, session.noteBlockId, session.linkedNotes, Boolean(session.finished), session.timerStartedAt, session.timerEndsAt, session.manualRecordedAt, Boolean(session.manualSuperseded), Boolean(session.dailyRetired)]);
 var archivePlanningKey = (state) => JSON.stringify({ sessions: state.sessions.map(planningKey), defaults: state.defaults });
 var isLocked = (session, now = /* @__PURE__ */ new Date()) => session.finished || session.actualSeconds > 0 || session.timerStartedAt || sessionBounds(session).start <= now;
 function daySessions(state, date, blockId) {
@@ -717,14 +756,14 @@ function serializeDailyPlan(sessions, date) {
   for (const s of [...sessions].sort((a, b) => sessionBounds(a).start - sessionBounds(b).start)) {
     if (s.date !== date && s.date !== dayAfter(date)) throw Error("Una sessione collegata \xE8 stata spostata fuori dalla giornata della nota.");
     const bounds = sessionBounds(s), gross = Math.round((bounds.end - bounds.start) / 6e4);
-    const key2 = JSON.stringify([s.areaId, s.area || s.title, gross, s.workMinutes, s.breakEnabled, s.customBreakMinutes, s.cycleMinutes]);
+    const key2 = JSON.stringify([s.areaId, s.area || s.title, gross, s.workMinutes, s.breakEnabled, s.customBreakMinutes, s.cycleMinutes, s.linkedNotes || []]);
     const last = groups.at(-1);
     if (last && last.key === key2 && +last.until === +bounds.start && s.date === last.date && +bounds.end - last.from < 864e5) {
       last.end = s.end;
       last.until = bounds.end;
-    } else groups.push({ key: key2, date: s.date, area: s.area || s.title, start: s.start, end: s.end, gross, from: +bounds.start, until: bounds.end });
+    } else groups.push({ key: key2, linkedNotes: s.linkedNotes || [], date: s.date, area: s.area || s.title, start: s.start, end: s.end, gross, from: +bounds.start, until: bounds.end });
   }
-  return groups.map((g) => (g.gross === 1440 ? `${g.area} @1440m +${g.start}` : `${g.area} +${g.start}-${g.end} -${g.gross}m`) + (g.date !== date ? " +1d" : "")).join("\n");
+  return groups.map((g) => (g.gross === 1440 ? `${g.area} @1440m +${g.start}` : `${g.area} +${g.start}-${g.end} -${g.gross}m`) + g.linkedNotes.map((n) => " [[" + n.path + (n.label && n.label !== n.path ? "|" + n.label : "") + "]]").join("") + (g.date !== date ? " +1d" : "")).join("\n");
 }
 function rowChanges(source, previousSource, areas, owned, date) {
   if (previousSource === void 0) return { byRequest: /* @__PURE__ */ new Map(), changedRows: /* @__PURE__ */ new Set(), previousByRow: /* @__PURE__ */ new Map(), addedRows: /* @__PURE__ */ new Set() };
@@ -808,7 +847,7 @@ function prepareDailyPlan({ source, date, blockId, state, previousSource, protec
     const samePause = existing && (!request.cycleMinutes || request.rangeSession || request.cycleMinutes === existing.cycleMinutes) && (request.focusMinutes === void 0 || request.focusMinutes === existing.workMinutes) && (request.customBreakMinutes === void 0 || request.customBreakMinutes === existing.customBreakMinutes);
     const correction = elapsed && (!existing || !exact(existing) || !samePause || changes.changedRows.has(request.sourceRow) || changes.addedRows.has(request.sourceRow));
     if (existing && isLocked(existing, now) && !correction && exact(existing) && samePause) {
-      candidates.push({ ...existing, noteBlockId: blockId });
+      candidates.push({ ...existing, noteBlockId: blockId, linkedNotes: request.linkedNotes });
       claimed.add(existing.id);
       continue;
     }
@@ -828,6 +867,7 @@ function prepareDailyPlan({ source, date, blockId, state, previousSource, protec
     }
     delete session.dailyRetired;
     session.noteBlockId = blockId;
+    session.linkedNotes = request.linkedNotes;
     if (correction) {
       delete session.manualSuperseded;
       session = manualRecord(session, now);
@@ -2157,42 +2197,6 @@ function confirmTempvs(app, title, description) {
   });
 }
 
-// obsidian/notes-integration.js
-var wiki = /!?\[\[([^\]\n]+)\]\]/g;
-var markdown = /\[([^\]\n]+)\]\(([^)\n]+)\)/g;
-function noteLinks(description = "") {
-  const found = [], seen = /* @__PURE__ */ new Set();
-  const add = (target, label) => {
-    target = String(target || "").trim();
-    if (!target || /^(?:https?:|javascript:|data:|file:)/i.test(target)) return;
-    if (target.startsWith("obsidian://open?")) {
-      try {
-        const url = new URL(target);
-        target = url.searchParams.get("file") || "";
-      } catch {
-        return;
-      }
-    } else if (target.includes("://")) return;
-    if (!target) return;
-    const key2 = target.toLowerCase();
-    if (seen.has(key2)) return;
-    seen.add(key2);
-    found.push({ path: target, label: String(label || target).trim() || target });
-  };
-  for (const m of String(description).matchAll(wiki)) {
-    const [path, alias] = m[1].split("|");
-    add(path?.split("#")[0], alias || path);
-  }
-  for (const m of String(description).matchAll(markdown)) add(m[2], m[1]);
-  return found;
-}
-function appendNoteLink(description = "", path) {
-  path = String(path || "").trim();
-  if (!path || path.includes("]]") || path.includes("\n")) throw Error("Percorso nota non valido.");
-  if (noteLinks(description).some((link) => link.path.toLowerCase() === path.toLowerCase())) return String(description);
-  return String(description).trimEnd() + (String(description).trim() ? "\n" : "") + "- [[" + path + "]]";
-}
-
 // core/tempo-audio.js
 var TempoAmbientAudio = class _TempoAmbientAudio {
   constructor(onChange = () => {
@@ -2904,6 +2908,17 @@ var TempvsView = class extends import_obsidian4.ItemView {
       info.createEl("strong", { text: s.start + "\u2013" + s.end });
       const details = info.createDiv({ cls: "tempvs-session-details" });
       details.createSpan({ text: s.area || s.title });
+      if (s.linkedNotes?.length) {
+        const resources = info.createDiv({ cls: "tempvs-session-resources", attr: { "aria-label": "Note della sessione" } });
+        const sourcePath = plugin.dailyNotes?.[s.noteBlockId]?.path || "";
+        for (const note of s.linkedNotes) {
+          const link = resources.createEl("a", { cls: "internal-link tempvs-session-resource", text: note.label || note.path, attr: { href: note.path, "data-href": note.path, title: note.path } });
+          link.addEventListener("click", (event) => {
+            event.preventDefault();
+            void this.app.workspace.openLinkText(note.path, sourcePath, event.metaKey || event.ctrlKey).catch((error) => new import_obsidian4.Notice(error.message));
+          });
+        }
+      }
       if (!s.finished && sessionBounds(s).end > now) plugin.estimates?.selector(info, s);
       const isActive = active?.id === s.id;
       item.toggleClass("is-current", isActive);
