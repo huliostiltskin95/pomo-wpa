@@ -1,5 +1,5 @@
+import {groupSessions,sessionNotes,updatedSessionNotes} from './session-notes.js';
 import {NoteEstimates} from './note-estimates.js';
-import {recordNoteWork} from '../core/tempo-estimates.js';
 import {DailyBlocks} from './daily-blocks.js';
 import { Plugin, ItemView, Notice, Platform, PluginSettingTab, Setting, setIcon } from "obsidian";
 import { getActiveSession, getNextSession, getPhase, sessionBounds, hasSessionOverlaps, localDateString, formatTime, mmss } from "../core/tempo-core.js";
@@ -311,6 +311,30 @@ class TempvsView extends ItemView {
       ? (plugin.ambient.audible?"Suono attivo":"In attesa della concentrazione")
       : (eligible?"Pronto":"Disponibile durante la concentrazione");
   }
+  renderNoteEditor(parent,ids,notes){
+    const editor=parent.createEl('details',{cls:'tempvs-session-note-editor'});
+    editor.createEl('summary',{text:notes.length?'Cambia nota':'Collega nota'});
+    const form=editor.createEl('form');
+    const input=form.createEl('input',{attr:{type:'text','aria-label':'Nota da collegare',placeholder:'Percorso nota oppure [[nota|titolo]]'}});
+    input.value=notes[0]?'[['+notes[0].path+'|'+notes[0].label+']]':'';
+    const listId='tempvs-note-options-'+uuid();input.setAttribute('list',listId);
+    const options=form.createEl('datalist',{attr:{id:listId}});
+    for(const file of this.plugin.app.vault?.getMarkdownFiles?.()||[])options.createEl('option',{value:file.path});
+    form.createEl('button',{text:'Salva',attr:{type:'submit'}});
+    form.addEventListener('submit',event=>{event.preventDefault();void this.plugin.setSessionNote(ids,input.value).catch(e=>new Notice(e.message));});
+  }
+  renderSessionNotes(parent,notes,session,ids){
+    const resources=parent.createDiv({cls:'tempvs-session-resources',attr:{'aria-label':'Nota e risorse della sessione'}});
+    const source=this.plugin.dailyNotes?.[session.noteBlockId]?.path||'';
+    for(const [index,note] of notes.entries()){
+      const row=resources.createDiv({cls:'tempvs-session-note'});
+      const link=row.createEl('a',{cls:'internal-link tempvs-session-resource',text:note.label||note.path,attr:{href:note.path,title:note.path}});
+      link.addEventListener('click',event=>{event.preventDefault();void this.plugin.app.workspace.openLinkText(note.path,source,event.metaKey||event.ctrlKey).catch(e=>new Notice(e.message));});
+      if(index>0)row.createEl('small',{text:'Risorsa',cls:'tempvs-muted'});
+      iconButton(row,'x','Scollega '+(note.label||note.path),()=>this.plugin.setSessionNote(ids,'',note.path));
+    }
+    this.renderNoteEditor(parent,ids,notes);
+  }
   renderNotes(){
     const root=this.containerEl.children[1];
     const area=root.querySelector(".tempvs-note-area")?.value;
@@ -375,26 +399,33 @@ class TempvsView extends ItemView {
       if(s.dailyRetired||s.manualSuperseded)return false;
       return s.date===this.day || (this.day===today()&&sessionBounds(s).start<=now&&sessionBounds(s).end>now);
     }).sort((a,b)=>sessionBounds(a).start-sessionBounds(b).start);
-    for(const s of sessions){
-      const item=list.createDiv({cls:"tempvs-session"});
+    const expanded=this.expandedGroups??=new Set();
+    for(const group of groupSessions(sessions,plugin.estimates?.notes||[])){
+      const first=group.sessions[0],last=group.sessions.at(-1),ids=group.sessions.map(s=>s.id);
+      const item=list.createDiv({cls:"tempvs-session tempvs-session-group"});
       const info=item.createDiv({cls:"tempvs-session-info"});
-      info.createEl("strong",{text:s.start+"–"+s.end});
-      const details=info.createDiv({cls:"tempvs-session-details"});
-      details.createSpan({text:s.area||s.title});
-      if(s.linkedNotes?.length){
-        const resources=info.createDiv({cls:"tempvs-session-resources",attr:{"aria-label":"Note della sessione"}});
-        const sourcePath=plugin.dailyNotes?.[s.noteBlockId]?.path||"";
-        for(const note of s.linkedNotes){
-          const link=resources.createEl("a",{cls:"internal-link tempvs-session-resource",text:note.label||note.path,attr:{href:note.path,"data-href":note.path,title:note.path}});
-          link.addEventListener("click",event=>{event.preventDefault();void this.app.workspace.openLinkText(note.path,sourcePath,event.metaKey||event.ctrlKey).catch(error=>new Notice(error.message));});
+      const heading=info.createDiv({cls:"tempvs-session-heading"});
+      heading.createEl("strong",{text:first.start+"–"+last.end});
+      heading.createSpan({text:first.area||first.title});
+      const current=group.sessions.find(s=>s.id===active?.id);
+      item.toggleClass("is-current",Boolean(current));
+      const done=group.sessions.filter(s=>s.finished||sessionBounds(s).end<=now).length;
+      info.createEl("small",{cls:"tempvs-muted",text:`${ids.length} ${ids.length===1?'sessione':'sessioni'} · ${Math.round((sessionBounds(last).end-sessionBounds(first).start)/60000)} min · ${done} concluse`+(current?' · '+(current.paused?'Focus sospeso':'In corso'):'')});
+      this.renderSessionNotes(info,group.notes,first,ids);
+      if(ids.length>1){
+        const detail=info.createEl("details",{cls:"tempvs-session-cycles"});
+        const key=ids.join('|');detail.open=expanded.has(key);
+        detail.addEventListener('toggle',()=>{if(detail.open)expanded.add(key);else expanded.delete(key);});
+        detail.createEl("summary",{text:"Singole sessioni"});
+        for(const s of group.sessions){
+          const row=detail.createDiv({cls:"tempvs-session-cycle"});
+          row.createEl("span",{text:s.start+'–'+s.end+' · '+(s.finished||sessionBounds(s).end<=now?'Conclusa':s.id===active?.id?'In corso':'Programmata')+(s.cycleMinutes?` · ${s.workMinutes}/${s.cycleMinutes-s.workMinutes}`:'')});
+          this.renderNoteEditor(row,[s.id],sessionNotes(s,plugin.estimates?.notes||[]));
+          if(!s.finished&&sessionBounds(s).start>now)iconButton(row,"trash-2","Elimina sessione "+s.start,()=>plugin.removeSession(s.id));
         }
+      }else if(!first.finished&&sessionBounds(first).start>now){
+        iconButton(item,"trash-2","Elimina sessione "+(first.area||first.title),()=>plugin.removeSession(first.id));
       }
-      if(!s.finished&&sessionBounds(s).end>now)plugin.estimates?.selector(info,s);
-      const isActive=active?.id===s.id;
-      item.toggleClass("is-current",isActive);
-      details.createEl("small",{cls:"tempvs-muted",text:s.finished?"Conclusa · "+minutes((s.actualSeconds||0))+" min effettivi":sessionBounds(s).end<=now?((s.actualSeconds||0)>0?"Svolta":"Trascorsa")+" · "+minutes((s.actualSeconds||0))+" min effettivi":isActive?(s.paused?"Focus sospeso":"In corso"):minutes((sessionBounds(s).end-sessionBounds(s).start)/1000)+" min · Programmata"+(s.cycleMinutes!==undefined?` · ${s.workMinutes}/${s.cycleMinutes-s.workMinutes}`:"")});
-      if(!s.finished&&sessionBounds(s).start>now)
-        iconButton(item,"trash-2","Elimina sessione "+(s.area||s.title),()=>plugin.removeSession(s.id));
     }
     if(!sessions.length){
       const empty=list.createDiv({cls:"tempvs-empty"});
@@ -703,7 +734,7 @@ export default class TempvsPlugin extends Plugin {
     if (now <= this.lastTick) { this.lastTick = now; return; }
     for (const s of this.state.sessions) {
       const elapsed = measuredFocus(s, this.lastTick, now);
-      if (elapsed > 0) { s.actualSeconds = (s.actualSeconds || 0) + elapsed; recordNoteWork(s,elapsed); this.dirty = true; }
+      if (elapsed > 0) { s.actualSeconds = (s.actualSeconds || 0) + elapsed; this.dirty = true; }
     }
     this.lastTick = now;
   }
@@ -746,6 +777,19 @@ export default class TempvsPlugin extends Plugin {
       this.refresh(true);
     } finally {this.changing=false;}
     await this.daily?.archiveChanged();
+  }
+  async setSessionNote(ids,input,removePath){
+    const updates=new Map();
+    for(const id of ids){
+      const session=this.state.sessions.find(s=>s.id===id);
+      if(!session)throw Error('La sessione non è più disponibile.');
+      updates.set(id,updatedSessionNotes(session,input,{removePath,estimates:this.estimates?.notes||[]}));
+    }
+    const bindings=new Set(ids.map(id=>this.state.sessions.find(s=>s.id===id).noteBlockId).filter(Boolean));
+    if(bindings.size){
+      if(bindings.size!==1)throw Error('Modifica una giornata alla volta.');
+      await this.daily.updateSessionNotes([...bindings][0],updates);
+    }else await this.change(()=>{for(const [id,notes] of updates){const s=this.state.sessions.find(s=>s.id===id);s.linkedNotes=notes;delete s.noteEstimateId;}});
   }
   async setCompact(value){
     this.compact=Boolean(value);

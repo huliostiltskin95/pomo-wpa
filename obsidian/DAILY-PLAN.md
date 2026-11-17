@@ -1,3 +1,9 @@
+## 0.5.16 · un solo collegamento e gruppi compatti
+
+Le sessioni consecutive con la stessa area e le stesse note sono raggruppate in una fascia espandibile. Il collegamento principale identifica la nota di lavoro; gli eventuali link aggiuntivi già presenti restano risorse rimovibili. Il selettore separato delle stime non compare più nell’agenda.
+
+«Cambia nota» sul gruppo aggiorna tutti i suoi pomodori; nei dettagli modifica soltanto la singola sessione. Sono accettati percorsi e `[[nota#sezione|alias]]`, anche per note senza TEMPVS. Le modifiche scrivono nel blocco quotidiano e rifiutano di sovrascrivere modifiche della nota non ancora sincronizzate. Il tempo delle nuove sessioni è registrato nell’area; il credito storico delle note è conservato, senza ulteriori accrediti automatici. Le stime rimangono consultabili.
+
 ## 0.5.15 · note collegate alle sessioni
 
 Nel blocco TEMPVS della nota quotidiana aggiungi uno o più wikilink dopo gli orari:

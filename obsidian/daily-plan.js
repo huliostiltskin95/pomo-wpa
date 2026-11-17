@@ -154,9 +154,11 @@ export function prepareDailyPlan({source,date,blockId,state,previousSource,prote
   if(!existing)existing=state.sessions.find(s=>!claimed.has(s.id)&&!s.manualSuperseded&&!s.dailyRetired&&!foreign(s)&&exact(s));
   if(existing&&foreign(existing))throw Error('Una sessione appartiene già a un altro blocco TEMPVS.');
   if(existing&&claimed.has(existing.id))throw Error('La stessa sessione compare due volte nel blocco.');
+  const legacy=existing?.linkedNotes===undefined&&state.defaults.simple.noteEstimates?.[existing?.noteEstimateId];
+  if(legacy&&!request.linkedNotes.length)request.linkedNotes=[{path:legacy.path,label:legacy.title}];
   const samePause=existing&&(!request.cycleMinutes||request.rangeSession||request.cycleMinutes===existing.cycleMinutes)&&(request.focusMinutes===undefined||request.focusMinutes===existing.workMinutes)&&(request.customBreakMinutes===undefined||request.customBreakMinutes===existing.customBreakMinutes);
   const correction=elapsed&&(!existing||!exact(existing)||!samePause||changes.changedRows.has(request.sourceRow)||changes.addedRows.has(request.sourceRow));
-  if(existing&&isLocked(existing,now)&&!correction&&exact(existing)&&samePause){candidates.push({...existing,noteBlockId:blockId,linkedNotes:request.linkedNotes});claimed.add(existing.id);continue;}
+  if(existing&&isLocked(existing,now)&&!correction&&exact(existing)&&samePause){candidates.push({...existing,noteBlockId:blockId,linkedNotes:request.linkedNotes,noteEstimateId:undefined});claimed.add(existing.id);continue;}
   // Retrospective reservations are allowed only here; future planning elsewhere
   // continues to reject past starts. The timer still uses the corrected bounds.
   const result=planSessions([request],[],[],state.defaults,new Date(Math.min(+now,+start)),()=>existing?.id||id(),date);
@@ -169,7 +171,7 @@ export function prepareDailyPlan({source,date,blockId,state,previousSource,prote
    // Otherwise sessionBounds would continue reading the old immediate timer.
    if(!exact(existing)||correction){delete session.timerStartedAt;delete session.timerEndsAt;}
   }
-  delete session.dailyRetired;session.noteBlockId=blockId;session.linkedNotes=request.linkedNotes;
+  delete session.dailyRetired;session.noteBlockId=blockId;session.linkedNotes=request.linkedNotes;delete session.noteEstimateId;
   if(correction){delete session.manualSuperseded;session=manualRecord(session,now);if(existing)session.manualOriginal=originalRecord(existing);correctionIds.push(session.id);correctedRows.add(request.sourceRow);}
   candidates.push(session);claimed.add(session.id);
  }

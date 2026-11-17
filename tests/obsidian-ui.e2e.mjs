@@ -143,7 +143,7 @@ try {
   });
   await page.waitForFunction(()=>plugin.state.sessions.filter(s=>s.date==='2099-11-06'&&!s.finished).length===2);
   await page.waitForFunction(()=>view.day==='2099-11-06');
-  assert.equal(await page.locator('.tempvs-session').count(),2);
+  assert.equal(await page.locator('.tempvs-session').count(),1);
   assert.match(await page.locator('.tempvs-sessions').textContent(),/18:00/);
   assert(await page.evaluate(()=>plugin.state.sessions.some(s=>s.date==='2099-11-06'&&s.finished)));
   await page.evaluate(async()=>{window.dailyText=liveDailyText;await plugin.daily.archiveChanged();});
@@ -166,12 +166,20 @@ try {
   await page.waitForFunction(()=>document.querySelector('.estimate-container')?.textContent.includes('16 h 40 min'));
   const estimates=page.locator('.tempvs-estimates');
   await estimates.locator('summary').click();
-  await estimates.getByRole('button',{name:'Assegna alle sessioni libere del giorno',exact:true}).click();
-  await page.waitForFunction(()=>plugin.state.sessions.filter(s=>s.date==='2099-11-06'&&!s.finished).every(s=>s.noteEstimateId));
+  await page.evaluate(()=>{const old=plugin.app.vault.process;plugin.app.vault.process=async(file,change)=>{await old(file,change);window.liveDailyText=dailyText;};});
+  await estimates.getByRole('button',{name:'Collega alle sessioni libere del giorno',exact:true}).click();
+  await page.waitForFunction(()=>plugin.state.sessions.filter(s=>s.date==='2099-11-06'&&!s.finished).every(s=>s.linkedNotes?.length===1));
   assert.match(await estimates.textContent(),/0%/);
   assert.match(await estimates.textContent(),/15 h/);
-  await page.getByLabel('Nota della sessione 18:00').selectOption('');
-  await page.waitForFunction(()=>!plugin.state.sessions.find(s=>s.start==='18:00'&&s.date==='2099-11-06').noteEstimateId);
+  assert.equal(await page.locator('.tempvs-note-assignment').count(),0);
+  await page.locator('.tempvs-session-cycles > summary').click();
+  const cycle=page.locator('.tempvs-session-cycle').first();
+  await cycle.locator('.tempvs-session-note-editor > summary').click();
+  await cycle.getByLabel('Nota da collegare').fill('[[Appunti#Lettura|Lettura]]');
+  await cycle.getByRole('button',{name:'Salva',exact:true}).click();
+  await page.waitForFunction(()=>plugin.state.sessions.find(s=>s.start==='18:00'&&s.date==='2099-11-06').linkedNotes?.[0]?.path==='Appunti#Lettura');
+  assert(await page.evaluate(()=>dailyText.includes('[[Appunti#Lettura|Lettura]]')));
+  assert.equal(await page.locator('.tempvs-session').count(),2);
   await estimates.getByRole('button',{name:'Segna completata',exact:true}).click();
   await page.waitForFunction(()=>plugin.estimates.notes[0].completed);
   assert.equal(await page.evaluate(()=>plugin.state.sessions.filter(s=>s.date==='2099-11-06'&&!s.finished).length),2);
@@ -220,7 +228,7 @@ try {
   });
   await page.waitForFunction(()=>document.querySelector('.tempvs-clock')?.textContent==='05:00');
   assert.equal(await page.locator('.tempvs-area').textContent(),'Svago');assert.equal(await page.locator('.tempvs-phase').textContent(),'Pausa');
-  assert.equal(await page.locator('.tempvs-session').count(),5);assert.equal(await page.locator('.tempvs-daily-status').isVisible(),false);
+  assert.equal(await page.locator('.tempvs-session').count(),4);assert.equal(await page.locator('.tempvs-daily-status').isVisible(),false);
   assert.match(await page.locator('.tempvs-sessions').textContent(),/01:26–01:56/);assert.match(await page.locator('.tempvs-sessions').textContent(),/21:00–22:00/);
   await page.evaluate(async()=>{
    window.screenshotNote=screenshotNote.replace('Svago +18:30-21:00 -120m\n','');await plugin.daily.syncFile('agenda/15 novembre 2026.md');
@@ -235,7 +243,7 @@ try {
     window.screenshotNote=screenshotNote.replace('Studio +21:00-23:00 -60m','Studio +21:00-23:00 -60m [[personal-management#Serie TV|Serie TV]] [[Appunti|Seconda nota]]');
     await plugin.daily.syncFile('agenda/15 novembre 2026.md');plugin.refresh(true);
   });
-  assert.equal(await page.locator('.tempvs-session-resource').count(),4);
+  assert.equal(await page.locator('.tempvs-session-resource').count(),2);
   await page.locator('.tempvs-session-resource').first().click();
   assert.deepEqual(await page.evaluate(()=>openedResource),['personal-management#Serie TV','agenda/15 novembre 2026.md',false]);
   await page.setViewportSize({width:320,height:800});

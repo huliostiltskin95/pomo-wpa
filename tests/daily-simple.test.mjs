@@ -135,3 +135,17 @@ test('an already synchronized open note still selects its day in the plugin pane
  f.plugin.app.workspace.getActiveFile=()=>f.file;f.plugin.app.workspace.getLeavesOfType=type=>type==='tempvs-timer'?[{view:panel}]:[];
  await f.daily.syncFile(f.file.path);assert.equal(panel.day,day);f.daily.destroy();
 });
+test('panel note editing writes one session back to daily text without losing its neighbors',async()=>{
+ const f=fixture();await f.daily.syncFile(f.file.path);
+ const id=Object.keys(f.plugin.dailyNotes)[0],session=f.plugin.state.sessions[0],originalIds=f.plugin.state.sessions.map(s=>s.id);
+ await f.daily.updateSessionNotes(id,new Map([[session.id,[{path:'Studio/Nota#Sezione',label:'Lettura'}]]]));
+ assert(f.text.includes('[[Studio/Nota#Sezione|Lettura]]'));
+ assert.deepEqual(f.plugin.state.sessions.map(s=>s.id),originalIds);
+ assert.equal(f.plugin.state.sessions[0].linkedNotes[0].path,'Studio/Nota#Sezione');
+ assert.deepEqual(f.plugin.state.sessions[1].linkedNotes,[]);
+ await f.daily.updateSessionNotes(id,new Map([[session.id,[]]]));
+ assert(!f.text.includes('[[Studio/Nota'));
+ f.text=f.text.replace('Studio +14:00','Studio +14:');
+ await assert.rejects(f.daily.updateSessionNotes(id,new Map([[session.id,[]]])),/sta cambiando/);
+ f.daily.destroy();
+});

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
+import {updatedSessionNotes} from '../obsidian/session-notes.js';
 import * as estimates from '../core/tempo-estimates.js';
 import * as core from '../core/tempo-core.js';
 import * as simple from '../core/tempo-simple.js';
@@ -53,6 +54,7 @@ function fixture(){
  }
  plugin.estimates=new context.module.exports.NoteEstimates(plugin);plugin.daily=new context.module.exports.DailyBlocks(plugin);
  plugin.change=async fn=>{fn();plugin.state=simple.normalizeArchive(plugin.state);await plugin.daily.archiveChanged();};
+ plugin.setSessionNote=async(ids,input)=>plugin.change(()=>{for(const id of ids){const s=plugin.state.sessions.find(s=>s.id===id);s.linkedNotes=updatedSessionNotes(s,input);delete s.noteEstimateId;}});
  return {plugin,file,set text(value){markdown=value;}};
 }
 test('ordinary note imports without daily date, updates without duplicates and avoids queue deadlock',{timeout:2000},async()=>{
@@ -68,8 +70,8 @@ test('ordinary note imports without daily date, updates without duplicates and a
 test('assignment respects area and occupied assignments, rename retains identity and progress',async()=>{
  const f=fixture(),p=f.plugin;await p.daily.syncFile(f.file.path);let n=p.estimates.notes[0];
  p.state.sessions=[session(p.state),{...session(p.state,'16:00','17:00'),id:'other-session',noteEstimateId:'other-note'}];
- await p.estimates.assignDay(n,'2099-11-15');assert.equal(p.state.sessions[0].noteEstimateId,n.id);assert.equal(p.state.sessions[1].noteEstimateId,'other-note');
- recordNoteWork(p.state.sessions[0],60);
+ await p.estimates.assignDay(n,'2099-11-15');assert.equal(p.state.sessions[0].linkedNotes[0].path,n.path);assert.equal(p.state.sessions[0].noteEstimateId,undefined);assert.equal(p.state.sessions[1].noteEstimateId,'other-note');
+ p.state.sessions[0].noteWork={[n.id]:60};
  await p.estimates.rename({path:'zettel/Platone nuovo.md'},f.file.path);n=p.estimates.notes[0];assert.equal(n.path,'zettel/Platone nuovo.md');assert.equal(estimateProgress(n,p.state).done,60);
  p.daily.destroy();
 });

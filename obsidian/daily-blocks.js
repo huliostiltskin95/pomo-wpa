@@ -182,6 +182,17 @@ export class DailyBlocks {
   return canonical;
  }
  apply(prepared){return this.queue(()=>this.commit(prepared));}
+ updateSessionNotes(blockId,updates){return this.queue(async()=>{
+  const binding=this.bindings[blockId];if(!binding)throw Error('Nota giornaliera non collegata.');
+  const context=await this.context(binding.path);
+  if(!context||context.block.source!==binding.source)throw Error('La nota giornaliera sta cambiando: attendi la sincronizzazione e riprova.');
+  const sessions=daySessions(this.plugin.state,binding.date,blockId).filter(s=>!binding.hiddenSessionIds?.includes(s.id)).map(s=>updates.has(s.id)?{...s,linkedNotes:updates.get(s.id)}:s);
+  const body=serializeDailyPlan(sessions,binding.date);
+  const source=explicitDay(binding.source)?'date: '+binding.date+'\n'+body:body;
+  const plan=prepareDailyPlan({source,date:binding.date,blockId,state:this.plugin.state,previousSource:binding.source,protectedBlockIds:this.protectedBlocks(blockId)});
+  for(const session of plan.sessions)if(updates.has(session.id))delete session.noteEstimateId;
+  await this.commit({...context,...plan,originalSource:context.block.source,keepSource:true});
+ });}
  async includeDay(child){
   const context=await this.locate(child),blockId=this.bindingId(context.file.path)||blockIdentity(context.block.source)||uid();
   this.validateBinding(blockId,context.file.path,context.date);

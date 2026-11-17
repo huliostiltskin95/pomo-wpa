@@ -28,28 +28,23 @@ export class NoteEstimates {
  }
  available(session){return this.notes.filter(n=>!n.archived&&!n.completed&&n.entries.some(e=>matchesArea(e,session)));}
  async assign(sessionId,noteId){
-  await this.plugin.change(()=>{
-   const s=this.plugin.state.sessions.find(s=>s.id===sessionId),note=this.notes.find(n=>n.id===noteId);
-   if(!s||s.finished||sessionBounds(s).end<=new Date())throw Error('Sessione non più disponibile.');
-   if(noteId&&(!note||!this.available(s).some(n=>n.id===noteId)))throw Error('Nota non disponibile per questa area.');
-   if(noteId)s.noteEstimateId=noteId;else delete s.noteEstimateId;
-  });
+  const note=this.notes.find(n=>n.id===noteId);
+  await this.plugin.setSessionNote([sessionId],note?'[['+note.path+'|'+note.title+']]':'');
  }
  async assignDay(note,day){
-  let count=0;
-  await this.plugin.change(()=>{for(const s of this.plugin.state.sessions){
-   if(s.date===day&&!s.noteEstimateId&&!s.finished&&sessionBounds(s).start>new Date()&&note.entries.some(e=>matchesArea(e,s))){s.noteEstimateId=note.id;count++;}
-  }});
-  new Notice(count?`${count} sessioni assegnate a ${note.title}.`:'Nessuna sessione futura libera nelle aree della nota per questo giorno.');
+  const sessions=this.plugin.state.sessions.filter(s=>s.date===day&&!s.linkedNotes?.length&&!s.noteEstimateId&&!s.finished&&sessionBounds(s).start>new Date()&&note.entries.some(e=>matchesArea(e,s)));
+  for(const s of sessions)await this.assign(s.id,note.id);
+  new Notice(sessions.length?`${sessions.length} sessioni collegate a ${note.title}.`:'Nessuna sessione futura libera.');
  }
  async start(note,entry){
   const plugin=this.plugin,now=new Date(),end=manualSessionEnd(now,entry.minutes),cycle=grossCycle(entry.minutes);
-  const session={id:uid(),title:entry.area,area:entry.area,areaId:entry.areaId,date:localDateString(now),start:formatTime(now),end:formatTime(end),timerStartedAt:now.toISOString(),timerEndsAt:end.toISOString(),workMinutes:cycle.focusMinutes,cycleMinutes:entry.minutes,breakEnabled:true,actualSeconds:0,noteEstimateId:note.id};
+  const session={id:uid(),title:entry.area,area:entry.area,areaId:entry.areaId,date:localDateString(now),start:formatTime(now),end:formatTime(end),timerStartedAt:now.toISOString(),timerEndsAt:end.toISOString(),workMinutes:cycle.focusMinutes,cycleMinutes:entry.minutes,breakEnabled:true,actualSeconds:0,linkedNotes:[{path:note.path,label:note.title}]};
   if(plugin.state.sessions.some(s=>!s.finished&&sessionBounds(s).start<end&&sessionBounds(s).end>now))throw Error('Questo intervallo è già occupato. Assegna la nota alla sessione in agenda.');
   await plugin.change(()=>plugin.state.sessions.push(session));
  }
  render(parent,note,day=localDateString()){
   const p=estimateProgress(note,this.plugin.state,{day}),box=parent.createDiv({cls:'tempvs-estimate'});
+  box.createEl('p',{cls:'tempvs-muted',text:'Il tempo delle nuove sessioni viene registrato nell’area. L’avanzamento qui conserva i dati storici della nota.'});
   action(box,note.title,()=>this.plugin.app.workspace.openLinkText(note.path,'',false));
   box.createEl('p',{text:'Stima: '+note.entries.map(e=>`${e.count} × ${e.minutes} min (${e.area})`).join(' + ')+` · ${note.entries.reduce((n,e)=>n+e.count,0)} sessioni · ${estimateTime(p.estimated*6/5)} lordi.`});
   box.createEl('p',{text:`${note.completed?'Completata · ':''}${Math.round(p.percent)}% · Lavoro registrato: ${estimateTime(p.done)} / ${estimateTime(p.estimated)}`});
@@ -61,7 +56,7 @@ export class NoteEstimates {
   }
   box.createEl('p',{cls:'tempvs-muted',text:`Già assegnati nel giorno: ${estimateTime(p.planned)} di lavoro previsto. Il tempo previsto non aumenta l’avanzamento.`});
   if(!note.archived&&!note.completed){
-   action(box,'Assegna alle sessioni libere del giorno',()=>this.assignDay(note,day));
+   action(box,'Collega alle sessioni libere del giorno',()=>this.assignDay(note,day));
    const seen=new Set();for(const e of note.entries){const key=(e.areaId||e.area)+':'+e.minutes;if(seen.has(key))continue;seen.add(key);action(box,`Avvia ${e.area} · ${e.minutes} min`,()=>this.start(note,e));}
   }
   action(box,note.completed?'Riapri attività':'Segna completata',()=>this.plugin.change(()=>{this.plugin.config.noteEstimates[note.id].completed=!note.completed;}));

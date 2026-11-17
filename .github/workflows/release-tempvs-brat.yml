@@ -113,4 +113,4 @@ jobs:
             obsidian/dist/styles.css#styles.css \
             --target "${{ github.sha }}" \
             --title "TEMPVS $VERSION" \
-            --notes "TEMPVS 0.5.14: la daily note guida l’agenda; riconciliazione di vecchie sessioni sovrapposte e ripristini Dropbox, storico conservato senza doppio credito, timer sulla sessione corrente e anteprima della prossima. Verificato il caso segnalato con Personale, Studio e Svago."
+            --notes "TEMPVS 0.5.16: collegamento unico alle note, gruppi compatti espandibili, modifica della singola sessione con aggiornamento della daily note e registrazione del tempo nell’area."
