@@ -113,4 +113,4 @@ jobs:
             obsidian/dist/styles.css#styles.css \
             --target "${{ github.sha }}" \
             --title "TEMPVS $VERSION" \
-            --notes "TEMPVS 0.5.17: attivazione preventiva dei suoni di sottofondo. Audio pronto in attesa delle sessioni, avvio automatico alla concentrazione, silenzio durante le pause e disattivazione manuale."
+            --notes "TEMPVS 0.5.18: stima lorda totale per nota con @14h, aggiornamento del progresso tramite il primo wikilink delle sessioni, conteggio lordo del lavoro registrato e compatibilità delle stime precedenti."
