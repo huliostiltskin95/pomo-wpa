@@ -1,3 +1,27 @@
+## 0.5.18 · stima lorda totale del file
+
+In una nota di lavoro non giornaliera inserisci un blocco semplice:
+
+```TEMPVS
+@14h
+```
+
+`@14h` significa **14 ore lorde complessive** assegnate alla nota, senza obbligo di specificare un'area, il numero di sessioni o la loro durata. Sono accettati anche `@90m` e `@1,5h`. La direttiva deve essere l'unica riga non vuota del blocco; le sintassi precedenti `@Studio 20 -30m` restano compatibili, ma non si mescolano con la nuova stima totale.
+
+Nella daily note collega il file come **primo** wikilink di una o più sessioni, ad esempio:
+
+```TEMPVS
+Studio +14:00-16:00 -60m [[zettel/Platone|Platone]] [[Materiale-di-consultazione]]
+```
+
+Il plugin calcola l'avanzamento dalla **concentrazione realmente registrata**, convertendola nel corrispondente tempo lordo usando la durata e le pause della sessione. Una sessione da 60 minuti (50 focus + 10 pausa) interamente lavorata accredita 60 minuti lordi alla nota; 25 minuti di focus misurato nella stessa sessione corrispondono a 30 minuti lordi. Le sessioni soltanto programmate, saltate o in pausa senza focus registrato non accreditano tempo; valgono anche le correzioni retroattive esplicite dal blocco giornaliero. Le stime e l'avanzamento compaiono nel blocco della nota, nel pannello «Note e stime» e, dopo sincronizzazione, nella PWA.
+
+Solo il **primo wikilink** della sessione identifica la nota destinataria del tempo; gli altri rimangono risorse, senza duplicare il lavoro. I collegamenti possono includere alias e sezioni `[[nota#Sezione|Etichetta]]`. Il nome senza cartella viene risolto solo se non ambiguo fra le note con stima; in caso di omonimie usa il percorso completo. I crediti storici espliciti (`noteWork`) vengono conservati e non duplicati. Il progresso è calcolato in base alla nota principale attualmente collegata per la quota di lavoro non attribuita storicamente, quindi cambiare il link può riassegnare quella quota pregressa; non modifica il tempo misurato della sessione.
+
+La stima è aggiornata modificando `@14h`, senza cancellare il lavoro già registrato. Il completamento della nota rimane manuale. Sono disponibili proiezioni in base alle sessioni giornaliere future, senza creare automaticamente alcuna prenotazione.
+
+---
+
 ## 0.5.16 · un solo collegamento e gruppi compatti
 
 Le sessioni consecutive con la stessa area e le stesse note sono raggruppate in una fascia espandibile. Il collegamento principale identifica la nota di lavoro; gli eventuali link aggiuntivi già presenti restano risorse rimovibili. Il selettore separato delle stime non compare più nell’agenda.
