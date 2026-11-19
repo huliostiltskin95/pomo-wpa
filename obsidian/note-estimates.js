@@ -37,6 +37,7 @@ export class NoteEstimates {
   new Notice(sessions.length?`${sessions.length} sessioni collegate a ${note.title}.`:'Nessuna sessione futura libera.');
  }
  async start(note,entry){
+  if(entry.kind==='total')throw Error('La stima @14h non imposta un’area: avvia una sessione dall’agenda e collega la nota.');
   const plugin=this.plugin,now=new Date(),end=manualSessionEnd(now,entry.minutes),cycle=grossCycle(entry.minutes);
   const session={id:uid(),title:entry.area,area:entry.area,areaId:entry.areaId,date:localDateString(now),start:formatTime(now),end:formatTime(end),timerStartedAt:now.toISOString(),timerEndsAt:end.toISOString(),workMinutes:cycle.focusMinutes,cycleMinutes:entry.minutes,breakEnabled:true,actualSeconds:0,linkedNotes:[{path:note.path,label:note.title}]};
   if(plugin.state.sessions.some(s=>!s.finished&&sessionBounds(s).start<end&&sessionBounds(s).end>now))throw Error('Questo intervallo è già occupato. Assegna la nota alla sessione in agenda.');
@@ -44,20 +45,21 @@ export class NoteEstimates {
  }
  render(parent,note,day=localDateString()){
   const p=estimateProgress(note,this.plugin.state,{day}),box=parent.createDiv({cls:'tempvs-estimate'});
-  box.createEl('p',{cls:'tempvs-muted',text:'Il tempo delle nuove sessioni viene registrato nell’area. L’avanzamento qui conserva i dati storici della nota.'});
+  box.createEl('p',{cls:'tempvs-muted',text:'Le sessioni collegate a questa nota registrano il tempo realmente svolto. Solo il primo link della sessione riceve il credito; gli altri sono risorse.'});
   action(box,note.title,()=>this.plugin.app.workspace.openLinkText(note.path,'',false));
-  box.createEl('p',{text:'Stima: '+note.entries.map(e=>`${e.count} × ${e.minutes} min (${e.area})`).join(' + ')+` · ${note.entries.reduce((n,e)=>n+e.count,0)} sessioni · ${estimateTime(p.estimated*6/5)} lordi.`});
-  box.createEl('p',{text:`${note.completed?'Completata · ':''}${Math.round(p.percent)}% · Lavoro registrato: ${estimateTime(p.done)} / ${estimateTime(p.estimated)}`});
+  if(p.unit==='gross')box.createEl('p',{text:'Stima totale del file: '+estimateTime(p.estimated)+' lordi (pause comprese), indipendentemente dall’area.'});
+  else box.createEl('p',{text:'Stima: '+note.entries.map(e=>`${e.count} × ${e.minutes} min (${e.area})`).join(' + ')+` · ${note.entries.reduce((n,e)=>n+e.count,0)} sessioni · ${estimateTime(p.estimated*6/5)} lordi.`});
+  box.createEl('p',{text:`${note.completed?'Completata · ':''}${Math.round(p.percent)}% · Tempo registrato: ${estimateTime(p.done)} / ${estimateTime(p.estimated)} ${p.unit==='gross'?'lordi':'di concentrazione'}`});
   box.createEl('progress',{attr:{max:'100',value:String(p.percent),'aria-label':'Avanzamento '+note.title}});
-  box.createEl('p',{text:`Resta da lavorare: ${estimateTime(p.remaining)} netti · ${estimateTime(p.remaining*6/5)} lordi, pause comprese.`});
+  box.createEl('p',{text:p.unit==='gross'?`Resta da lavorare: ${estimateTime(p.remaining)} lordi, pause comprese.`:`Resta da lavorare: ${estimateTime(p.remaining)} netti · ${estimateTime(p.remaining*6/5)} lordi, pause comprese.`});
   for(const a of p.areas){
-   box.createEl('p',{text:`${a.area}: ${estimateTime(a.remaining)} di lavoro residuo. Equivalenti: ${a.durations.map(m=>`${Math.ceil(a.remaining/(m*50))} sessioni da ${m} min`).join(' oppure ')}.`});
-   box.createEl('small',{text:a.dayCapacity?`Se dedichi a questa nota tutte le sessioni ${a.area} ancora disponibili il ${day}: resterebbero ${estimateTime(a.afterDay)} netti (${estimateTime(a.afterDay*6/5)} lordi).`:`Il ${day} non ci sono sessioni ${a.area} disponibili per calcolare la proiezione.`});
+   box.createEl('p',{text:`${a.area}: ${estimateTime(a.remaining)} ${p.unit==='gross'?'lordi':'netti'} residui. Equivalenti: ${a.durations.map(m=>`${Math.ceil(a.remaining/(m*(p.unit==='gross'?60:50)))} sessioni da ${m} min`).join(' oppure ')}.`});
+   box.createEl('small',{text:a.dayCapacity?`Se dedichi a questa nota tutte le sessioni ${a.area} ancora disponibili il ${day}: resterebbero ${estimateTime(a.afterDay)} ${p.unit==='gross'?'lordi':'netti'}.`:`Il ${day} non ci sono sessioni ${a.area} disponibili per calcolare la proiezione.`});
   }
   box.createEl('p',{cls:'tempvs-muted',text:`Già assegnati nel giorno: ${estimateTime(p.planned)} di lavoro previsto. Il tempo previsto non aumenta l’avanzamento.`});
   if(!note.archived&&!note.completed){
    action(box,'Collega alle sessioni libere del giorno',()=>this.assignDay(note,day));
-   const seen=new Set();for(const e of note.entries){const key=(e.areaId||e.area)+':'+e.minutes;if(seen.has(key))continue;seen.add(key);action(box,`Avvia ${e.area} · ${e.minutes} min`,()=>this.start(note,e));}
+   const seen=new Set();for(const e of note.entries.filter(e=>e.kind!=='total')){const key=(e.areaId||e.area)+':'+e.minutes;if(seen.has(key))continue;seen.add(key);action(box,`Avvia ${e.area} · ${e.minutes} min`,()=>this.start(note,e));}
   }
   action(box,note.completed?'Riapri attività':'Segna completata',()=>this.plugin.change(()=>{this.plugin.config.noteEstimates[note.id].completed=!note.completed;}));
   return box;
