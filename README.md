@@ -1,3 +1,7 @@
+## Obsidian 0.5.18 · stima lorda totale per nota
+
+Nei file di lavoro, `TEMPVS` ora accetta una singola riga `@14h` per definire **14 ore lorde complessive** (pause comprese), senza scegliere a priori area e durata delle sessioni. Quando il file è il primo wikilink di una sessione giornaliera, la concentrazione realmente registrata contribuisce al tempo lordo svolto e riduce il residuo; più link non duplicano il credito. Le precedenti sintassi `@Studio 20 -30m` restano valide. [Grammatica, esempi e precauzioni](obsidian/DAILY-PLAN.md).
+
 ## Obsidian 0.5.14 · agenda coerente con la daily note
 
 La pianificazione nel blocco TEMPVS/TEMPUS ha priorità sulle vecchie prenotazioni della giornata: vengono riconciliate automaticamente anche all’avvio e dopo Dropbox. Le sessioni archiviate non bloccano il blocco valido e non riappaiono nel calendario. Agenda e timer seguono gli intervalli della nota, con anteprima della prossima sessione. [Dettagli e riproduzione del caso segnalato](obsidian/DAILY-PLAN.md).
