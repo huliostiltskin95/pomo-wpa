@@ -75,3 +75,77 @@ test('assignment respects area and occupied assignments, rename retains identity
  await p.estimates.rename({path:'zettel/Platone nuovo.md'},f.file.path);n=p.estimates.notes[0];assert.equal(n.path,'zettel/Platone nuovo.md');assert.equal(estimateProgress(n,p.state).done,60);
  p.daily.destroy();
 });
+
+
+test('a single @14h directive is the total gross budget of the file',()=>{
+ const s=state(),entries=parseEstimate('@14h',s.defaults.simple.areas);
+ assert.deepEqual(entries,[{kind:'total',grossMinutes:840}]);
+ assert.deepEqual(parseEstimate('@1,5h',s.defaults.simple.areas),[{kind:'total',grossMinutes:90}]);
+ assert.deepEqual(parseEstimate('@90m',s.defaults.simple.areas),[{kind:'total',grossMinutes:90}]);
+ for(const bad of ['@0h','@0,1m','@14h\\n@Studio 1 -30m','@14h\\n@2h','@-14h'])
+  assert.throws(()=>parseEstimate(bad,s.defaults.simple.areas));
+ const n={...note(s),entries};s.defaults.simple.noteEstimates={[n.id]:n};
+ assert.equal(simple.normalizeArchive(s).defaults.simple.noteEstimates[n.id].entries[0].grossMinutes,840);
+ const p=estimateProgress(n,s);
+ assert.equal(p.unit,'gross');assert.equal(p.estimated,14*3600);
+ assert.equal(p.done,0);assert.equal(p.remaining,14*3600);
+});
+test('only measured time in the primary linked note reduces its gross estimate',()=>{
+ const s=state(),n={...note(s),entries:parseEstimate('@14h',s.defaults.simple.areas)};
+ s.defaults.simple.noteEstimates={[n.id]:n};
+ const a=session(s);a.linkedNotes=[{path:'Platone#Capitolo 1',label:'Lettura'},{path:'Risorsa',label:'Riferimento'}];
+ s.sessions.push(a);
+ let p=estimateProgress(n,s,{day:a.date,now:new Date('2099-11-15T14:00:00')});
+ assert.equal(p.done,0);assert.equal(p.planned,3600);
+ a.actualSeconds=25*60;
+ p=estimateProgress(n,s);
+ assert.equal(p.done,30*60);
+ a.actualSeconds=50*60;
+ p=estimateProgress(n,s);
+ assert.equal(p.done,60*60);assert.equal(p.remaining,13*3600);
+ assert.equal(Math.round(p.percent*100)/100,7.14);
+ const other={...n,id:'other',path:'zettel/Risorsa.md'};
+ s.defaults.simple.noteEstimates[other.id]=other;
+ assert.equal(estimateProgress(other,s).done,0);
+ a.linkedNotes=[{path:'Risorsa',label:'Riferimento'},{path:'Platone#Capitolo 1',label:'Lettura'}];
+ assert.equal(estimateProgress(n,s).done,0);
+ assert.equal(estimateProgress(other,s).done,3600);
+});
+test('partial and custom-pause sessions credit gross time without counting pauses as focus',()=>{
+ const s=state(),n={...note(s),entries:parseEstimate('@2h',s.defaults.simple.areas)};
+ s.defaults.simple.noteEstimates={[n.id]:n};
+ const a=session(s);a.customBreakMinutes=5;a.workMinutes=55;a.cycleMinutes=undefined;
+ a.linkedNotes=[{path:'zettel/Platone.md',label:'Platone'}];a.actualSeconds=55*60;
+ s.sessions.push(a);assert.equal(estimateProgress(n,s).done,60*60);
+ a.actualSeconds=27.5*60;assert.equal(estimateProgress(n,s).done,30*60);
+ a.actualSeconds=0;assert.equal(estimateProgress(n,s).done,0);
+});
+test('unallocated measured work and historical ledger cannot be counted twice',()=>{
+ const s=state(),n={...note(s),entries:parseEstimate('@14h',s.defaults.simple.areas)};
+ s.defaults.simple.noteEstimates={[n.id]:n};
+ const a=session(s);a.linkedNotes=[{path:'Platone',label:'Platone'}];a.actualSeconds=3000;
+ a.noteWork={[n.id]:600,other:1000};
+ s.sessions.push(a);
+ assert.equal(estimateProgress(n,s).done,2400*6/5);
+ a.noteWork={[n.id]:3000};
+ assert.equal(estimateProgress(n,s).done,3600);
+ const conflict={...n,id:'note-duplicate',path:'archivio/Platone.md'};
+ s.defaults.simple.noteEstimates[conflict.id]=conflict;
+ delete a.noteWork;
+ assert.equal(estimateProgress(n,s).done,0);
+ a.linkedNotes=[{path:'zettel/Platone.md',label:'Platone'}];
+ assert.equal(estimateProgress(n,s).done,3600);
+});
+test('gross note estimate is imported by ordinary-note controller and retains the same identity',async()=>{
+ const f=fixture(),p=f.plugin;
+ f.text='\`\`\`TEMPVS\\n@14h\\n\`\`\`';
+ await p.daily.syncFile(f.file.path);
+ const n=p.estimates.notes[0],id=n.id;
+ assert.equal(n.entries[0].grossMinutes,840);
+ assert.equal(estimateProgress(n,p.state).unit,'gross');
+ f.text='\`\`\`TEMPVS\\n@12h\\n\`\`\`';
+ await p.daily.syncFile(f.file.path);
+ assert.equal(p.estimates.notes[0].id,id);
+ assert.equal(p.estimates.notes[0].entries[0].grossMinutes,720);
+ p.daily.destroy();
+});
