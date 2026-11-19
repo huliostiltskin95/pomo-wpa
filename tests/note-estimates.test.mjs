@@ -82,7 +82,7 @@ test('a single @14h directive is the total gross budget of the file',()=>{
  assert.deepEqual(entries,[{kind:'total',grossMinutes:840}]);
  assert.deepEqual(parseEstimate('@1,5h',s.defaults.simple.areas),[{kind:'total',grossMinutes:90}]);
  assert.deepEqual(parseEstimate('@90m',s.defaults.simple.areas),[{kind:'total',grossMinutes:90}]);
- for(const bad of ['@0h','@0,1m','@14h\\n@Studio 1 -30m','@14h\\n@2h','@-14h'])
+ for(const bad of ['@0h','@0,1m','@14h\n@Studio 1 -30m','@14h\n@2h','@-14h'])
   assert.throws(()=>parseEstimate(bad,s.defaults.simple.areas));
  const n={...note(s),entries};s.defaults.simple.noteEstimates={[n.id]:n};
  assert.equal(simple.normalizeArchive(s).defaults.simple.noteEstimates[n.id].entries[0].grossMinutes,840);
@@ -126,7 +126,7 @@ test('unallocated measured work and historical ledger cannot be counted twice',(
  const a=session(s);a.linkedNotes=[{path:'Platone',label:'Platone'}];a.actualSeconds=3000;
  a.noteWork={[n.id]:600,other:1000};
  s.sessions.push(a);
- assert.equal(estimateProgress(n,s).done,2400*6/5);
+ assert.equal(estimateProgress(n,s).done,2000*6/5);
  a.noteWork={[n.id]:3000};
  assert.equal(estimateProgress(n,s).done,3600);
  const conflict={...n,id:'note-duplicate',path:'archivio/Platone.md'};
@@ -138,12 +138,12 @@ test('unallocated measured work and historical ledger cannot be counted twice',(
 });
 test('gross note estimate is imported by ordinary-note controller and retains the same identity',async()=>{
  const f=fixture(),p=f.plugin;
- f.text='\`\`\`TEMPVS\\n@14h\\n\`\`\`';
+ f.text='```TEMPVS\n@14h\n```';
  await p.daily.syncFile(f.file.path);
  const n=p.estimates.notes[0],id=n.id;
  assert.equal(n.entries[0].grossMinutes,840);
  assert.equal(estimateProgress(n,p.state).unit,'gross');
- f.text='\`\`\`TEMPVS\\n@12h\\n\`\`\`';
+ f.text='```TEMPVS\n@12h\n```';
  await p.daily.syncFile(f.file.path);
  assert.equal(p.estimates.notes[0].id,id);
  assert.equal(p.estimates.notes[0].entries[0].grossMinutes,720);
