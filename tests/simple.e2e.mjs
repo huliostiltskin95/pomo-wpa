@@ -85,7 +85,7 @@ try {
   await ratioPage.getByRole('button',{name:'Pianifica',exact:true}).click();
   await ratioPage.locator('#session-date').fill('2099-11-07');
   await ratioPage.locator('#note-estimates summary').click();
-  assert.match(await ratioPage.locator('#note-estimates').textContent(),/16 h 40 min/);
+  assert.match(await ratioPage.locator('#note-estimates').textContent(),/20 h/);
   await ratioPage.locator('#note-estimates').getByRole('button',{name:'Assegna alle sessioni libere del giorno',exact:true}).click();
   assert.equal(await ratioPage.evaluate(()=>JSON.parse(localStorage.getItem('tempo-pomodoro-v2')).sessions.filter(s=>s.noteEstimateId==='note-test').length),4);
   await ratioPage.getByLabel('Nota della sessione 15:00').selectOption('');

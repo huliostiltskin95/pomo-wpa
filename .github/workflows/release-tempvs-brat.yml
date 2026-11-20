@@ -113,4 +113,4 @@ jobs:
             obsidian/dist/styles.css#styles.css \
             --target "${{ github.sha }}" \
             --title "TEMPVS $VERSION" \
-            --notes "Collega note e intestazioni a fasce o singoli cicli. La prima nota riceve il tempo, le altre si aprono da Risorse. Timer con cifre, barra o anello, dimensioni regolabili e colori delle aree."
+            --notes "Stime con @Studio 10h, avanzamento sul tempo registrato e completamento manuale con scostamento finale conservato."

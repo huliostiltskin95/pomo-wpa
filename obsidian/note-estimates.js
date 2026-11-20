@@ -1,11 +1,11 @@
 import {Notice} from 'obsidian';
-import {parseEstimate,estimatesOf,matchesArea,estimateProgress,estimateTime} from '../core/tempo-estimates.js';
+import {parseEstimate,estimatesOf,matchesArea,estimateProgress,estimateTime,estimateResult,setEstimateCompleted} from '../core/tempo-estimates.js';
 import {localDateString,sessionBounds,formatTime} from '../core/tempo-core.js';
 import {grossCycle,manualSessionEnd} from '../core/tempo-simple.js';
 const uid=()=>globalThis.crypto?.randomUUID?.()||Date.now().toString(36)+'-'+Math.random().toString(36).slice(2);
 const action=(el,label,fn)=>{const b=el.createEl('button',{text:label});b.onclick=()=>Promise.resolve().then(fn).catch(e=>new Notice(e.message));return b;};
 export class NoteEstimates {
- constructor(plugin){this.plugin=plugin;}
+ constructor(plugin){this.plugin=plugin;this.preferences=new Map();}
  get notes(){return estimatesOf(this.plugin.state);}
  get vault(){return this.plugin.app.vault?.getName?.()||'';}
  find(path){return this.notes.find(n=>n.path===path&&n.vault===this.vault);}
@@ -43,33 +43,58 @@ export class NoteEstimates {
   if(plugin.state.sessions.some(s=>!s.finished&&sessionBounds(s).start<end&&sessionBounds(s).end>now))throw Error('Questo intervallo è già occupato. Assegna la nota alla sessione in agenda.');
   await plugin.change(()=>plugin.state.sessions.push(session));
  }
- render(parent,note,day=localDateString()){
-  const p=estimateProgress(note,this.plugin.state,{day}),box=parent.createDiv({cls:'tempvs-estimate'});
-  box.createEl('p',{cls:'tempvs-muted',text:'Le sessioni collegate a questa nota registrano il tempo realmente svolto. Solo il primo link della sessione riceve il credito; gli altri sono risorse.'});
-  action(box,note.title,()=>this.plugin.app.workspace.openLinkText(note.path,'',false));
-  if(p.unit==='gross')box.createEl('p',{text:'Stima totale del file: '+estimateTime(p.estimated)+' lordi (pause comprese), indipendentemente dall’area.'});
-  else box.createEl('p',{text:'Stima: '+note.entries.map(e=>`${e.count} × ${e.minutes} min (${e.area})`).join(' + ')+` · ${note.entries.reduce((n,e)=>n+e.count,0)} sessioni · ${estimateTime(p.estimated*6/5)} lordi.`});
-  box.createEl('p',{text:`${note.completed?'Completata · ':''}${Math.round(p.percent)}% · Tempo registrato: ${estimateTime(p.done)} / ${estimateTime(p.estimated)} ${p.unit==='gross'?'lordi':'di concentrazione'}`});
-  box.createEl('progress',{attr:{max:'100',value:String(p.percent),'aria-label':'Avanzamento '+note.title}});
-  box.createEl('p',{text:p.unit==='gross'?`Resta da lavorare: ${estimateTime(p.remaining)} lordi, pause comprese.`:`Resta da lavorare: ${estimateTime(p.remaining)} netti · ${estimateTime(p.remaining*6/5)} lordi, pause comprese.`});
-  for(const a of p.areas){
-   box.createEl('p',{text:`${a.area}: ${estimateTime(a.remaining)} ${p.unit==='gross'?'lordi':'netti'} residui. Equivalenti: ${a.durations.map(m=>`${Math.ceil(a.remaining/(m*(p.unit==='gross'?60:50)))} sessioni da ${m} min`).join(' oppure ')}.`});
-   box.createEl('small',{text:a.dayCapacity?`Se dedichi a questa nota tutte le sessioni ${a.area} ancora disponibili il ${day}: resterebbero ${estimateTime(a.afterDay)} ${p.unit==='gross'?'lordi':'netti'}.`:`Il ${day} non ci sono sessioni ${a.area} disponibili per calcolare la proiezione.`});
+ render(parent,note,day=localDateString(),panel=false){
+  const state=this.plugin.state,p=estimateProgress(note,state),box=parent.createDiv({cls:'tempvs-estimate'});
+  if(panel)action(box,note.title,()=>this.plugin.app.workspace.openLinkText(note.path,'',false));
+  const names=[...new Set(note.entries.map(entry=>entry.area).filter(Boolean))];
+  box.createEl('p',{text:(names.join(' / ')||'Tutte le aree')+' · Tempo registrato '+estimateTime(p.done)+ ' su '+estimateTime(p.estimated)});
+  box.createEl('strong',{text:estimateResult(note,p)});
+  const actions=box.createDiv({cls:'tempvs-estimate-actions'});
+  const choices=this.preferences.get(note.id)||{};
+  const areas=this.plugin.config.areas.filter(area=>note.entries.some(entry=>matchesArea(entry,{area:area.name,areaId:area.id})));
+  const area=areas.find(a=>a.id===choices.areaId)||areas[0];
+  if(!note.completed&&area){
+   action(actions,'Avvia '+area.name,()=>{
+    const selected=areas.find(a=>a.id===choices.areaId)||area;
+    return this.start(note,{area:selected.name,areaId:selected.id,minutes:choices.minutes||30});
+   });
   }
-  box.createEl('p',{cls:'tempvs-muted',text:`Già assegnati nel giorno: ${estimateTime(p.planned)} di lavoro previsto. Il tempo previsto non aumenta l’avanzamento.`});
-  if(!note.archived&&!note.completed){
-   action(box,'Collega alle sessioni libere del giorno',()=>this.assignDay(note,day));
-   const seen=new Set();for(const e of note.entries.filter(e=>e.kind!=='total')){const key=(e.areaId||e.area)+':'+e.minutes;if(seen.has(key))continue;seen.add(key);action(box,`Avvia ${e.area} · ${e.minutes} min`,()=>this.start(note,e));}
+  const menu=actions.createEl('details',{cls:'tempvs-estimate-menu'});
+  menu.createEl('summary',{text:'⋯',attr:{'aria-label':'Azioni studio'}});
+  if(!note.completed){
+   if(areas.length>1){
+    const select=menu.createEl('select',{attr:{'aria-label':'Area di avvio'}});
+    for(const a of areas)select.createEl('option',{text:a.name,attr:{value:a.id}});
+    select.value=area.id;
+    select.onchange=()=>{choices.areaId=select.value;this.preferences.set(note.id,choices);this.plugin.refresh(true);};
+   }
+   const label=menu.createEl('label',{text:'Durata sessione '});
+   const input=label.createEl('input',{attr:{type:'number',min:1,max:1439,value:choices.minutes||30}});
+   input.onchange=()=>{
+    const minutes=input.valueAsNumber;
+    if(!Number.isInteger(minutes)||minutes<1||minutes>1439){input.value=String(choices.minutes||30);new Notice('Scegli da 1 a 1439 minuti.');return;}
+    choices.minutes=minutes;this.preferences.set(note.id,choices);
+   };
+   action(menu,'Collega alle sessioni libere del giorno',()=>this.assignDay(note,day));
   }
-  action(box,note.completed?'Riapri attività':'Segna completata',()=>this.plugin.change(()=>{this.plugin.config.noteEstimates[note.id].completed=!note.completed;}));
+  action(menu,note.completed?'Riapri attività':'Segna completata',()=>this.plugin.change(()=>{
+   setEstimateCompleted(this.plugin.config.noteEstimates[note.id],this.plugin.state,!note.completed);
+  }));
   return box;
  }
  renderPanel(parent,day){
-  const open=new Set([...parent.querySelectorAll('details[open]')].map(el=>el.dataset.noteId));
+  const open=new Set([...parent.querySelectorAll('.tempvs-estimate-details[open]')].map(el=>el.dataset.noteId));
+  const menus=new Set([...parent.querySelectorAll('.tempvs-estimate-menu[open]')].map(el=>el.closest('.tempvs-estimate-details').dataset.noteId));
   parent.empty();const notes=this.notes.filter(n=>!n.archived);
   if(!notes.length)return;
   parent.createEl('h4',{text:'Note e stime'});
-  for(const note of notes){const details=parent.createEl('details',{cls:'tempvs-estimate-details'});details.dataset.noteId=note.id;details.open=open.has(note.id);details.createEl('summary',{text:`${note.title} · ${Math.round(estimateProgress(note,this.plugin.state).percent)}%${note.completed?' · completata':''}`});this.render(details,note,day);}
+  for(const note of notes){
+   const details=parent.createEl('details',{cls:'tempvs-estimate-details'});
+   details.dataset.noteId=note.id;details.open=open.has(note.id);
+   details.createEl('summary',{text:note.title+' · '+(note.completed?'completato':Math.floor(estimateProgress(note,this.plugin.state).percent)+'%')});
+   this.render(details,note,day,true);
+   details.querySelector('.tempvs-estimate-menu').open=menus.has(note.id);
+  }
  }
  selector(parent,session){
   const notes=this.available(session),current=this.notes.find(n=>n.id===session.noteEstimateId);

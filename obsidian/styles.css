@@ -172,3 +172,10 @@
 .tempvs-picker-results { display:grid; gap:4px; max-height:50vh; overflow:auto; margin:8px 0; }
 .tempvs-picker button { display:flex; flex-direction:column; align-items:flex-start; text-align:start; white-space:normal; height:auto; padding:7px 10px; overflow-wrap:anywhere; }
 .tempvs-picker button small { color:var(--text-muted); }
+
+.tempvs-estimate-actions { display:flex; align-items:baseline; gap:.5em; flex-wrap:wrap; margin-top:.4em; }
+.tempvs-estimate-menu summary { cursor:pointer; list-style:none; padding:2px 8px; }
+.tempvs-estimate-menu summary::-webkit-details-marker { display:none; }
+.tempvs-estimate-menu[open] { flex-basis:100%; }
+.tempvs-estimate-menu[open] > :is(label,button,select) { display:block; margin:6px 0; }
+.tempvs-estimate-menu input { width:5em; }

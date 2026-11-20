@@ -258,11 +258,16 @@ class DailyBlock extends MarkdownRenderChild {
    const context=await this.controller.locate(this);if(this.disposed||version!==this.version)return;
    this.source=context.block.source;
    if(context.kind==="estimate"||context.kind==="estimate-empty"){
-    const el=this.containerEl;el.empty();el.addClass("tempvs-daily");el.createEl("pre").createEl("code",{text:this.source});
+    const el=this.containerEl;
+    const menuOpen=el.querySelector('.tempvs-estimate-menu')?.open;
+    el.empty();el.addClass("tempvs-daily");
     const error=this.controller.errors.get(this.ctx.sourcePath);
     if(error)el.createEl("p",{text:error,cls:"tempvs-daily-error"});
     const note=this.controller.plugin.estimates?.find(this.ctx.sourcePath);
-    if(note&&!note.archived)this.controller.plugin.estimates.render(el,note);
+    if(note&&!note.archived){
+     const box=this.controller.plugin.estimates.render(el,note);
+     if(menuOpen)box.querySelector('.tempvs-estimate-menu').open=true;
+    }
     return;
    }
    const el=this.containerEl;el.empty();el.addClass('tempvs-daily');

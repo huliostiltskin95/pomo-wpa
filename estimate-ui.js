@@ -1,4 +1,4 @@
-import {estimatesOf,estimateProgress,estimateTime,matchesArea} from './core/tempo-estimates.js';
+import {estimatesOf,estimateProgress,estimateTime,matchesArea,setEstimateCompleted,estimateResult} from './core/tempo-estimates.js';
 import {sessionBounds} from './core/tempo-core.js';
 export function renderNoteEstimates({document,state,day,commit}){
  const list=document.getElementById('session-list');if(!list)return;
@@ -12,13 +12,11 @@ export function renderNoteEstimates({document,state,day,commit}){
  for(const note of notes){
   const p=estimateProgress(note,state,{day}),box=add(root,'details');box.dataset.noteId=note.id;box.open=open.has(note.id);
   add(box,'summary',`${note.title} · ${Math.round(p.percent)}%${note.completed?' · completata':''}`);
-  add(box,'p',p.unit==='gross'?`Stima complessiva del file: ${estimateTime(p.estimated)} lordi (pause comprese).`:'Stima: '+note.entries.map(e=>`${e.count} × ${e.minutes} min (${e.area})`).join(' + ')+` · ${note.entries.reduce((n,e)=>n+e.count,0)} sessioni · ${estimateTime(p.estimated*6/5)} lordi.`);
-  add(box,'p',p.unit==='gross'?`Tempo registrato: ${estimateTime(p.done)} / ${estimateTime(p.estimated)} lordi. Restano ${estimateTime(p.remaining)} lordi.`:`Lavoro registrato: ${estimateTime(p.done)} / ${estimateTime(p.estimated)}. Restano ${estimateTime(p.remaining)} netti (${estimateTime(p.remaining*6/5)} lordi).`);
+  add(box,'p',estimateTime(p.done)+' registrati su '+estimateTime(p.estimated));
+  add(box,'p',estimateResult(note,p));
   const link=add(box,'a','Apri nota in Obsidian');link.href='obsidian://open?'+new URLSearchParams({vault:note.vault||'',file:note.path});
-  for(const a of p.areas)add(box,'p',`${a.area}: ${a.durations.map(m=>`${Math.ceil(a.remaining/(m*(p.unit==='gross'?60:50)))} sessioni equivalenti da ${m} min`).join(' oppure ')}. `+(a.dayCapacity?`Dedicando tutti gli slot ancora disponibili del ${day} a questa nota, resterebbero ${estimateTime(a.afterDay)} ${p.unit==='gross'?'lordi':'netti'}.`:'Nessuno slot disponibile in questo giorno per la proiezione.'));
-  add(box,'p',`Già assegnati nel giorno: ${estimateTime(p.planned)} di lavoro previsto. Le stime si modificano nel blocco della nota.`);
   if(!note.completed)button(box,'Assegna alle sessioni libere del giorno',()=>commit(()=>{for(const s of state.sessions)if(s.date===day&&!s.noteEstimateId&&!s.finished&&sessionBounds(s).start>new Date()&&note.entries.some(e=>matchesArea(e,s)))s.noteEstimateId=note.id;}));
-  button(box,note.completed?'Riapri attività':'Segna completata',()=>commit(()=>{state.defaults.simple.noteEstimates[note.id].completed=!note.completed;}));
+  button(box,note.completed?'Riapri attività':'Segna completata',()=>commit(()=>{setEstimateCompleted(state.defaults.simple.noteEstimates[note.id],state,!note.completed);}));
  }
  for(const item of list.querySelectorAll('[data-delete]')){
   const s=state.sessions.find(s=>s.id===item.dataset.delete);if(!s||s.finished||sessionBounds(s).end<=new Date())continue;

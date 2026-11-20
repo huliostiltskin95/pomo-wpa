@@ -8,14 +8,14 @@ import * as core from '../core/tempo-core.js';
 import * as simple from '../core/tempo-simple.js';
 import * as dailyPlan from '../obsidian/daily-plan.js';
 import {mergeSnapshots} from '../core/tempo-merge.js';
-const {parseEstimate,estimateProgress,recordNoteWork,remainingFocus}=estimates;
+const {parseEstimate,estimateProgress,recordNoteWork,setEstimateCompleted}=estimates;
 const source='@Studio 20 -30m\n@Studio 10 -60m';
 const state=()=>simple.normalizeArchive({sessions:[]});
 const note=s=>({id:'note-1',title:'Platone',path:'zettel/Platone.md',vault:'Test',entries:parseEstimate(source,s.defaults.simple.areas),completed:false});
 const session=(s,start='15:00',end='16:00')=>({id:'session-1',title:'Studio',area:'Studio',areaId:s.defaults.simple.areas.find(a=>a.name==='Studio').id,date:'2099-11-15',start,end,workMinutes:50,cycleMinutes:60,breakEnabled:true,actualSeconds:0});
-test('example adds both rows: 30 sessions, 20 gross hours, 16h40 focus, exact 5:1',()=>{
+test('example adds both rows: 30 legacy sessions give a 20-hour target',()=>{
  const s=state(),n=note(s),p=estimateProgress(n,s);
- assert.equal(n.entries.reduce((v,e)=>v+e.count,0),30);assert.equal(p.estimated,60000);assert.equal(p.remaining*6/5,72000);assert.equal(p.percent,0);
+ assert.equal(n.entries.reduce((v,e)=>v+e.count,0),30);assert.equal(p.estimated,72000);assert.equal(p.remaining,72000);assert.equal(p.percent,0);
  assert.equal(parseEstimate('@Studio 2 -45m',s.defaults.simple.areas)[0].minutes*50,2250);
  for(const bad of ['@Studio 20 -60m -30m','@Studio -1 -30m','@Studio 0 -30m','@Missing 1 -30m','@Studio 2 -1.5m',source+'\ninvalid'])assert.throws(()=>parseEstimate(bad,s.defaults.simple.areas));
 });
@@ -23,17 +23,27 @@ test('only measured work assigned to this note counts, switching never reallocat
  const s=state(),n=note(s),a=session(s);s.sessions.push(a);
  recordNoteWork(a,100);assert.equal(estimateProgress(n,s).done,0);
  a.noteEstimateId=n.id;recordNoteWork(a,120);a.noteEstimateId='other';recordNoteWork(a,60);
- assert.equal(estimateProgress(n,s).done,120);assert.equal(estimateProgress(n,s).remaining,59880);
+ assert.equal(estimateProgress(n,s).done,120);assert.equal(estimateProgress(n,s).remaining,71880);
  s.history=[{sessionId:a.id,areaId:a.areaId,area:a.area,measured:true,minutes:2,noteWork:{[n.id]:120}}];
  assert.equal(estimateProgress(n,s).done,120);s.sessions=[];assert.equal(estimateProgress(n,s).done,120);
  assert.equal(simple.normalizeArchive(s).history[0].noteWork[n.id],120);
 });
-test('day forecast excludes past, finished and unrelated areas; planned work is not done',()=>{
- const s=state(),n=note(s),a=session(s);a.noteEstimateId=n.id;s.sessions=[a];
- let p=estimateProgress(n,s,{day:a.date,now:new Date('2099-11-15T15:25:00')});
- assert.equal(p.done,0);assert.equal(p.planned,25*60);assert.equal(p.afterDay,60000-25*60);
- assert.equal(remainingFocus(a,new Date('2099-11-15T15:55:00')),0);
- a.finished=true;assert.equal(estimateProgress(n,s,{day:a.date,now:new Date('2099-11-15T14:00:00')}).planned,0);
+test('area budget counts only recorded seconds in matching primary sessions and freezes the final variance',()=>{
+ const s=state(),n=note(s);n.entries=parseEstimate('@Studio 10h',s.defaults.simple.areas);
+ const a=session(s);a.linkedNotes=[{path:n.path}];s.sessions=[a];
+ assert.equal(estimateProgress(n,s).remaining,36000);
+ a.actualSeconds=9000;
+ s.sessions.push({...a,id:'work',area:'Lavoro',areaId:'other'}, {...a,id:'resource',linkedNotes:[{path:'Other'},...a.linkedNotes]});
+ assert.equal(estimateProgress(n,s).done,9000);
+ setEstimateCompleted(n,s,true);
+ a.actualSeconds=40000;n.entries=parseEstimate('@Studio 12h',s.defaults.simple.areas);
+ assert.equal(estimateProgress(n,s).difference,-27000);
+ setEstimateCompleted(n,s,false);
+ n.entries=parseEstimate('@Studio 10h',s.defaults.simple.areas);
+ setEstimateCompleted(n,s,true);
+ assert.equal(estimateProgress(n,s).difference,4000);
+ s.defaults.simple.noteEstimates={[n.id]:n};
+ assert.deepEqual(simple.normalizeArchive(JSON.parse(JSON.stringify(s))).defaults.simple.noteEstimates[n.id].completion,{estimated:36000,done:40000});
 });
 test('backup and cloud merge preserve estimates, note bindings and measured ledger',()=>{
  const base=state(),local=structuredClone(base),n=note(local);local.defaults.simple.noteEstimates={[n.id]:n};local.sessions=[{...session(local),noteEstimateId:n.id,noteWork:{[n.id]:30},actualSeconds:30}];
@@ -87,7 +97,7 @@ test('a single @14h directive is the total gross budget of the file',()=>{
  const n={...note(s),entries};s.defaults.simple.noteEstimates={[n.id]:n};
  assert.equal(simple.normalizeArchive(s).defaults.simple.noteEstimates[n.id].entries[0].grossMinutes,840);
  const p=estimateProgress(n,s);
- assert.equal(p.unit,'gross');assert.equal(p.estimated,14*3600);
+ assert.equal(p.estimated,14*3600);
  assert.equal(p.done,0);assert.equal(p.remaining,14*3600);
 });
 test('only measured time in the primary linked note reduces its gross estimate',()=>{
@@ -96,28 +106,28 @@ test('only measured time in the primary linked note reduces its gross estimate',
  const a=session(s);a.linkedNotes=[{path:'Platone#Capitolo 1',label:'Lettura'},{path:'Risorsa',label:'Riferimento'}];
  s.sessions.push(a);
  let p=estimateProgress(n,s,{day:a.date,now:new Date('2099-11-15T14:00:00')});
- assert.equal(p.done,0);assert.equal(p.planned,3600);
+ assert.equal(p.done,0);assert.equal(p.remaining,14*3600);
  a.actualSeconds=25*60;
  p=estimateProgress(n,s);
- assert.equal(p.done,30*60);
+ assert.equal(p.done,25*60);
  a.actualSeconds=50*60;
  p=estimateProgress(n,s);
- assert.equal(p.done,60*60);assert.equal(p.remaining,13*3600);
- assert.equal(Math.round(p.percent*100)/100,7.14);
+ assert.equal(p.done,50*60);assert.equal(p.remaining,14*3600-3000);
+ assert.equal(Math.round(p.percent*100)/100,5.95);
  const other={...n,id:'other',path:'zettel/Risorsa.md'};
  s.defaults.simple.noteEstimates[other.id]=other;
  assert.equal(estimateProgress(other,s).done,0);
  a.linkedNotes=[{path:'Risorsa',label:'Riferimento'},{path:'Platone#Capitolo 1',label:'Lettura'}];
  assert.equal(estimateProgress(n,s).done,0);
- assert.equal(estimateProgress(other,s).done,3600);
+ assert.equal(estimateProgress(other,s).done,3000);
 });
-test('partial and custom-pause sessions credit gross time without counting pauses as focus',()=>{
+test('partial and custom-pause sessions credit only their measured seconds',()=>{
  const s=state(),n={...note(s),entries:parseEstimate('@2h',s.defaults.simple.areas)};
  s.defaults.simple.noteEstimates={[n.id]:n};
  const a=session(s);a.customBreakMinutes=5;a.workMinutes=55;a.cycleMinutes=undefined;
  a.linkedNotes=[{path:'zettel/Platone.md',label:'Platone'}];a.actualSeconds=55*60;
- s.sessions.push(a);assert.equal(estimateProgress(n,s).done,60*60);
- a.actualSeconds=27.5*60;assert.equal(estimateProgress(n,s).done,30*60);
+ s.sessions.push(a);assert.equal(estimateProgress(n,s).done,55*60);
+ a.actualSeconds=27.5*60;assert.equal(estimateProgress(n,s).done,27.5*60);
  a.actualSeconds=0;assert.equal(estimateProgress(n,s).done,0);
 });
 test('unallocated measured work and historical ledger cannot be counted twice',()=>{
@@ -126,15 +136,15 @@ test('unallocated measured work and historical ledger cannot be counted twice',(
  const a=session(s);a.linkedNotes=[{path:'Platone',label:'Platone'}];a.actualSeconds=3000;
  a.noteWork={[n.id]:600,other:1000};
  s.sessions.push(a);
- assert.equal(estimateProgress(n,s).done,2000*6/5);
+ assert.equal(estimateProgress(n,s).done,2000);
  a.noteWork={[n.id]:3000};
- assert.equal(estimateProgress(n,s).done,3600);
+ assert.equal(estimateProgress(n,s).done,3000);
  const conflict={...n,id:'note-duplicate',path:'archivio/Platone.md'};
  s.defaults.simple.noteEstimates[conflict.id]=conflict;
  delete a.noteWork;
  assert.equal(estimateProgress(n,s).done,0);
  a.linkedNotes=[{path:'zettel/Platone.md',label:'Platone'}];
- assert.equal(estimateProgress(n,s).done,3600);
+ assert.equal(estimateProgress(n,s).done,3000);
 });
 test('gross note estimate is imported by ordinary-note controller and retains the same identity',async()=>{
  const f=fixture(),p=f.plugin;
@@ -142,7 +152,7 @@ test('gross note estimate is imported by ordinary-note controller and retains th
  await p.daily.syncFile(f.file.path);
  const n=p.estimates.notes[0],id=n.id;
  assert.equal(n.entries[0].grossMinutes,840);
- assert.equal(estimateProgress(n,p.state).unit,'gross');
+ assert.equal(estimateProgress(n,p.state).estimated,840*60);
  f.text='```TEMPVS\n@12h\n```';
  await p.daily.syncFile(f.file.path);
  assert.equal(p.estimates.notes[0].id,id);
