@@ -345,8 +345,17 @@ function parseEstimate(source, areas) {
         throw Error("Durata totale lorda non valida: usa @14h oppure @90m (minuti interi).");
       return [{ kind: "total", grossMinutes: value }];
     }
+    const budget = line.trim().match(/^@(.+?)\s+(\d+(?:[.,]\d+)?)\s*(m|h)$/i);
+    if (budget) {
+      const area2 = areas.find((a) => a.name.toLocaleLowerCase() === budget[1].trim().toLocaleLowerCase());
+      if (!area2) throw Error("Area sconosciuta: " + budget[1]);
+      const targetMinutes = Number(budget[2].replace(",", ".")) * (budget[3].toLowerCase() === "h" ? 60 : 1);
+      if (!Number.isSafeInteger(targetMinutes) || targetMinutes < 1 || targetMinutes > 1e5) throw Error("Indica una durata tra 1 e 100000 minuti interi.");
+      rows.push({ kind: "budget", area: area2.name, areaId: area2.id, targetMinutes });
+      continue;
+    }
     const m = line.trim().match(/^@(.+?)\s+(\d+)\s+-\s*(\d+(?:[.,]\d+)?)\s*(m|h)$/i);
-    if (!m) throw Error(`Riga ${i + 1}: usa @Studio 20 -30m (numero di sessioni e durata lorda).`);
+    if (!m) throw Error(`Riga ${i + 1}: usa @Studio 10h.`);
     const area = areas.find((a) => a.name.trim().toLocaleLowerCase() === m[1].trim().toLocaleLowerCase());
     if (!area) throw Error(`Riga ${i + 1}: area sconosciuta: ${m[1]}.`);
     const count = Number(m[2]), minutes = Number(m[3].replace(",", ".")) * (m[4].toLowerCase() === "h" ? 60 : 1);
@@ -360,8 +369,9 @@ function validateEstimates(value) {
   if (value === void 0) return;
   if (!value || typeof value !== "object" || Array.isArray(value)) throw Error("Stime delle note non valide.");
   for (const [id, n] of Object.entries(value)) {
+    if (n?.completion && (!Number.isFinite(n.completion.estimated) || n.completion.estimated <= 0 || !Number.isFinite(n.completion.done) || n.completion.done < 0)) throw Error("Consuntivo della nota non valido.");
     const total = n?.entries?.length === 1 && n.entries[0]?.kind === "total";
-    const invalid = total ? !Number.isSafeInteger(n.entries[0].grossMinutes) || n.entries[0].grossMinutes < 1 || n.entries[0].grossMinutes > 1e5 : n?.entries?.some((e) => !e || e.kind === "total" || typeof e.area !== "string" || !Number.isInteger(e.count) || e.count < 1 || e.count > 1e5 || !Number.isInteger(e.minutes) || e.minutes < 1 || e.minutes > 1439);
+    const invalid = total ? !Number.isSafeInteger(n.entries[0].grossMinutes) || n.entries[0].grossMinutes < 1 || n.entries[0].grossMinutes > 1e5 : n?.entries?.some((e) => !e || e.kind === "total" || typeof e.area !== "string" || (e.kind === "budget" ? !Number.isSafeInteger(e.targetMinutes) || e.targetMinutes < 1 || e.targetMinutes > 1e5 : !Number.isInteger(e.count) || e.count < 1 || e.count > 1e5 || !Number.isInteger(e.minutes) || e.minutes < 1 || e.minutes > 1439));
     if (!n || n.id !== id || typeof n.path !== "string" || !n.path || typeof n.title !== "string" || !Array.isArray(n.entries) || !n.entries.length || invalid)
       throw Error("Stima della nota non valida.");
   }
@@ -383,75 +393,33 @@ function attributedFocus(record, note, state) {
   const credited = Math.max(0, Number(existing[note.id]) || 0);
   const allocated = Object.values(existing).reduce((sum, v) => sum + (Number(v) || 0), 0);
   const selected = isPrimaryLink(record, note, state) || !record.linkedNotes?.length && record.noteEstimateId === note.id;
-  return credited + (selected ? Math.max(0, (Number(record.actualSeconds) || 0) - allocated) : 0);
+  return credited + (selected ? Math.max(0, (record.actualSeconds ?? (record.measured ? (Number(record.minutes) || 0) * 60 : 0)) - allocated) : 0);
 }
-function grossEquivalentSeconds(session, focusSeconds) {
-  if (!(focusSeconds > 0)) return 0;
-  if (!session.date || !session.start || !session.end || !Number.isFinite(session.workMinutes)) return focusSeconds * 6 / 5;
-  const { start, end } = sessionBounds(session);
-  const gross = (end - start) / 1e3;
-  let cursor = +start, work = 0;
-  while (cursor < +end) {
-    const phase = getPhase(session, new Date(cursor)), next = Math.min(+phase.end, +end);
-    if (next <= cursor) break;
-    if (phase.kind === "work") work += (next - cursor) / 1e3;
-    cursor = next;
-  }
-  return work > 0 ? Math.min(gross, focusSeconds * gross / work) : 0;
-}
-function remainingFocus(session, now = /* @__PURE__ */ new Date()) {
-  if (session.finished) return 0;
-  const { start, end } = sessionBounds(session);
-  let at = Math.max(+start, +now), total = 0;
-  while (at < +end) {
-    const p = getPhase(session, new Date(at)), until = Math.min(+p.end, +end);
-    if (until <= at) break;
-    if (p.kind === "work") total += (until - at) / 1e3;
-    at = until;
-  }
-  return total;
-}
-function estimateProgress(note, state, { day, now = /* @__PURE__ */ new Date() } = {}) {
+function measuredTotals(note, state) {
+  const estimated = note.entries.reduce((sum, e) => sum + (e.targetMinutes ?? e.grossMinutes ?? e.count * e.minutes) * 60, 0);
   const records = /* @__PURE__ */ new Map();
-  for (const h of state.history || []) if (h.measured) records.set(h.sessionId, h);
-  for (const s of state.sessions || []) records.set(s.id, s);
-  const total = note.entries.length === 1 && note.entries[0].kind === "total";
-  const areas = total ? [{ kind: "total", area: "Tutte le aree", estimated: note.entries[0].grossMinutes * 60, done: 0, planned: 0, dayCapacity: 0, durations: [30, 60] }] : [];
-  if (!total) for (const e of note.entries) {
-    let a = areas.find((a2) => matchesArea(a2, e));
-    if (!a) {
-      a = { areaId: e.areaId, area: e.area, estimated: 0, done: 0, planned: 0, dayCapacity: 0, durations: [] };
-      areas.push(a);
-    }
-    a.estimated += e.count * e.minutes * 50;
-    if (!a.durations.includes(e.minutes)) a.durations.push(e.minutes);
+  for (const history2 of state.history || []) if (history2.measured) records.set(history2.sessionId, history2);
+  for (const session of state.sessions || []) records.set(session.id, session);
+  let done = 0;
+  for (const record of records.values()) {
+    if (note.entries.some((entry) => matchesArea(entry, record))) done += attributedFocus(record, note, state);
   }
-  for (const a of areas) {
-    for (const r of records.values()) if (matchesArea(a, r)) {
-      const focus = attributedFocus(r, note, state);
-      a.done += total ? grossEquivalentSeconds(r, focus) : focus;
-    }
-    a.remaining = Math.max(0, a.estimated - a.done);
-    for (const s of state.sessions || []) if (matchesArea(a, s) && (!day || s.date === day)) {
-      const focus = remainingFocus(s, now), credit = total ? grossEquivalentSeconds(s, focus) : focus;
-      a.dayCapacity += credit;
-      if (s.noteEstimateId === note.id || isPrimaryLink(s, note, state)) a.planned += credit;
-    }
-    a.afterDay = Math.max(0, a.remaining - a.dayCapacity);
-    a.days = a.dayCapacity > 0 ? Math.ceil(a.remaining / a.dayCapacity) : null;
-  }
-  const sum = (k) => areas.reduce((n, a) => n + a[k], 0);
-  const estimated = sum("estimated");
-  return {
-    areas,
-    unit: total ? "gross" : "net",
-    estimated,
-    done: sum("done"),
-    remaining: sum("remaining"),
-    planned: sum("planned"),
-    afterDay: sum("afterDay"),
-    percent: estimated ? areas.reduce((n, a) => n + Math.min(a.done, a.estimated), 0) / estimated * 100 : 0
-  };
+  return { estimated, done };
+}
+function estimateProgress(note, state) {
+  const { estimated, done } = note.completed && note.completion ? note.completion : measuredTotals(note, state);
+  return { estimated, done, remaining: Math.max(0, estimated - done), difference: done - estimated, percent: estimated ? 100 * done / estimated : 0 };
+}
+function setEstimateCompleted(note, state, completed) {
+  if (note.completed === completed) return;
+  if (completed) note.completion = measuredTotals(note, state);
+  else delete note.completion;
+  note.completed = completed;
+}
+function estimateResult(note, progress) {
+  if (!note.completed) return "Restano " + estimateTime(progress.remaining) + " \xB7 " + Math.floor(progress.percent) + "%";
+  if (progress.difference === 0) return "Completato \xB7 stima rispettata";
+  return "Completato \xB7 " + estimateTime(Math.abs(progress.difference)) + (progress.difference < 0 ? " sotto la stima" : " oltre la stima");
 }
 function estimateTime(seconds) {
   const value = Math.max(0, Math.ceil(seconds)), h = Math.floor(value / 3600), m = Math.floor(value % 3600 / 60), s = value % 60;
@@ -707,6 +675,7 @@ var action = (el, label, fn) => {
 var NoteEstimates = class {
   constructor(plugin) {
     this.plugin = plugin;
+    this.preferences = /* @__PURE__ */ new Map();
   }
   get notes() {
     return estimatesOf(this.plugin.state);
@@ -764,37 +733,57 @@ var NoteEstimates = class {
     if (plugin.state.sessions.some((s) => !s.finished && sessionBounds(s).start < end && sessionBounds(s).end > now)) throw Error("Questo intervallo \xE8 gi\xE0 occupato. Assegna la nota alla sessione in agenda.");
     await plugin.change(() => plugin.state.sessions.push(session));
   }
-  render(parent, note, day = localDateString()) {
-    const p = estimateProgress(note, this.plugin.state, { day }), box = parent.createDiv({ cls: "tempvs-estimate" });
-    box.createEl("p", { cls: "tempvs-muted", text: "Le sessioni collegate a questa nota registrano il tempo realmente svolto. Solo il primo link della sessione riceve il credito; gli altri sono risorse." });
-    action(box, note.title, () => this.plugin.app.workspace.openLinkText(note.path, "", false));
-    if (p.unit === "gross") box.createEl("p", { text: "Stima totale del file: " + estimateTime(p.estimated) + " lordi (pause comprese), indipendentemente dall\u2019area." });
-    else box.createEl("p", { text: "Stima: " + note.entries.map((e) => `${e.count} \xD7 ${e.minutes} min (${e.area})`).join(" + ") + ` \xB7 ${note.entries.reduce((n, e) => n + e.count, 0)} sessioni \xB7 ${estimateTime(p.estimated * 6 / 5)} lordi.` });
-    box.createEl("p", { text: `${note.completed ? "Completata \xB7 " : ""}${Math.round(p.percent)}% \xB7 Tempo registrato: ${estimateTime(p.done)} / ${estimateTime(p.estimated)} ${p.unit === "gross" ? "lordi" : "di concentrazione"}` });
-    box.createEl("progress", { attr: { max: "100", value: String(p.percent), "aria-label": "Avanzamento " + note.title } });
-    box.createEl("p", { text: p.unit === "gross" ? `Resta da lavorare: ${estimateTime(p.remaining)} lordi, pause comprese.` : `Resta da lavorare: ${estimateTime(p.remaining)} netti \xB7 ${estimateTime(p.remaining * 6 / 5)} lordi, pause comprese.` });
-    for (const a of p.areas) {
-      box.createEl("p", { text: `${a.area}: ${estimateTime(a.remaining)} ${p.unit === "gross" ? "lordi" : "netti"} residui. Equivalenti: ${a.durations.map((m) => `${Math.ceil(a.remaining / (m * (p.unit === "gross" ? 60 : 50)))} sessioni da ${m} min`).join(" oppure ")}.` });
-      box.createEl("small", { text: a.dayCapacity ? `Se dedichi a questa nota tutte le sessioni ${a.area} ancora disponibili il ${day}: resterebbero ${estimateTime(a.afterDay)} ${p.unit === "gross" ? "lordi" : "netti"}.` : `Il ${day} non ci sono sessioni ${a.area} disponibili per calcolare la proiezione.` });
+  render(parent, note, day = localDateString(), panel = false) {
+    const state = this.plugin.state, p = estimateProgress(note, state), box = parent.createDiv({ cls: "tempvs-estimate" });
+    if (panel) action(box, note.title, () => this.plugin.app.workspace.openLinkText(note.path, "", false));
+    const names = [...new Set(note.entries.map((entry) => entry.area).filter(Boolean))];
+    box.createEl("p", { text: (names.join(" / ") || "Tutte le aree") + " \xB7 Tempo registrato " + estimateTime(p.done) + " su " + estimateTime(p.estimated) });
+    box.createEl("strong", { text: estimateResult(note, p) });
+    const actions = box.createDiv({ cls: "tempvs-estimate-actions" });
+    const choices = this.preferences.get(note.id) || {};
+    const areas = this.plugin.config.areas.filter((area2) => note.entries.some((entry) => matchesArea(entry, { area: area2.name, areaId: area2.id })));
+    const area = areas.find((a) => a.id === choices.areaId) || areas[0];
+    if (!note.completed && area) {
+      action(actions, "Avvia " + area.name, () => {
+        const selected = areas.find((a) => a.id === choices.areaId) || area;
+        return this.start(note, { area: selected.name, areaId: selected.id, minutes: choices.minutes || 30 });
+      });
     }
-    box.createEl("p", { cls: "tempvs-muted", text: `Gi\xE0 assegnati nel giorno: ${estimateTime(p.planned)} di lavoro previsto. Il tempo previsto non aumenta l\u2019avanzamento.` });
-    if (!note.archived && !note.completed) {
-      action(box, "Collega alle sessioni libere del giorno", () => this.assignDay(note, day));
-      const seen = /* @__PURE__ */ new Set();
-      for (const e of note.entries.filter((e2) => e2.kind !== "total")) {
-        const key2 = (e.areaId || e.area) + ":" + e.minutes;
-        if (seen.has(key2)) continue;
-        seen.add(key2);
-        action(box, `Avvia ${e.area} \xB7 ${e.minutes} min`, () => this.start(note, e));
+    const menu = actions.createEl("details", { cls: "tempvs-estimate-menu" });
+    menu.createEl("summary", { text: "\u22EF", attr: { "aria-label": "Azioni studio" } });
+    if (!note.completed) {
+      if (areas.length > 1) {
+        const select = menu.createEl("select", { attr: { "aria-label": "Area di avvio" } });
+        for (const a of areas) select.createEl("option", { text: a.name, attr: { value: a.id } });
+        select.value = area.id;
+        select.onchange = () => {
+          choices.areaId = select.value;
+          this.preferences.set(note.id, choices);
+          this.plugin.refresh(true);
+        };
       }
+      const label = menu.createEl("label", { text: "Durata sessione " });
+      const input = label.createEl("input", { attr: { type: "number", min: 1, max: 1439, value: choices.minutes || 30 } });
+      input.onchange = () => {
+        const minutes = input.valueAsNumber;
+        if (!Number.isInteger(minutes) || minutes < 1 || minutes > 1439) {
+          input.value = String(choices.minutes || 30);
+          new import_obsidian2.Notice("Scegli da 1 a 1439 minuti.");
+          return;
+        }
+        choices.minutes = minutes;
+        this.preferences.set(note.id, choices);
+      };
+      action(menu, "Collega alle sessioni libere del giorno", () => this.assignDay(note, day));
     }
-    action(box, note.completed ? "Riapri attivit\xE0" : "Segna completata", () => this.plugin.change(() => {
-      this.plugin.config.noteEstimates[note.id].completed = !note.completed;
+    action(menu, note.completed ? "Riapri attivit\xE0" : "Segna completata", () => this.plugin.change(() => {
+      setEstimateCompleted(this.plugin.config.noteEstimates[note.id], this.plugin.state, !note.completed);
     }));
     return box;
   }
   renderPanel(parent, day) {
-    const open = new Set([...parent.querySelectorAll("details[open]")].map((el) => el.dataset.noteId));
+    const open = new Set([...parent.querySelectorAll(".tempvs-estimate-details[open]")].map((el) => el.dataset.noteId));
+    const menus = new Set([...parent.querySelectorAll(".tempvs-estimate-menu[open]")].map((el) => el.closest(".tempvs-estimate-details").dataset.noteId));
     parent.empty();
     const notes = this.notes.filter((n) => !n.archived);
     if (!notes.length) return;
@@ -803,8 +792,9 @@ var NoteEstimates = class {
       const details = parent.createEl("details", { cls: "tempvs-estimate-details" });
       details.dataset.noteId = note.id;
       details.open = open.has(note.id);
-      details.createEl("summary", { text: `${note.title} \xB7 ${Math.round(estimateProgress(note, this.plugin.state).percent)}%${note.completed ? " \xB7 completata" : ""}` });
-      this.render(details, note, day);
+      details.createEl("summary", { text: note.title + " \xB7 " + (note.completed ? "completato" : Math.floor(estimateProgress(note, this.plugin.state).percent) + "%") });
+      this.render(details, note, day, true);
+      details.querySelector(".tempvs-estimate-menu").open = menus.has(note.id);
     }
   }
   selector(parent, session) {
@@ -1482,13 +1472,16 @@ var DailyBlock = class extends import_obsidian3.MarkdownRenderChild {
       this.source = context.block.source;
       if (context.kind === "estimate" || context.kind === "estimate-empty") {
         const el2 = this.containerEl;
+        const menuOpen = el2.querySelector(".tempvs-estimate-menu")?.open;
         el2.empty();
         el2.addClass("tempvs-daily");
-        el2.createEl("pre").createEl("code", { text: this.source });
         const error2 = this.controller.errors.get(this.ctx.sourcePath);
         if (error2) el2.createEl("p", { text: error2, cls: "tempvs-daily-error" });
         const note = this.controller.plugin.estimates?.find(this.ctx.sourcePath);
-        if (note && !note.archived) this.controller.plugin.estimates.render(el2, note);
+        if (note && !note.archived) {
+          const box = this.controller.plugin.estimates.render(el2, note);
+          if (menuOpen) box.querySelector(".tempvs-estimate-menu").open = true;
+        }
         return;
       }
       const el = this.containerEl;
