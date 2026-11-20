@@ -40,7 +40,7 @@ try {
     class ItemView{constructor(){this.containerEl=document.querySelector('#view');this.containerEl.createDiv();this.containerEl.createDiv()}}
     const setIcon=(el,name)=>{el.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4" y="4" width="16" height="16" rx="4"/><path d="M8 12h8M12 8v8"/></svg>';el.dataset.icon=name};
     window.notices=[];
-    window.require=()=>({Plugin,ItemView,MarkdownRenderChild:class{constructor(el){this.containerEl=el}},Modal:class{},PluginSettingTab:class{},Setting:class{},Platform:{isMobile:true},setIcon,Notice:class{constructor(message){window.notices.push(message)}}});
+    window.require=()=>({Plugin,ItemView,MarkdownRenderChild:class{constructor(el){this.containerEl=el}},Modal:class{constructor(app){this.app=app;this.contentEl=document.createElement("div")}open(){document.body.append(this.contentEl);this.onOpen()}close(){this.onClose();this.contentEl.remove()}},PluginSettingTab:class{},Setting:class{},Platform:{isMobile:true},setIcon,Notice:class{constructor(message){window.notices.push(message)}}});
     window.module={exports:{}};
     window.mount=async()=>{const plugin=new module.exports.default();await plugin.onload();const view=plugin.factory({});leaves.push({view});await view.onOpen();window.plugin=plugin;window.view=view;};
   });
@@ -54,6 +54,11 @@ try {
   await page.waitForFunction(()=>plugin.state.sessions.length===1);
   assert.equal(await page.locator('.tempvs-create-panel').isVisible(),false);
   assert.equal(await page.locator('.tempvs-progress').isVisible(),true);
+  for (const style of ['digits','ring','bar']) {
+    await page.evaluate(style=>{plugin.timerStyle=style;view.update();},style);
+    assert.equal(await page.locator('.tempvs-progress').isVisible(),style!=='digits');
+    assert.equal(await page.locator('.tempvs-timer').getAttribute('data-style'),style);
+  }
   await page.getByRole('button',{name:'Pausa',exact:true}).click();
   await page.waitForFunction(()=>plugin.active().paused);
   assert.equal(await page.locator('.tempvs-phase').textContent(),'Conteggio focus sospeso');
@@ -78,9 +83,6 @@ try {
   await page.getByRole('button',{name:'Concludi',exact:true}).click();
   await page.waitForFunction(()=>plugin.state.sessions[0].finished);
   assert.equal(await page.locator('.tempvs-primary-controls').isVisible(),false);
-  await page.getByRole('button',{name:'Risorse Obsidian',exact:true}).click();
-  assert.equal(await page.locator('.tempvs-note-links').textContent(),'Nessuna nota collegata.');
-  await page.keyboard.press('Escape');
   // Form drafts survive one-second ticks and panel changes.
   await page.getByRole('button',{name:'+ Nuova sessione',exact:true}).click();
   await page.locator('.tempvs-method').selectOption('start');
@@ -174,10 +176,16 @@ try {
   assert.equal(await page.locator('.tempvs-note-assignment').count(),0);
   await page.locator('.tempvs-session-cycles > summary').click();
   const cycle=page.locator('.tempvs-session-cycle').first();
-  await cycle.locator('.tempvs-session-note-editor > summary').click();
-  await cycle.getByLabel('Nota da collegare').fill('[[Appunti#Lettura|Lettura]]');
-  await cycle.getByRole('button',{name:'Salva',exact:true}).click();
-  await page.waitForFunction(()=>plugin.state.sessions.find(s=>s.start==='18:00'&&s.date==='2099-11-06').linkedNotes?.[0]?.path==='Appunti#Lettura');
+  await page.evaluate(()=>{
+    const file={path:'Appunti.md',basename:'Appunti',extension:'md'};
+    plugin.app.vault.getMarkdownFiles=()=>[file];
+    plugin.app.metadataCache={...plugin.app.metadataCache,getFileCache:()=>({frontmatter:{title:'Quaderno',aliases:['Taccuino']},headings:[{heading:'Lettura',level:2}]})};
+  });
+  await cycle.getByRole('button',{name:'＋ Collega nota'}).click();
+  await page.getByLabel('Cerca nota').fill('Taccuino');
+  await page.getByRole('button',{name:/Quaderno.*Appunti/}).click();
+  await page.getByRole('button',{name:/Lettura.*H2/}).click();
+  await page.waitForFunction(()=>plugin.state.sessions.find(s=>s.start==='18:00'&&s.date==='2099-11-06').linkedNotes?.[1]?.path==='Appunti#Lettura');
   assert(await page.evaluate(()=>dailyText.includes('[[Appunti#Lettura|Lettura]]')));
   assert.equal(await page.locator('.tempvs-session').count(),2);
   await estimates.getByRole('button',{name:'Segna completata',exact:true}).click();
@@ -243,7 +251,7 @@ try {
     window.screenshotNote=screenshotNote.replace('Studio +21:00-23:00 -60m','Studio +21:00-23:00 -60m [[personal-management#Serie TV|Serie TV]] [[Appunti|Seconda nota]]');
     await plugin.daily.syncFile('agenda/15 novembre 2026.md');plugin.refresh(true);
   });
-  assert.equal(await page.locator('.tempvs-session-resource').count(),2);
+  assert.equal(await page.locator('.tempvs-session-info > .tempvs-session-resources .tempvs-session-resource').count(),2);
   await page.locator('.tempvs-session-resource').first().click();
   assert.deepEqual(await page.evaluate(()=>openedResource),['personal-management#Serie TV','agenda/15 novembre 2026.md',false]);
   await page.setViewportSize({width:320,height:800});

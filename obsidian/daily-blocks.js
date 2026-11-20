@@ -266,7 +266,15 @@ class DailyBlock extends MarkdownRenderChild {
     return;
    }
    const el=this.containerEl;el.empty();el.addClass('tempvs-daily');
-   el.createEl('pre').createEl('code',{text:plain(this.source)});
+   const code=el.createEl('pre').createEl('code');
+   const lines=plain(this.source).split('\n');
+   for(const [index,line] of lines.entries()){
+    if(index)code.append('\n');
+    const span=code.createSpan({text:line});
+    const name=line.trim().split(/\s+(?=[+@])/)[0].toLocaleLowerCase();
+    const area=this.controller.plugin.config.areas.find(a=>a.name.toLocaleLowerCase()===name);
+    if(area){span.addClass('tempvs-area-mark');span.style.setProperty('--tempvs-area-color',area.color);}
+   }
    const error=this.controller.errors.get(this.ctx.sourcePath);
    const binding=this.controller.bindings[this.controller.bindingId(this.ctx.sourcePath)];
    const manual=daySessions(this.controller.plugin.state,context.date,this.controller.bindingId(this.ctx.sourcePath)).filter(s=>s.actualSource==='manual');

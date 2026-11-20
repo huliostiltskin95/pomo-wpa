@@ -1,3 +1,4 @@
+import {SessionNotePicker} from './note-picker.js';
 import {groupSessions,sessionNotes,updatedSessionNotes} from './session-notes.js';
 import {NoteEstimates} from './note-estimates.js';
 import {DailyBlocks} from './daily-blocks.js';
@@ -105,16 +106,17 @@ class TempvsView extends ItemView {
     const heading = root.createDiv({cls:"tempvs-header"});
     const brand = heading.createDiv({cls:"tempvs-brand"});
     brand.createEl("h3", {text:"TEMPVS"});
-    brand.createSpan({text:"Un momento alla volta",cls:"tempvs-muted"});
+
     const actions = heading.createDiv({cls:"tempvs-heading-actions"});
     const cloud = iconButton(actions,"cloud","Impostazioni Dropbox",()=>plugin.openSettings());
     cloud.addClass("tempvs-cloud-indicator");
     iconButton(actions,"settings","Impostazioni TEMPVS",()=>plugin.openSettings());
     const timer = root.createDiv({cls:"tempvs-timer"});
     timer.createDiv({cls:"tempvs-phase"});
-    timer.createDiv({cls:"tempvs-clock"});
+    const face=timer.createDiv({cls:"tempvs-face"});
+    face.createDiv({cls:"tempvs-clock"});
     timer.createDiv({cls:"tempvs-area"});
-    const progress=timer.createDiv({cls:"tempvs-progress",attr:{role:"progressbar","aria-label":"Avanzamento della fase","aria-valuemin":"0","aria-valuemax":"100"}});
+    const progress=face.createDiv({cls:"tempvs-progress",attr:{role:"progressbar","aria-label":"Avanzamento della fase","aria-valuemin":"0","aria-valuemax":"100"}});
     progress.createDiv({cls:"tempvs-progress-fill"});
     timer.createDiv({cls:"tempvs-timer-hint"});
     const controls = root.createDiv({cls:"tempvs-controls tempvs-primary-controls"});
@@ -142,9 +144,6 @@ class TempvsView extends ItemView {
     const soundShortcut=iconButton(quickActions,"volume-2","Suoni",()=>this.togglePanel("sound"));
     soundShortcut.createSpan({text:"Suoni"});
     soundShortcut.dataset.panel="sound";
-    const noteShortcut=iconButton(quickActions,"book-open","Risorse Obsidian",()=>this.togglePanel("notes"));
-    noteShortcut.createSpan({text:"Risorse"});
-    noteShortcut.dataset.panel="notes";
     const panels = root.createDiv({cls:"tempvs-panels"});
     const create = panels.createDiv({cls:"tempvs-panel tempvs-create-panel"});
     create.hidden=true;
@@ -240,17 +239,7 @@ class TempvsView extends ItemView {
     sounds.createDiv({cls:"tempvs-sound-status",attr:{role:"status","aria-live":"polite"}});
     const volumeValue=soundVolume.createEl("output",{text:slider.value+"%","attr":{"aria-label":"Volume selezionato"}});
     slider.addEventListener("input",()=>{volumeValue.textContent=slider.value+"%";});
-    const notes=panels.createDiv({cls:"tempvs-panel tempvs-notes-panel"});
-    notes.hidden=true;
-    notes.createEl("h4",{text:"Risorse Obsidian"});
-    const noteArea=notes.createEl("select",{cls:"tempvs-note-area",attr:{"aria-label":"Area delle note"}});
-    const initialArea=plugin.active()?.area || plugin.config.areas[0]?.name;
-    for(const a of plugin.config.areas)noteArea.createEl("option",{text:a.name,attr:{value:a.name}});
-    if(initialArea)noteArea.value=initialArea;
-    noteArea.onchange=()=>this.renderNotes();
-    button(notes,"Collega nota attiva all'area",async()=>{await plugin.attachActiveNote(noteArea.value);this.renderNotes();});
-    notes.createDiv({cls:"tempvs-note-links"});
-    for(const [name,panel] of [["create",create],["sound",sounds],["notes",notes]]){
+    for(const [name,panel] of [["create",create],["sound",sounds]]){
       const header=panel.createDiv({cls:"tempvs-panel-heading"});
       header.appendChild(panel.querySelector("h4"));
       panel.prepend(header);
@@ -288,11 +277,10 @@ class TempvsView extends ItemView {
   }
   applyPanel() {
     const root=this.containerEl.children[1];
-    for(const name of ["create","sound","notes"]){
+    for(const name of ["create","sound"]){
       const el=root.querySelector(".tempvs-"+name+"-panel");
       if(el){el.id=this.panelId+"-"+name;setPanel(el,this.panel===name);}
     }
-    if(this.panel==="notes")this.renderNotes();
     for(const trigger of root.querySelectorAll("[data-panel]")){
       trigger.setAttribute("aria-controls",this.panelId+"-"+trigger.dataset.panel);
       trigger.setAttribute("aria-expanded",String(trigger.dataset.panel===this.panel));
@@ -311,40 +299,23 @@ class TempvsView extends ItemView {
       ? (plugin.ambient.audible?"Suono attivo":"Audio pronto · in attesa della concentrazione")
       : (eligible?"Pronto":"Attiva ora per sentire il sottofondo all’inizio delle sessioni");
   }
-  renderNoteEditor(parent,ids,notes){
-    const editor=parent.createEl('details',{cls:'tempvs-session-note-editor'});
-    editor.createEl('summary',{text:notes.length?'Cambia nota':'Collega nota'});
-    const form=editor.createEl('form');
-    const input=form.createEl('input',{attr:{type:'text','aria-label':'Nota da collegare',placeholder:'Percorso nota oppure [[nota|titolo]]'}});
-    input.value=notes[0]?'[['+notes[0].path+'|'+notes[0].label+']]':'';
-    const listId='tempvs-note-options-'+uuid();input.setAttribute('list',listId);
-    const options=form.createEl('datalist',{attr:{id:listId}});
-    for(const file of this.plugin.app.vault?.getMarkdownFiles?.()||[])options.createEl('option',{value:file.path});
-    form.createEl('button',{text:'Salva',attr:{type:'submit'}});
-    form.addEventListener('submit',event=>{event.preventDefault();void this.plugin.setSessionNote(ids,input.value).catch(e=>new Notice(e.message));});
-  }
   renderSessionNotes(parent,notes,session,ids){
-    const resources=parent.createDiv({cls:'tempvs-session-resources',attr:{'aria-label':'Nota e risorse della sessione'}});
+    const resources=parent.createDiv({cls:'tempvs-session-resources'});
     const source=this.plugin.dailyNotes?.[session.noteBlockId]?.path||'';
+    let more;
     for(const [index,note] of notes.entries()){
-      const row=resources.createDiv({cls:'tempvs-session-note'});
-      const link=row.createEl('a',{cls:'internal-link tempvs-session-resource',text:note.label||note.path,attr:{href:note.path,title:note.path}});
+      if(index===1){
+        more=resources.createEl('details');
+        more.createEl('summary',{text:'Risorse ('+(notes.length-1)+')'});
+      }
+      const row=(more||resources).createDiv({cls:'tempvs-session-note'});
+      const label=note.label||note.path;
+      const link=row.createEl('a',{cls:'internal-link tempvs-session-resource',text:label,attr:{href:note.path,title:note.path}});
       link.addEventListener('click',event=>{event.preventDefault();void this.plugin.app.workspace.openLinkText(note.path,source,event.metaKey||event.ctrlKey).catch(e=>new Notice(e.message));});
-      if(index>0)row.createEl('small',{text:'Risorsa',cls:'tempvs-muted'});
-      iconButton(row,'x','Scollega '+(note.label||note.path),()=>this.plugin.setSessionNote(ids,'',note.path));
+      if(index>0)iconButton(row,'arrow-up','Rendi principale '+label,()=>this.plugin.setSessionNote(ids,'',{primaryPath:note.path}));
+      iconButton(row,'x','Scollega '+label,()=>this.plugin.setSessionNote(ids,'',{removePath:note.path}));
     }
-    this.renderNoteEditor(parent,ids,notes);
-  }
-  renderNotes(){
-    const root=this.containerEl.children[1];
-    const area=root.querySelector(".tempvs-note-area")?.value;
-    const list=root.querySelector(".tempvs-note-links");
-    if(!list)return;
-    list.empty();
-    const description=this.plugin.config.areas.find(a=>a.name===area)?.description||"";
-    const links=noteLinks(description);
-    if(!links.length){list.createEl("p",{text:"Nessuna nota collegata."});return;}
-    for(const link of links)button(list,link.label,()=>this.plugin.app.workspace.openLinkText(link.path,"",false));
+    button(resources,'＋ Collega nota',()=>new SessionNotePicker(this.plugin.app, value=>this.plugin.setSessionNote(ids,value)).open());
   }
   update(full=false) {
     const root=this.containerEl.children[1];
@@ -359,7 +330,13 @@ class TempvsView extends ItemView {
     root.querySelector(".tempvs-clock").textContent=phase?mmss(phase.remaining):upcoming?mmss(upcoming.remaining):String(plugin.state.defaults.workMinutes).padStart(2,"0")+":00";
     root.querySelector(".tempvs-area").textContent=active?(active.area||active.title):next?(next.area||next.title):"Scegli un’area e inizia una sessione";
     const progress=root.querySelector(".tempvs-progress");
-    progress.hidden=!phase;
+    const timer=root.querySelector(".tempvs-timer");
+    const area=plugin.config.areas.find(a=>a.name===(active||next)?.area);
+    timer.style.setProperty("--tempvs-area-color",area?.color||"var(--interactive-accent)");
+    timer.dataset.style=plugin.timerStyle;
+    timer.dataset.size=plugin.clockSize;
+    timer.style.setProperty("--tempvs-progress-angle",(phase?.progress||0)*3.6+"deg");
+    progress.hidden=!phase||plugin.timerStyle==="digits";
     progress.setAttribute("aria-valuenow",String(Math.round(phase?.progress||0)));
     progress.firstElementChild.style.width=(phase?.progress||0)+"%";
     root.querySelector(".tempvs-timer-hint").textContent=phase
@@ -406,7 +383,8 @@ class TempvsView extends ItemView {
       const info=item.createDiv({cls:"tempvs-session-info"});
       const heading=info.createDiv({cls:"tempvs-session-heading"});
       heading.createEl("strong",{text:first.start+"–"+last.end});
-      heading.createSpan({text:first.area||first.title});
+      const badge=heading.createSpan({cls:"tempvs-area-mark",text:first.area||first.title});
+      badge.style.setProperty("--tempvs-area-color",plugin.config.areas.find(a=>a.name===first.area)?.color||"var(--interactive-accent)");
       const current=group.sessions.find(s=>s.id===active?.id);
       item.toggleClass("is-current",Boolean(current));
       const done=group.sessions.filter(s=>s.finished||sessionBounds(s).end<=now).length;
@@ -420,7 +398,7 @@ class TempvsView extends ItemView {
         for(const s of group.sessions){
           const row=detail.createDiv({cls:"tempvs-session-cycle"});
           row.createEl("span",{text:s.start+'–'+s.end+' · '+(s.finished||sessionBounds(s).end<=now?'Conclusa':s.id===active?.id?'In corso':'Programmata')+(s.cycleMinutes?` · ${s.workMinutes}/${s.cycleMinutes-s.workMinutes}`:'')});
-          this.renderNoteEditor(row,[s.id],sessionNotes(s,plugin.estimates?.notes||[]));
+          this.renderSessionNotes(row,group.notes,s,[s.id]);
           if(!s.finished&&sessionBounds(s).start>now)iconButton(row,"trash-2","Elimina sessione "+s.start,()=>plugin.removeSession(s.id));
         }
       }else if(!first.finished&&sessionBounds(first).start>now){
@@ -434,7 +412,6 @@ class TempvsView extends ItemView {
       empty.createEl("p",{text:"Nessuna sessione in agenda. Avvia un focus o pianifica un momento per questa giornata."});
     }
     plugin.estimates?.renderPanel(root.querySelector(".tempvs-estimates"),this.day);
-    if(this.panel==="notes")this.renderNotes();
   }
 }
 
@@ -446,6 +423,16 @@ class TempvsSettings extends PluginSettingTab {
     new Setting(el).setName("Layout del timer").setDesc("Automatico, pannello laterale oppure scheda ampia su iPad e desktop.")
       .addDropdown(d=>d.addOptions({auto:"Automatico",side:"Pannello laterale",wide:"Scheda ampia"})
       .setValue(this.plugin.layout).onChange(async v=>{this.plugin.layout=v;await this.plugin.persist();await this.plugin.openView(true);}));
+    for(const [key,label,choices] of [
+      ["timerStyle","Aspetto del timer",{digits:"Sole cifre",bar:"Cifre con barra",ring:"Cifre con anello"}],
+      ["clockSize","Dimensione delle cifre",{small:"Piccole",medium:"Medie",large:"Grandi"}]
+    ]){
+      new Setting(el).setName(label).addDropdown(d=>d.addOptions(choices).setValue(this.plugin[key]).onChange(async value=>{
+        this.plugin[key]=value;
+        this.plugin.refresh(true);
+        await this.plugin.persist();
+      }));
+    }
     new Setting(el).setName("Minuti focus predefiniti").addText(t=>t
       .setValue(String(this.plugin.state.defaults.workMinutes)).onChange(async v=>{
         const n=Number(v);if(Number.isInteger(n)&&n>=1&&n<=240)
@@ -477,6 +464,13 @@ class TempvsSettings extends PluginSettingTab {
       details.createEl("summary",{text:"Descrizione Markdown"});
       const description=details.createEl("textarea",{attr:{rows:"4","aria-label":"Descrizione area "+area.name}});
       description.value=area.description||"";
+      const resources=section.createEl("details");
+      resources.createEl("summary",{text:"Risorse dell’area"});
+      for(const note of noteLinks(area.description))button(resources,note.label,()=>this.plugin.app.workspace.openLinkText(note.path,"",false));
+      button(resources,"Collega nota aperta all’area",async()=>{
+        await this.plugin.attachActiveNote(area.name);
+        this.display();
+      });
       heading.addButton(b=>b.setButtonText("Salva").onClick(async()=>{
         try{
           const next=nameInput.value.trim();
@@ -544,6 +538,8 @@ export default class TempvsPlugin extends Plugin {
       this.cloudData = data?.cloudData && typeof data.cloudData === "object" ? data.cloudData : {};
       this.compact = typeof data?.ui?.compact === "boolean" ? data.ui.compact : Platform.isMobile;
       this.layout = ["auto","side","wide"].includes(data?.ui?.layout) ? data.ui.layout : "auto";
+      this.timerStyle=["digits","ring"].includes(data?.ui?.timerStyle)?data.ui.timerStyle:"bar";
+      this.clockSize=["small","large"].includes(data?.ui?.clockSize)?data.ui.clockSize:"medium";
       this.audioKind = ["white","brown","rain","fire"].includes(data?.audio?.kind) ? data.audio.kind : "brown";
       const savedVolume=Number(data?.audio?.volume);
       this.audioVolume=data?.audio?.volume!==undefined&&Number.isFinite(savedVolume)
@@ -754,7 +750,7 @@ export default class TempvsPlugin extends Plugin {
     const audio={kind:this.audioKind,volume:this.audioVolume};
     const notifications={sound:this.chimeEnabled};
     const dailyNotes=JSON.parse(JSON.stringify(this.dailyNotes||{}));
-    const write = this.writeChain.catch(() => {}).then(() => this.saveData({ archive, cloudData, ui:{compact:this.compact,layout:this.layout},audio,notifications,dailyNotes }));
+    const write = this.writeChain.catch(() => {}).then(() => this.saveData({ archive, cloudData, ui:{compact:this.compact,layout:this.layout,timerStyle:this.timerStyle,clockSize:this.clockSize},audio,notifications,dailyNotes }));
     this.writeChain = write;
     await write;
     if (JSON.stringify(this.state) === JSON.stringify(archive)) this.dirty = false;
@@ -775,12 +771,17 @@ export default class TempvsPlugin extends Plugin {
     } finally {this.changing=false;}
     await this.daily?.archiveChanged();
   }
-  async setSessionNote(ids,input,removePath){
+  setSessionNote(ids,input,options={}){
+    const operation=(this.noteWrite || Promise.resolve()).then(()=>this.applySessionNote(ids,input,options));
+    this.noteWrite=operation.catch(()=>{});
+    return operation;
+  }
+  async applySessionNote(ids,input,options){
     const updates=new Map();
     for(const id of ids){
       const session=this.state.sessions.find(s=>s.id===id);
       if(!session)throw Error('La sessione non è più disponibile.');
-      updates.set(id,updatedSessionNotes(session,input,{removePath,estimates:this.estimates?.notes||[]}));
+      updates.set(id,updatedSessionNotes(session,input,{...options,estimates:this.estimates?.notes||[]}));
     }
     const bindings=new Set(ids.map(id=>this.state.sessions.find(s=>s.id===id).noteBlockId).filter(Boolean));
     if(bindings.size){

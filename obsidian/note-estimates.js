@@ -29,7 +29,7 @@ export class NoteEstimates {
  available(session){return this.notes.filter(n=>!n.archived&&!n.completed&&n.entries.some(e=>matchesArea(e,session)));}
  async assign(sessionId,noteId){
   const note=this.notes.find(n=>n.id===noteId);
-  await this.plugin.setSessionNote([sessionId],note?'[['+note.path+'|'+note.title+']]':'');
+  await this.plugin.setSessionNote([sessionId],note?'[['+note.path+'|'+note.title+']]':'',{replacePrimary:true});
  }
  async assignDay(note,day){
   const sessions=this.plugin.state.sessions.filter(s=>s.date===day&&!s.linkedNotes?.length&&!s.noteEstimateId&&!s.finished&&sessionBounds(s).start>new Date()&&note.entries.some(e=>matchesArea(e,s)));

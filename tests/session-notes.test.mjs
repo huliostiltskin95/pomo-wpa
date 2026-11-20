@@ -9,7 +9,7 @@ test('contiguous sessions group only with identical area and note resources',()=
 });
 test('one work note can change without discarding legacy resources',()=>{
  const session=s('14:00','15:00',[{path:'Uno',label:'Uno'},{path:'Due',label:'Due'}]);
- assert.deepEqual(updatedSessionNotes(session,'[[Tre#Titolo|Tre]]'),[{path:'Tre#Titolo',label:'Tre'},{path:'Due',label:'Due'}]);
+ assert.deepEqual(updatedSessionNotes(session,'[[Tre#Titolo|Tre]]',{replacePrimary:true}),[{path:'Tre#Titolo',label:'Tre'},{path:'Due',label:'Due'}]);
  assert.deepEqual(updatedSessionNotes(session,'',{removePath:'Due'}),[{path:'Uno',label:'Uno'}]);
  assert.throws(()=>updatedSessionNotes(session,'[[Uno]] [[Due]]'),/sola nota/);
  assert.throws(()=>updatedSessionNotes(session,'[[incompleto'),/sola nota/);
@@ -17,4 +17,13 @@ test('one work note can change without discarding legacy resources',()=>{
 test('legacy assignments remain readable without requiring an estimate for new links',()=>{
  assert.deepEqual(sessionNotes({noteEstimateId:'a'},[{id:'a',path:'Nota',title:'Titolo'}]),[{path:'Nota',label:'Titolo'}]);
  assert.deepEqual(updatedSessionNotes(s('14:00','15:00'),'Una nota senza stima'),[{path:'Una nota senza stima',label:'Una nota senza stima'}]);
+});
+
+test('adding and promoting a session resource preserves the other links',()=>{
+ const one={path:'Uno',label:'Uno'},two={path:'Due#Sezione',label:'Titolo'};
+ const session={linkedNotes:[one]};
+ const notes=updatedSessionNotes(session,'[[Due#Sezione|Titolo]]');
+ assert.deepEqual(notes,[one,two]);
+ assert.deepEqual(updatedSessionNotes({linkedNotes:notes},'[[Due#Sezione]]'),notes);
+ assert.deepEqual(updatedSessionNotes({linkedNotes:notes},'',{primaryPath:two.path}),[two,one]);
 });

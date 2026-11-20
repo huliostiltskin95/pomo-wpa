@@ -113,4 +113,4 @@ jobs:
             obsidian/dist/styles.css#styles.css \
             --target "${{ github.sha }}" \
             --title "TEMPVS $VERSION" \
-            --notes "TEMPVS 0.5.18: stima lorda totale per nota con @14h, aggiornamento del progresso tramite il primo wikilink delle sessioni, conteggio lordo del lavoro registrato e compatibilità delle stime precedenti."
+            --notes "Collega note e intestazioni a fasce o singoli cicli. La prima nota riceve il tempo, le altre si aprono da Risorse. Timer con cifre, barra o anello, dimensioni regolabili e colori delle aree."
