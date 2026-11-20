@@ -157,3 +157,18 @@
 .tempvs-session-note-editor form { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
 .tempvs-session-note-editor input { flex:1; min-width:120px; }
 .tempvs-session-cycle { padding:8px 0; border-top:1px solid var(--background-modifier-border); display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+
+.tempvs-area-mark::before { content:""; display:inline-block; width:.65em; height:.65em; margin-inline-end:.45em; background:var(--tempvs-area-color); border-radius:50%; }
+.tempvs-progress-fill { background:var(--tempvs-area-color,var(--interactive-accent)); }
+.tempvs-timer[data-size="small"] .tempvs-clock { font-size:clamp(2rem,13cqw,3.5rem); }
+.tempvs-timer[data-size="large"] .tempvs-clock { font-size:clamp(3.25rem,22cqw,7rem); }
+.tempvs-timer[data-style="ring"] .tempvs-face { position:relative; display:grid; place-items:center; min-width:min(12em,100%); aspect-ratio:1; max-width:100%; margin:12px auto; border-radius:50%; width:fit-content; padding:.75em; box-sizing:border-box; }
+.tempvs-timer[data-style="ring"] .tempvs-clock { margin:0; }
+.tempvs-timer[data-style="ring"] .tempvs-progress { position:absolute; inset:0; height:auto; margin:0; border-radius:50%; background:conic-gradient(var(--tempvs-area-color) var(--tempvs-progress-angle),var(--background-modifier-border) 0); -webkit-mask:radial-gradient(farthest-side,transparent calc(100% - 5px),black 0); mask:radial-gradient(farthest-side,transparent calc(100% - 5px),black 0); }
+.tempvs-timer[data-style="ring"] .tempvs-progress-fill { display:none; }
+.tempvs-session-group .tempvs-session-resources { flex-direction:column; align-items:flex-start; }
+.tempvs-session-resources summary { cursor:pointer; color:var(--text-muted); }
+.tempvs-picker input { width:100%; }
+.tempvs-picker-results { display:grid; gap:4px; max-height:50vh; overflow:auto; margin:8px 0; }
+.tempvs-picker button { display:flex; flex-direction:column; align-items:flex-start; text-align:start; white-space:normal; height:auto; padding:7px 10px; overflow-wrap:anywhere; }
+.tempvs-picker button small { color:var(--text-muted); }

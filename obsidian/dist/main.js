@@ -24,6 +24,98 @@ __export(main_exports, {
 });
 module.exports = __toCommonJS(main_exports);
 
+// obsidian/note-picker.js
+var import_obsidian = require("obsidian");
+var fold = (text) => String(text).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase();
+var safeLabel = (text) => String(text).replace(/[\r\n|\[\]]/g, " ").trim();
+var SessionNotePicker = class extends import_obsidian.Modal {
+  constructor(app, save) {
+    super(app);
+    this.save = save;
+    this.activeFile = app.workspace.getActiveFile?.() || app.workspace.getMostRecentLeaf?.()?.view?.file;
+  }
+  onOpen() {
+    this.contentEl.addClass("tempvs-picker");
+    this.files = (this.app.vault?.getMarkdownFiles?.() || []).map((file) => {
+      const meta = this.app.metadataCache?.getFileCache(file)?.frontmatter || {};
+      const title = String(meta.title || file.basename);
+      const aliases = [].concat(meta.aliases || meta.alias || []);
+      return { file, title, search: fold([title, file.path, ...aliases].join(" ")) };
+    });
+    this.searchFiles();
+  }
+  choice(parent, title, action2, subtitle) {
+    const button2 = parent.createEl("button", { attr: { type: "button" } });
+    button2.createSpan({ text: title });
+    if (subtitle) button2.createEl("small", { text: subtitle });
+    button2.onclick = action2;
+    return button2;
+  }
+  searchFiles() {
+    const el = this.contentEl;
+    el.empty();
+    el.createEl("h3", { text: "Collega nota" });
+    const input = el.createEl("input", { attr: { type: "search", "aria-label": "Cerca nota", placeholder: "Titolo, alias, nome file o [[wikilink]]" } });
+    const results = el.createDiv({ cls: "tempvs-picker-results" });
+    const render = () => {
+      results.empty();
+      const query = input.value.trim();
+      if (query.startsWith("[[")) {
+        this.choice(results, "Collega wikilink", () => this.commit(query), query);
+        return;
+      }
+      const words = fold(query).split(/\s+/);
+      const active = this.files.find((entry) => entry.file.path === this.activeFile?.path);
+      if (!query && active) this.choice(results, "Usa la nota aperta", () => this.selectFile(active), active.title);
+      const matches = this.files.filter((entry) => words.every((word) => entry.search.includes(word)));
+      for (const entry of matches.slice(0, 50)) this.choice(results, entry.title, () => this.selectFile(entry), entry.file.path);
+      if (!matches.length) results.createEl("p", { text: "Nessuna nota trovata." });
+      if (matches.length > 50) results.createEl("small", { text: "Affina la ricerca per vedere altri risultati." });
+    };
+    input.oninput = render;
+    input.onkeydown = (event) => {
+      if (event.key === "Enter") results.querySelector("button")?.click();
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        results.querySelector("button")?.focus();
+      }
+    };
+    render();
+    input.focus();
+  }
+  selectFile({ file, title }) {
+    const path = file.path.replace(/\.md$/i, "");
+    const link = (target, label) => this.commit("[[" + target + "|" + safeLabel(label) + "]]");
+    const headings = this.app.metadataCache?.getFileCache(file)?.headings || [];
+    if (!headings.length) return link(path, title);
+    const el = this.contentEl;
+    el.empty();
+    el.createEl("h3", { text: title });
+    this.choice(el, "Collega nota intera", () => link(path, title)).focus();
+    const results = el.createDiv({ cls: "tempvs-picker-results" });
+    for (const { heading, level } of headings) {
+      this.choice(results, heading, () => link(path + "#" + heading, heading), "H" + level);
+    }
+    this.choice(el, "Torna alla ricerca", () => this.searchFiles());
+  }
+  async commit(value) {
+    if (this.saving) return;
+    this.saving = true;
+    try {
+      await this.save(value);
+      this.close();
+    } catch (error) {
+      new import_obsidian.Notice(error.message);
+    } finally {
+      this.saving = false;
+    }
+  }
+  onClose() {
+    this.contentEl.empty();
+    this.files = [];
+  }
+};
+
 // core/tempo-core.js
 var DEFAULTS = Object.freeze({ workMinutes: 25, breakEnabled: true });
 function localDateString(date = /* @__PURE__ */ new Date()) {
@@ -209,14 +301,19 @@ function sessionNotes(session, estimates = []) {
   const legacy = estimates.find((n) => n.id === session.noteEstimateId);
   return legacy ? [{ path: legacy.path, label: legacy.title }] : [];
 }
-function updatedSessionNotes(session, input, { removePath, estimates = [] } = {}) {
+function updatedSessionNotes(session, input, { removePath, primaryPath, replacePrimary = false, estimates = [] } = {}) {
   const previous = sessionNotes(session, estimates);
   if (removePath !== void 0) return previous.filter((n) => n.path !== removePath);
+  if (primaryPath !== void 0) {
+    const primary = previous.find((note) => note.path === primaryPath);
+    return primary ? [primary, ...previous.filter((note) => note !== primary)] : previous;
+  }
   const text = input.trim();
-  if (!text) return previous.slice(1);
+  if (!text) return replacePrimary ? previous.slice(1) : previous;
   const links = noteLinks(text.startsWith("[[") ? text : "[[" + text + "]]");
   if (links.length !== 1 || /[\r\n]/.test(text) || text.startsWith("[[") && !/^\[\[[^\]\n]+\]\]$/.test(text)) throw Error("Scegli una sola nota: [[nota|titolo]].");
-  return [links[0], ...previous.slice(1).filter((n) => n.path !== links[0].path)];
+  if (replacePrimary) return [links[0], ...previous.slice(1).filter((note) => note.path !== links[0].path)];
+  return previous.some((note) => note.path === links[0].path) ? previous : [...previous, links[0]];
 }
 function groupSessions(sessions, estimates = []) {
   const groups = [];
@@ -231,7 +328,7 @@ function groupSessions(sessions, estimates = []) {
 }
 
 // obsidian/note-estimates.js
-var import_obsidian = require("obsidian");
+var import_obsidian2 = require("obsidian");
 
 // core/tempo-estimates.js
 var isEstimateSource = (source) => /^\s*@/m.test(source);
@@ -604,7 +701,7 @@ function measuredFocus(session, from, to) {
 var uid = () => globalThis.crypto?.randomUUID?.() || Date.now().toString(36) + "-" + Math.random().toString(36).slice(2);
 var action = (el, label, fn) => {
   const b = el.createEl("button", { text: label });
-  b.onclick = () => Promise.resolve().then(fn).catch((e) => new import_obsidian.Notice(e.message));
+  b.onclick = () => Promise.resolve().then(fn).catch((e) => new import_obsidian2.Notice(e.message));
   return b;
 };
 var NoteEstimates = class {
@@ -653,12 +750,12 @@ var NoteEstimates = class {
   }
   async assign(sessionId, noteId) {
     const note = this.notes.find((n) => n.id === noteId);
-    await this.plugin.setSessionNote([sessionId], note ? "[[" + note.path + "|" + note.title + "]]" : "");
+    await this.plugin.setSessionNote([sessionId], note ? "[[" + note.path + "|" + note.title + "]]" : "", { replacePrimary: true });
   }
   async assignDay(note, day) {
     const sessions = this.plugin.state.sessions.filter((s) => s.date === day && !s.linkedNotes?.length && !s.noteEstimateId && !s.finished && sessionBounds(s).start > /* @__PURE__ */ new Date() && note.entries.some((e) => matchesArea(e, s)));
     for (const s of sessions) await this.assign(s.id, note.id);
-    new import_obsidian.Notice(sessions.length ? `${sessions.length} sessioni collegate a ${note.title}.` : "Nessuna sessione futura libera.");
+    new import_obsidian2.Notice(sessions.length ? `${sessions.length} sessioni collegate a ${note.title}.` : "Nessuna sessione futura libera.");
   }
   async start(note, entry) {
     if (entry.kind === "total") throw Error("La stima @14h non imposta un\u2019area: avvia una sessione dall\u2019agenda e collega la nota.");
@@ -718,12 +815,12 @@ var NoteEstimates = class {
     select.createEl("option", { value: "", text: "Solo area \xB7 nessuna nota" });
     for (const n of notes) select.createEl("option", { value: n.id, text: n.title + (n.completed ? " (completata)" : "") });
     select.value = session.noteEstimateId || "";
-    select.onchange = () => this.assign(session.id, select.value).catch((e) => new import_obsidian.Notice(e.message));
+    select.onchange = () => this.assign(session.id, select.value).catch((e) => new import_obsidian2.Notice(e.message));
   }
 };
 
 // obsidian/daily-blocks.js
-var import_obsidian2 = require("obsidian");
+var import_obsidian3 = require("obsidian");
 
 // obsidian/daily-plan.js
 var blockPattern = /^\s*<!-- tempvs-block:([^\s>]+) -->\s*$/;
@@ -1034,16 +1131,16 @@ var DailyBlocks = class {
         if (file.extension === "md") this.schedule(file.path);
       }));
       this.plugin.registerEvent(vault.on("delete", (file) => {
-        this.plugin.estimates?.archive(file.path).catch((e) => new import_obsidian2.Notice(e.message));
+        this.plugin.estimates?.archive(file.path).catch((e) => new import_obsidian3.Notice(e.message));
       }));
       this.plugin.registerEvent(vault.on("rename", (file, oldPath) => {
-        this.plugin.estimates?.rename(file, oldPath).catch((e) => new import_obsidian2.Notice(e.message));
+        this.plugin.estimates?.rename(file, oldPath).catch((e) => new import_obsidian3.Notice(e.message));
         let changed = false;
         for (const binding of Object.values(this.bindings)) if (binding.path === oldPath || binding.path.startsWith(oldPath + "/")) {
           binding.path = file.path + binding.path.slice(oldPath.length);
           changed = true;
         }
-        if (changed) this.plugin.persist().catch((e) => new import_obsidian2.Notice("TEMPVS: " + e.message));
+        if (changed) this.plugin.persist().catch((e) => new import_obsidian3.Notice("TEMPVS: " + e.message));
         this.refresh();
       }));
     }
@@ -1052,10 +1149,10 @@ var DailyBlocks = class {
     }));
     this.plugin.addCommand({ id: "unlink-daily-plan", name: "Scollega TEMPVS dalla nota attiva (conserva sessioni)", callback: () => {
       const file = this.plugin.app.workspace.getActiveFile();
-      if (file) this.detach(file.path).catch((error) => new import_obsidian2.Notice("TEMPVS: " + error.message));
+      if (file) this.detach(file.path).catch((error) => new import_obsidian3.Notice("TEMPVS: " + error.message));
     } });
     this.plugin.addCommand({ id: "insert-daily-plan", name: "Inserisci blocco TEMPVS nella nota", editorCallback: (editor) => editor.replaceSelection("```TEMPVS\n\n```\n") });
-    this.plugin.app.workspace.onLayoutReady?.(() => this.initialize().catch((error) => new import_obsidian2.Notice("TEMPVS: " + error.message)));
+    this.plugin.app.workspace.onLayoutReady?.(() => this.initialize().catch((error) => new import_obsidian3.Notice("TEMPVS: " + error.message)));
   }
   queue(work) {
     const result = this.chain.catch(() => {
@@ -1139,7 +1236,7 @@ var DailyBlocks = class {
     if (!block.source.trim() && this.plugin.estimates?.find(file.path)) return { file, block, markdown: markdown2, kind: "estimate-empty" };
     if (isEstimateSource(block.source)) return { file, block, markdown: markdown2, kind: "estimate" };
     const date = resolveDailyDate(block.source, file, {
-      moment: import_obsidian2.moment,
+      moment: import_obsidian3.moment,
       format: this.plugin.app.internalPlugins?.getPluginById("daily-notes")?.instance?.options?.format || "YYYY-MM-DD",
       frontmatter: this.plugin.app.metadataCache?.getFileCache(file)?.frontmatter
     });
@@ -1360,7 +1457,7 @@ var DailyBlocks = class {
     this.children.clear();
   }
 };
-var DailyBlock = class extends import_obsidian2.MarkdownRenderChild {
+var DailyBlock = class extends import_obsidian3.MarkdownRenderChild {
   constructor(el, controller, ctx, source) {
     super(el);
     this.controller = controller;
@@ -1397,7 +1494,18 @@ var DailyBlock = class extends import_obsidian2.MarkdownRenderChild {
       const el = this.containerEl;
       el.empty();
       el.addClass("tempvs-daily");
-      el.createEl("pre").createEl("code", { text: plain(this.source) });
+      const code = el.createEl("pre").createEl("code");
+      const lines = plain(this.source).split("\n");
+      for (const [index, line] of lines.entries()) {
+        if (index) code.append("\n");
+        const span = code.createSpan({ text: line });
+        const name = line.trim().split(/\s+(?=[+@])/)[0].toLocaleLowerCase();
+        const area = this.controller.plugin.config.areas.find((a) => a.name.toLocaleLowerCase() === name);
+        if (area) {
+          span.addClass("tempvs-area-mark");
+          span.style.setProperty("--tempvs-area-color", area.color);
+        }
+      }
       const error = this.controller.errors.get(this.ctx.sourcePath);
       const binding = this.controller.bindings[this.controller.bindingId(this.ctx.sourcePath)];
       const manual = daySessions(this.controller.plugin.state, context.date, this.controller.bindingId(this.ctx.sourcePath)).filter((s) => s.actualSource === "manual");
@@ -1412,7 +1520,7 @@ var DailyBlock = class extends import_obsidian2.MarkdownRenderChild {
 };
 
 // obsidian/main.js
-var import_obsidian4 = require("obsidian");
+var import_obsidian5 = require("obsidian");
 
 // core/tempo-merge.js
 var absent = Symbol("missing");
@@ -2170,7 +2278,7 @@ function createDropboxSync({ getState, applyRemote, normalizeRemote, onStatus, r
 }
 
 // obsidian/cloud-adapter.js
-var import_obsidian3 = require("obsidian");
+var import_obsidian4 = require("obsidian");
 async function dropboxRequest(url, options = {}) {
   const headers = { ...options.headers || {} };
   let body = options.body;
@@ -2178,7 +2286,7 @@ async function dropboxRequest(url, options = {}) {
     body = body.toString();
     headers["Content-Type"] = "application/x-www-form-urlencoded";
   }
-  const response = await (0, import_obsidian3.requestUrl)({
+  const response = await (0, import_obsidian4.requestUrl)({
     url,
     method: options.method || "GET",
     headers,
@@ -2212,7 +2320,7 @@ function createCloudStorage(initial = {}, onMutation = () => {
     snapshot: () => Object.fromEntries(map)
   };
 }
-var TempvsConflictModal = class extends import_obsidian3.Modal {
+var TempvsConflictModal = class extends import_obsidian4.Modal {
   constructor(app, conflicts, finish) {
     super(app);
     this.conflicts = conflicts;
@@ -2238,7 +2346,7 @@ var TempvsConflictModal = class extends import_obsidian3.Modal {
     const ok = controls.createEl("button", { text: "Conferma l'unione", cls: "mod-cta" });
     ok.addEventListener("click", () => {
       if (selects.some((item) => !item.select.value)) {
-        new import_obsidian3.Notice("Seleziona una versione per ogni conflitto.");
+        new import_obsidian4.Notice("Seleziona una versione per ogni conflitto.");
         return;
       }
       this.complete(Object.fromEntries(selects.map((item) => [item.key, item.select.value])));
@@ -2264,7 +2372,7 @@ function chooseTempvsConflicts(app, conflicts) {
 }
 function confirmTempvs(app, title, description) {
   return new Promise((resolve) => {
-    class Confirmation extends import_obsidian3.Modal {
+    class Confirmation extends import_obsidian4.Modal {
       onOpen() {
         this.setTitle(title);
         this.contentEl.createEl("p", { text: description });
@@ -2555,7 +2663,7 @@ var ZERO = () => normalizeArchive({ sessions: [] });
 var uuid = () => globalThis.crypto?.randomUUID?.() || String(Date.now()) + "-" + Math.random().toString(36).slice(2);
 var button = (parent, label, action2) => {
   const el = parent.createEl("button", { text: label });
-  el.addEventListener("click", () => Promise.resolve().then(action2).catch((e) => new import_obsidian4.Notice(e.message)));
+  el.addEventListener("click", () => Promise.resolve().then(action2).catch((e) => new import_obsidian5.Notice(e.message)));
   return el;
 };
 var today = () => localDateString();
@@ -2567,8 +2675,8 @@ var shiftDate = (value, change) => {
 };
 var iconButton = (parent, icon, label, action2) => {
   const el = parent.createEl("button", { cls: "tempvs-icon-button", attr: { "aria-label": label, "title": label } });
-  (0, import_obsidian4.setIcon)(el, icon);
-  el.addEventListener("click", () => Promise.resolve().then(action2).catch((e) => new import_obsidian4.Notice(e.message)));
+  (0, import_obsidian5.setIcon)(el, icon);
+  el.addEventListener("click", () => Promise.resolve().then(action2).catch((e) => new import_obsidian5.Notice(e.message)));
   return el;
 };
 var setPanel = (el, show) => {
@@ -2590,7 +2698,7 @@ function renderCloudSettings(parent, plugin) {
     link.href = url;
     link.hidden = false;
     await plugin.persist();
-    new import_obsidian4.Notice("Autorizza TEMPVS su Dropbox e copia il codice mostrato.");
+    new import_obsidian5.Notice("Autorizza TEMPVS su Dropbox e copia il codice mostrato.");
   });
   const code = cloud.createEl("input", { attr: { "aria-label": "Codice autorizzazione Dropbox", placeholder: "Incolla il codice Dropbox", autocomplete: "off" } });
   button(cloud, "2. Completa collegamento", async () => {
@@ -2607,7 +2715,7 @@ function renderCloudSettings(parent, plugin) {
     if (!copy?.data) throw Error("Nessuna copia di recupero disponibile.");
     const filename = "tempvs-recupero-" + Date.now() + ".json";
     await plugin.app.vault.create(filename, JSON.stringify(copy.data, null, 2));
-    new import_obsidian4.Notice("Copia di recupero salvata nel vault: " + filename);
+    new import_obsidian5.Notice("Copia di recupero salvata nel vault: " + filename);
   });
   const initial = cloud.createDiv({ cls: "tempvs-controls" });
   button(initial, "Prima unione", () => plugin.cloudOperation("firstSync", "merge"));
@@ -2629,7 +2737,7 @@ function renderCloudSettings(parent, plugin) {
     }
   });
 }
-var TempvsView = class extends import_obsidian4.ItemView {
+var TempvsView = class extends import_obsidian5.ItemView {
   constructor(leaf, plugin) {
     super(leaf);
     this.plugin = plugin;
@@ -2662,16 +2770,16 @@ var TempvsView = class extends import_obsidian4.ItemView {
     const heading = root.createDiv({ cls: "tempvs-header" });
     const brand = heading.createDiv({ cls: "tempvs-brand" });
     brand.createEl("h3", { text: "TEMPVS" });
-    brand.createSpan({ text: "Un momento alla volta", cls: "tempvs-muted" });
     const actions = heading.createDiv({ cls: "tempvs-heading-actions" });
     const cloud = iconButton(actions, "cloud", "Impostazioni Dropbox", () => plugin.openSettings());
     cloud.addClass("tempvs-cloud-indicator");
     iconButton(actions, "settings", "Impostazioni TEMPVS", () => plugin.openSettings());
     const timer = root.createDiv({ cls: "tempvs-timer" });
     timer.createDiv({ cls: "tempvs-phase" });
-    timer.createDiv({ cls: "tempvs-clock" });
+    const face = timer.createDiv({ cls: "tempvs-face" });
+    face.createDiv({ cls: "tempvs-clock" });
     timer.createDiv({ cls: "tempvs-area" });
-    const progress = timer.createDiv({ cls: "tempvs-progress", attr: { role: "progressbar", "aria-label": "Avanzamento della fase", "aria-valuemin": "0", "aria-valuemax": "100" } });
+    const progress = face.createDiv({ cls: "tempvs-progress", attr: { role: "progressbar", "aria-label": "Avanzamento della fase", "aria-valuemin": "0", "aria-valuemax": "100" } });
     progress.createDiv({ cls: "tempvs-progress-fill" });
     timer.createDiv({ cls: "tempvs-timer-hint" });
     const controls = root.createDiv({ cls: "tempvs-controls tempvs-primary-controls" });
@@ -2712,9 +2820,6 @@ var TempvsView = class extends import_obsidian4.ItemView {
     const soundShortcut = iconButton(quickActions, "volume-2", "Suoni", () => this.togglePanel("sound"));
     soundShortcut.createSpan({ text: "Suoni" });
     soundShortcut.dataset.panel = "sound";
-    const noteShortcut = iconButton(quickActions, "book-open", "Risorse Obsidian", () => this.togglePanel("notes"));
-    noteShortcut.createSpan({ text: "Risorse" });
-    noteShortcut.dataset.panel = "notes";
     const panels = root.createDiv({ cls: "tempvs-panels" });
     const create = panels.createDiv({ cls: "tempvs-panel tempvs-create-panel" });
     create.hidden = true;
@@ -2761,7 +2866,7 @@ var TempvsView = class extends import_obsidian4.ItemView {
       form.dataset.busy = "true";
       const submit = form.querySelector('[type="submit"]');
       submit.disabled = true;
-      plugin.start(area.value, Number(gross.value), Number(focus.value), pause.value === "" ? void 0 : Number(pause.value)).then(() => this.togglePanel(null, true)).catch((err) => new import_obsidian4.Notice(err.message)).finally(() => {
+      plugin.start(area.value, Number(gross.value), Number(focus.value), pause.value === "" ? void 0 : Number(pause.value)).then(() => this.togglePanel(null, true)).catch((err) => new import_obsidian5.Notice(err.message)).finally(() => {
         delete form.dataset.busy;
         submit.disabled = false;
       });
@@ -2808,7 +2913,7 @@ var TempvsView = class extends import_obsidian4.ItemView {
         this.day = dateInput.value;
         this.togglePanel(null, true);
         this.update(true);
-      }).catch((err) => new import_obsidian4.Notice(err.message)).finally(() => {
+      }).catch((err) => new import_obsidian5.Notice(err.message)).finally(() => {
         delete plan.dataset.busy;
         submit.disabled = false;
       });
@@ -2820,34 +2925,21 @@ var TempvsView = class extends import_obsidian4.ItemView {
     const soundChoice = sounds.createEl("select", { cls: "tempvs-sound-choice", attr: { "aria-label": "Rumore ambientale" } });
     for (const [value, label] of [["white", "Rumore bianco"], ["brown", "Rumore marrone"], ["rain", "Pioggia"], ["fire", "Caminetto"]]) soundChoice.createEl("option", { value, text: label });
     soundChoice.value = plugin.audioKind;
-    soundChoice.addEventListener("change", () => void plugin.selectAmbient(soundChoice.value).catch((e) => new import_obsidian4.Notice(e.message)));
+    soundChoice.addEventListener("change", () => void plugin.selectAmbient(soundChoice.value).catch((e) => new import_obsidian5.Notice(e.message)));
     const soundVolume = sounds.createDiv({ cls: "tempvs-sound-volume" });
     soundVolume.createEl("label", { text: "Volume", attr: { for: "tempvs-volume" } });
     const slider = soundVolume.createEl("input", { cls: "tempvs-volume-slider", attr: { type: "range", id: "tempvs-volume", min: "0", max: "100", step: "1", "aria-label": "Volume audio" } });
     slider.value = String(plugin.audioVolume);
     slider.addEventListener("input", () => plugin.adjustAmbientVolume(Number(slider.value)));
-    slider.addEventListener("change", () => void plugin.persist().catch((e) => new import_obsidian4.Notice(e.message)));
+    slider.addEventListener("change", () => void plugin.persist().catch((e) => new import_obsidian5.Notice(e.message)));
     const soundToggle = sounds.createEl("button", { cls: "tempvs-sound-toggle mod-cta", text: "Avvia suono" });
-    soundToggle.addEventListener("click", () => void plugin.toggleAmbient().catch((e) => new import_obsidian4.Notice(e.message)));
+    soundToggle.addEventListener("click", () => void plugin.toggleAmbient().catch((e) => new import_obsidian5.Notice(e.message)));
     sounds.createDiv({ cls: "tempvs-sound-status", attr: { role: "status", "aria-live": "polite" } });
     const volumeValue = soundVolume.createEl("output", { text: slider.value + "%", "attr": { "aria-label": "Volume selezionato" } });
     slider.addEventListener("input", () => {
       volumeValue.textContent = slider.value + "%";
     });
-    const notes = panels.createDiv({ cls: "tempvs-panel tempvs-notes-panel" });
-    notes.hidden = true;
-    notes.createEl("h4", { text: "Risorse Obsidian" });
-    const noteArea = notes.createEl("select", { cls: "tempvs-note-area", attr: { "aria-label": "Area delle note" } });
-    const initialArea = plugin.active()?.area || plugin.config.areas[0]?.name;
-    for (const a of plugin.config.areas) noteArea.createEl("option", { text: a.name, attr: { value: a.name } });
-    if (initialArea) noteArea.value = initialArea;
-    noteArea.onchange = () => this.renderNotes();
-    button(notes, "Collega nota attiva all'area", async () => {
-      await plugin.attachActiveNote(noteArea.value);
-      this.renderNotes();
-    });
-    notes.createDiv({ cls: "tempvs-note-links" });
-    for (const [name, panel] of [["create", create], ["sound", sounds], ["notes", notes]]) {
+    for (const [name, panel] of [["create", create], ["sound", sounds]]) {
       const header = panel.createDiv({ cls: "tempvs-panel-heading" });
       header.appendChild(panel.querySelector("h4"));
       panel.prepend(header);
@@ -2893,14 +2985,13 @@ var TempvsView = class extends import_obsidian4.ItemView {
   }
   applyPanel() {
     const root = this.containerEl.children[1];
-    for (const name of ["create", "sound", "notes"]) {
+    for (const name of ["create", "sound"]) {
       const el = root.querySelector(".tempvs-" + name + "-panel");
       if (el) {
         el.id = this.panelId + "-" + name;
         setPanel(el, this.panel === name);
       }
     }
-    if (this.panel === "notes") this.renderNotes();
     for (const trigger of root.querySelectorAll("[data-panel]")) {
       trigger.setAttribute("aria-controls", this.panelId + "-" + trigger.dataset.panel);
       trigger.setAttribute("aria-expanded", String(trigger.dataset.panel === this.panel));
@@ -2920,50 +3011,26 @@ var TempvsView = class extends import_obsidian4.ItemView {
     const status = root.querySelector(".tempvs-sound-status");
     if (status) status.textContent = plugin.ambient.playing ? plugin.ambient.audible ? "Suono attivo" : "Audio pronto \xB7 in attesa della concentrazione" : eligible ? "Pronto" : "Attiva ora per sentire il sottofondo all\u2019inizio delle sessioni";
   }
-  renderNoteEditor(parent, ids, notes) {
-    const editor = parent.createEl("details", { cls: "tempvs-session-note-editor" });
-    editor.createEl("summary", { text: notes.length ? "Cambia nota" : "Collega nota" });
-    const form = editor.createEl("form");
-    const input = form.createEl("input", { attr: { type: "text", "aria-label": "Nota da collegare", placeholder: "Percorso nota oppure [[nota|titolo]]" } });
-    input.value = notes[0] ? "[[" + notes[0].path + "|" + notes[0].label + "]]" : "";
-    const listId = "tempvs-note-options-" + uuid();
-    input.setAttribute("list", listId);
-    const options = form.createEl("datalist", { attr: { id: listId } });
-    for (const file of this.plugin.app.vault?.getMarkdownFiles?.() || []) options.createEl("option", { value: file.path });
-    form.createEl("button", { text: "Salva", attr: { type: "submit" } });
-    form.addEventListener("submit", (event) => {
-      event.preventDefault();
-      void this.plugin.setSessionNote(ids, input.value).catch((e) => new import_obsidian4.Notice(e.message));
-    });
-  }
   renderSessionNotes(parent, notes, session, ids) {
-    const resources = parent.createDiv({ cls: "tempvs-session-resources", attr: { "aria-label": "Nota e risorse della sessione" } });
+    const resources = parent.createDiv({ cls: "tempvs-session-resources" });
     const source = this.plugin.dailyNotes?.[session.noteBlockId]?.path || "";
+    let more;
     for (const [index, note] of notes.entries()) {
-      const row = resources.createDiv({ cls: "tempvs-session-note" });
-      const link = row.createEl("a", { cls: "internal-link tempvs-session-resource", text: note.label || note.path, attr: { href: note.path, title: note.path } });
+      if (index === 1) {
+        more = resources.createEl("details");
+        more.createEl("summary", { text: "Risorse (" + (notes.length - 1) + ")" });
+      }
+      const row = (more || resources).createDiv({ cls: "tempvs-session-note" });
+      const label = note.label || note.path;
+      const link = row.createEl("a", { cls: "internal-link tempvs-session-resource", text: label, attr: { href: note.path, title: note.path } });
       link.addEventListener("click", (event) => {
         event.preventDefault();
-        void this.plugin.app.workspace.openLinkText(note.path, source, event.metaKey || event.ctrlKey).catch((e) => new import_obsidian4.Notice(e.message));
+        void this.plugin.app.workspace.openLinkText(note.path, source, event.metaKey || event.ctrlKey).catch((e) => new import_obsidian5.Notice(e.message));
       });
-      if (index > 0) row.createEl("small", { text: "Risorsa", cls: "tempvs-muted" });
-      iconButton(row, "x", "Scollega " + (note.label || note.path), () => this.plugin.setSessionNote(ids, "", note.path));
+      if (index > 0) iconButton(row, "arrow-up", "Rendi principale " + label, () => this.plugin.setSessionNote(ids, "", { primaryPath: note.path }));
+      iconButton(row, "x", "Scollega " + label, () => this.plugin.setSessionNote(ids, "", { removePath: note.path }));
     }
-    this.renderNoteEditor(parent, ids, notes);
-  }
-  renderNotes() {
-    const root = this.containerEl.children[1];
-    const area = root.querySelector(".tempvs-note-area")?.value;
-    const list = root.querySelector(".tempvs-note-links");
-    if (!list) return;
-    list.empty();
-    const description = this.plugin.config.areas.find((a) => a.name === area)?.description || "";
-    const links = noteLinks(description);
-    if (!links.length) {
-      list.createEl("p", { text: "Nessuna nota collegata." });
-      return;
-    }
-    for (const link of links) button(list, link.label, () => this.plugin.app.workspace.openLinkText(link.path, "", false));
+    button(resources, "\uFF0B Collega nota", () => new SessionNotePicker(this.plugin.app, (value) => this.plugin.setSessionNote(ids, value)).open());
   }
   update(full = false) {
     const root = this.containerEl.children[1];
@@ -2978,7 +3045,13 @@ var TempvsView = class extends import_obsidian4.ItemView {
     root.querySelector(".tempvs-clock").textContent = phase ? mmss(phase.remaining) : upcoming ? mmss(upcoming.remaining) : String(plugin.state.defaults.workMinutes).padStart(2, "0") + ":00";
     root.querySelector(".tempvs-area").textContent = active ? active.area || active.title : next ? next.area || next.title : "Scegli un\u2019area e inizia una sessione";
     const progress = root.querySelector(".tempvs-progress");
-    progress.hidden = !phase;
+    const timer = root.querySelector(".tempvs-timer");
+    const area = plugin.config.areas.find((a) => a.name === (active || next)?.area);
+    timer.style.setProperty("--tempvs-area-color", area?.color || "var(--interactive-accent)");
+    timer.dataset.style = plugin.timerStyle;
+    timer.dataset.size = plugin.clockSize;
+    timer.style.setProperty("--tempvs-progress-angle", (phase?.progress || 0) * 3.6 + "deg");
+    progress.hidden = !phase || plugin.timerStyle === "digits";
     progress.setAttribute("aria-valuenow", String(Math.round(phase?.progress || 0)));
     progress.firstElementChild.style.width = (phase?.progress || 0) + "%";
     root.querySelector(".tempvs-timer-hint").textContent = phase ? "Fine sessione alle " + formatTime(phase.sessionEnd) + (active.paused ? " \xB7 L\u2019orario continua a scorrere" : "") : next ? "Inizio alle " + next.start + (next.date !== today() ? " \xB7 " + next.date : "") + " \xB7 fine alle " + next.end : "Il tuo prossimo passo: Nuova sessione";
@@ -3027,7 +3100,8 @@ var TempvsView = class extends import_obsidian4.ItemView {
       const info = item.createDiv({ cls: "tempvs-session-info" });
       const heading = info.createDiv({ cls: "tempvs-session-heading" });
       heading.createEl("strong", { text: first.start + "\u2013" + last.end });
-      heading.createSpan({ text: first.area || first.title });
+      const badge = heading.createSpan({ cls: "tempvs-area-mark", text: first.area || first.title });
+      badge.style.setProperty("--tempvs-area-color", plugin.config.areas.find((a) => a.name === first.area)?.color || "var(--interactive-accent)");
       const current = group.sessions.find((s) => s.id === active?.id);
       item.toggleClass("is-current", Boolean(current));
       const done = group.sessions.filter((s) => s.finished || sessionBounds(s).end <= now).length;
@@ -3045,7 +3119,7 @@ var TempvsView = class extends import_obsidian4.ItemView {
         for (const s of group.sessions) {
           const row = detail.createDiv({ cls: "tempvs-session-cycle" });
           row.createEl("span", { text: s.start + "\u2013" + s.end + " \xB7 " + (s.finished || sessionBounds(s).end <= now ? "Conclusa" : s.id === active?.id ? "In corso" : "Programmata") + (s.cycleMinutes ? ` \xB7 ${s.workMinutes}/${s.cycleMinutes - s.workMinutes}` : "") });
-          this.renderNoteEditor(row, [s.id], sessionNotes(s, plugin.estimates?.notes || []));
+          this.renderSessionNotes(row, group.notes, s, [s.id]);
           if (!s.finished && sessionBounds(s).start > now) iconButton(row, "trash-2", "Elimina sessione " + s.start, () => plugin.removeSession(s.id));
         }
       } else if (!first.finished && sessionBounds(first).start > now) {
@@ -3054,15 +3128,14 @@ var TempvsView = class extends import_obsidian4.ItemView {
     }
     if (!sessions.length) {
       const empty = list.createDiv({ cls: "tempvs-empty" });
-      (0, import_obsidian4.setIcon)(empty.createDiv({ cls: "tempvs-empty-icon" }), "calendar-check");
+      (0, import_obsidian5.setIcon)(empty.createDiv({ cls: "tempvs-empty-icon" }), "calendar-check");
       empty.createEl("strong", { text: "Spazio per i tuoi progetti" });
       empty.createEl("p", { text: "Nessuna sessione in agenda. Avvia un focus o pianifica un momento per questa giornata." });
     }
     plugin.estimates?.renderPanel(root.querySelector(".tempvs-estimates"), this.day);
-    if (this.panel === "notes") this.renderNotes();
   }
 };
-var TempvsSettings = class extends import_obsidian4.PluginSettingTab {
+var TempvsSettings = class extends import_obsidian5.PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.plugin = plugin;
@@ -3071,42 +3144,59 @@ var TempvsSettings = class extends import_obsidian4.PluginSettingTab {
     const el = this.containerEl;
     el.empty();
     el.createEl("h2", { text: "TEMPVS \u2014 Impostazioni" });
-    new import_obsidian4.Setting(el).setName("Layout del timer").setDesc("Automatico, pannello laterale oppure scheda ampia su iPad e desktop.").addDropdown((d) => d.addOptions({ auto: "Automatico", side: "Pannello laterale", wide: "Scheda ampia" }).setValue(this.plugin.layout).onChange(async (v) => {
+    new import_obsidian5.Setting(el).setName("Layout del timer").setDesc("Automatico, pannello laterale oppure scheda ampia su iPad e desktop.").addDropdown((d) => d.addOptions({ auto: "Automatico", side: "Pannello laterale", wide: "Scheda ampia" }).setValue(this.plugin.layout).onChange(async (v) => {
       this.plugin.layout = v;
       await this.plugin.persist();
       await this.plugin.openView(true);
     }));
-    new import_obsidian4.Setting(el).setName("Minuti focus predefiniti").addText((t) => t.setValue(String(this.plugin.state.defaults.workMinutes)).onChange(async (v) => {
+    for (const [key2, label, choices] of [
+      ["timerStyle", "Aspetto del timer", { digits: "Sole cifre", bar: "Cifre con barra", ring: "Cifre con anello" }],
+      ["clockSize", "Dimensione delle cifre", { small: "Piccole", medium: "Medie", large: "Grandi" }]
+    ]) {
+      new import_obsidian5.Setting(el).setName(label).addDropdown((d) => d.addOptions(choices).setValue(this.plugin[key2]).onChange(async (value) => {
+        this.plugin[key2] = value;
+        this.plugin.refresh(true);
+        await this.plugin.persist();
+      }));
+    }
+    new import_obsidian5.Setting(el).setName("Minuti focus predefiniti").addText((t) => t.setValue(String(this.plugin.state.defaults.workMinutes)).onChange(async (v) => {
       const n = Number(v);
       if (Number.isInteger(n) && n >= 1 && n <= 240)
         await this.plugin.change(() => {
           this.plugin.state.defaults.workMinutes = n;
         });
     }));
-    new import_obsidian4.Setting(el).setName("Pause automatiche").addToggle((t) => t.setValue(Boolean(this.plugin.state.defaults.breakEnabled)).onChange(async (v) => this.plugin.change(() => {
+    new import_obsidian5.Setting(el).setName("Pause automatiche").addToggle((t) => t.setValue(Boolean(this.plugin.state.defaults.breakEnabled)).onChange(async (v) => this.plugin.change(() => {
       this.plugin.state.defaults.breakEnabled = v;
     })));
-    new import_obsidian4.Setting(el).setName("Avvisi sonori").setDesc("Segnale udibile ai cambi tra concentrazione e pausa, quando Obsidian \xE8 in primo piano.").addToggle((t) => t.setValue(this.plugin.chimeEnabled).onChange(async (value) => {
+    new import_obsidian5.Setting(el).setName("Avvisi sonori").setDesc("Segnale udibile ai cambi tra concentrazione e pausa, quando Obsidian \xE8 in primo piano.").addToggle((t) => t.setValue(this.plugin.chimeEnabled).onChange(async (value) => {
       this.plugin.chimeEnabled = value;
       if (value) this.plugin.chime.arm();
       await this.plugin.persist();
     }));
-    new import_obsidian4.Setting(el).setName("Prova avviso").setDesc("Tocca per attivare e verificare l'audio su questo dispositivo.").addButton((b) => b.setButtonText("Riproduci").onClick(() => {
+    new import_obsidian5.Setting(el).setName("Prova avviso").setDesc("Tocca per attivare e verificare l'audio su questo dispositivo.").addButton((b) => b.setButtonText("Riproduci").onClick(() => {
       void this.plugin.chime.play("break").then((ok) => {
-        if (!ok) new import_obsidian4.Notice("Audio non disponibile: controlla il volume e riprova toccando Riproduci.");
+        if (!ok) new import_obsidian5.Notice("Audio non disponibile: controlla il volume e riprova toccando Riproduci.");
       });
     }));
     el.createEl("h3", { text: "Aree" });
     el.createEl("p", { cls: "tempvs-muted", text: "Rinomina, riordina o elimina le aree senza perdere sessioni e statistiche. La descrizione Markdown resta associata all'area." });
     for (const [index, area] of this.plugin.config.areas.entries()) {
       const section = el.createDiv({ cls: "tempvs-area-config" });
-      const heading = new import_obsidian4.Setting(section).setName(area.name);
+      const heading = new import_obsidian5.Setting(section).setName(area.name);
       const nameInput = section.createEl("input", { attr: { type: "text", maxlength: "80", "aria-label": "Nuovo nome area " + area.name, value: area.name } });
       const colorInput = section.createEl("input", { attr: { type: "color", "aria-label": "Colore area " + area.name, value: area.color || "#54769b" } });
       const details = section.createEl("details");
       details.createEl("summary", { text: "Descrizione Markdown" });
       const description = details.createEl("textarea", { attr: { rows: "4", "aria-label": "Descrizione area " + area.name } });
       description.value = area.description || "";
+      const resources = section.createEl("details");
+      resources.createEl("summary", { text: "Risorse dell\u2019area" });
+      for (const note of noteLinks(area.description)) button(resources, note.label, () => this.plugin.app.workspace.openLinkText(note.path, "", false));
+      button(resources, "Collega nota aperta all\u2019area", async () => {
+        await this.plugin.attachActiveNote(area.name);
+        this.display();
+      });
       heading.addButton((b) => b.setButtonText("Salva").onClick(async () => {
         try {
           const next = nameInput.value.trim();
@@ -3121,9 +3211,9 @@ var TempvsSettings = class extends import_obsidian4.PluginSettingTab {
             if (next !== previous) this.plugin.remapArea(previous, next);
           });
           this.display();
-          new import_obsidian4.Notice("Area aggiornata.");
+          new import_obsidian5.Notice("Area aggiornata.");
         } catch (e) {
-          new import_obsidian4.Notice(e.message);
+          new import_obsidian5.Notice(e.message);
         }
       }));
       heading.addButton((b) => b.setButtonText("\u2191").setTooltip("Sposta in alto").setDisabled(index === 0).onClick(async () => {
@@ -3134,7 +3224,7 @@ var TempvsSettings = class extends import_obsidian4.PluginSettingTab {
           });
           this.display();
         } catch (e) {
-          new import_obsidian4.Notice(e.message);
+          new import_obsidian5.Notice(e.message);
         }
       }));
       heading.addButton((b) => b.setButtonText("\u2193").setTooltip("Sposta in basso").setDisabled(index === this.plugin.config.areas.length - 1).onClick(async () => {
@@ -3145,7 +3235,7 @@ var TempvsSettings = class extends import_obsidian4.PluginSettingTab {
           });
           this.display();
         } catch (e) {
-          new import_obsidian4.Notice(e.message);
+          new import_obsidian5.Notice(e.message);
         }
       }));
       if (this.plugin.config.areas.length > 1) {
@@ -3161,27 +3251,27 @@ var TempvsSettings = class extends import_obsidian4.PluginSettingTab {
               this.plugin.config.areas = this.plugin.config.areas.filter((a) => a.name !== area.name);
             });
             this.display();
-            new import_obsidian4.Notice("Area eliminata e dati trasferiti.");
+            new import_obsidian5.Notice("Area eliminata e dati trasferiti.");
           } catch (e) {
-            new import_obsidian4.Notice(e.message);
+            new import_obsidian5.Notice(e.message);
           }
         }));
       }
     }
-    const addArea = new import_obsidian4.Setting(el).setName("Nuova area");
+    const addArea = new import_obsidian5.Setting(el).setName("Nuova area");
     let addName = "";
     addArea.addText((t) => t.setPlaceholder("Nome della nuova area").onChange((v) => {
       addName = v;
     }));
     addArea.addButton((b) => b.setButtonText("Aggiungi").onClick(async () => {
       const name = addName.trim();
-      if (!name || name.length > 80 || this.plugin.config.areas.some((a) => a.name.toLocaleLowerCase() === name.toLocaleLowerCase())) return new import_obsidian4.Notice("Nome area non valido o gi\xE0 utilizzato.");
+      if (!name || name.length > 80 || this.plugin.config.areas.some((a) => a.name.toLocaleLowerCase() === name.toLocaleLowerCase())) return new import_obsidian5.Notice("Nome area non valido o gi\xE0 utilizzato.");
       try {
         await this.plugin.change(() => this.plugin.config.areas.push({ name, description: "", color: "#54769B" }));
         this.display();
-        new import_obsidian4.Notice("Area aggiunta.");
+        new import_obsidian5.Notice("Area aggiunta.");
       } catch (e) {
-        new import_obsidian4.Notice(e.message);
+        new import_obsidian5.Notice(e.message);
       }
     }));
     el.createEl("h3", { text: "Dropbox" });
@@ -3189,7 +3279,7 @@ var TempvsSettings = class extends import_obsidian4.PluginSettingTab {
     el.createEl("p", { cls: "tempvs-muted", text: "Lo storico delle sessioni rimane salvato per statistiche, backup e sincronizzazione, ma non \xE8 mostrato nel timer." });
   }
 };
-var TempvsPlugin = class extends import_obsidian4.Plugin {
+var TempvsPlugin = class extends import_obsidian5.Plugin {
   async onload() {
     try {
       const data = await this.loadData();
@@ -3198,14 +3288,16 @@ var TempvsPlugin = class extends import_obsidian4.Plugin {
       this.state = normalizeArchive(data?.archive || (Array.isArray(data?.sessions) ? data : ZERO()));
       this.dailyNotes = Object.assign(/* @__PURE__ */ Object.create(null), data?.dailyNotes || {});
       this.cloudData = data?.cloudData && typeof data.cloudData === "object" ? data.cloudData : {};
-      this.compact = typeof data?.ui?.compact === "boolean" ? data.ui.compact : import_obsidian4.Platform.isMobile;
+      this.compact = typeof data?.ui?.compact === "boolean" ? data.ui.compact : import_obsidian5.Platform.isMobile;
       this.layout = ["auto", "side", "wide"].includes(data?.ui?.layout) ? data.ui.layout : "auto";
+      this.timerStyle = ["digits", "ring"].includes(data?.ui?.timerStyle) ? data.ui.timerStyle : "bar";
+      this.clockSize = ["small", "large"].includes(data?.ui?.clockSize) ? data.ui.clockSize : "medium";
       this.audioKind = ["white", "brown", "rain", "fire"].includes(data?.audio?.kind) ? data.audio.kind : "brown";
       const savedVolume = Number(data?.audio?.volume);
       this.audioVolume = data?.audio?.volume !== void 0 && Number.isFinite(savedVolume) ? Math.max(0, Math.min(100, Math.round(savedVolume))) : 25;
       this.chimeEnabled = data?.notifications?.sound !== false;
     } catch (error) {
-      new import_obsidian4.Notice("TEMPVS: dati non validi, archivio lasciato intatto. " + error.message, 1e4);
+      new import_obsidian5.Notice("TEMPVS: dati non validi, archivio lasciato intatto. " + error.message, 1e4);
       throw error;
     }
     this.ambient = new TempoAmbientAudio(() => this.refreshAudioControls());
@@ -3220,7 +3312,7 @@ var TempvsPlugin = class extends import_obsidian4.Plugin {
     this.cloudStorage = createCloudStorage(this.cloudData, () => {
       this.cloudDirty = true;
       clearTimeout(this.cloudSaveTimer);
-      this.cloudSaveTimer = window.setTimeout(() => this.persist().catch((e) => new import_obsidian4.Notice("TEMPVS: errore nel salvataggio Dropbox: " + e.message)), 150);
+      this.cloudSaveTimer = window.setTimeout(() => this.persist().catch((e) => new import_obsidian5.Notice("TEMPVS: errore nel salvataggio Dropbox: " + e.message)), 150);
     });
     this.cloud = createDropboxSync({
       getState: () => this.state,
@@ -3268,20 +3360,20 @@ var TempvsPlugin = class extends import_obsidian4.Plugin {
     this.registerView(VIEW_TYPE, (leaf) => new TempvsView(leaf, this));
     this.addSettingTab(new TempvsSettings(this.app, this));
     this.addCommand({ id: "open-tempvs", name: "Apri timer TEMPVS", callback: () => this.openView() });
-    this.addCommand({ id: "pause-tempvs", name: "Pausa o riprendi TEMPVS", callback: () => this.togglePause().catch((e) => new import_obsidian4.Notice(e.message)) });
-    this.addCommand({ id: "finish-tempvs", name: "Concludi sessione TEMPVS", callback: () => this.finish().catch((e) => new import_obsidian4.Notice(e.message)) });
+    this.addCommand({ id: "pause-tempvs", name: "Pausa o riprendi TEMPVS", callback: () => this.togglePause().catch((e) => new import_obsidian5.Notice(e.message)) });
+    this.addCommand({ id: "finish-tempvs", name: "Concludi sessione TEMPVS", callback: () => this.finish().catch((e) => new import_obsidian5.Notice(e.message)) });
     this.addCommand({ id: "link-current-note", name: "Collega nota attiva all'area della sessione", callback: async () => {
       const area = this.active()?.area;
       if (!area) {
         await this.openView();
-        new import_obsidian4.Notice("Apri i dettagli TEMPVS e scegli l'area della nota.");
+        new import_obsidian5.Notice("Apri i dettagli TEMPVS e scegli l'area della nota.");
         return;
       }
-      await this.attachActiveNote(area).catch((e) => new import_obsidian4.Notice(e.message));
+      await this.attachActiveNote(area).catch((e) => new import_obsidian5.Notice(e.message));
     } });
     this.addCommand({ id: "toggle-compact-view", name: "Espandi o compatta il pannello TEMPVS", callback: () => this.setCompact(!this.compact) });
     this.addRibbonIcon("timer", "Apri TEMPVS", () => this.openView());
-    if (!import_obsidian4.Platform.isMobile) {
+    if (!import_obsidian5.Platform.isMobile) {
       this.status = this.addStatusBarItem();
       this.status.addClass("tempvs-status");
       this.status.setAttribute("role", "button");
@@ -3331,7 +3423,7 @@ var TempvsPlugin = class extends import_obsidian4.Plugin {
     this.lastNoticeCheck = nowMs;
     if (!current || !previous || current.id !== previous.id || current.kind === previous.kind || gap < 0 || gap > 8e3 || nowMs - current.start < 0 || nowMs - current.start > 8e3 || document.hidden) return;
     const message = current.kind === "break" ? "TEMPVS \xB7 Inizia la pausa \u2014 " + current.area : "TEMPVS \xB7 Riprende la concentrazione \u2014 " + current.area;
-    new import_obsidian4.Notice(message, 6500);
+    new import_obsidian5.Notice(message, 6500);
     if (this.chimeEnabled) void this.chime.play(current.kind).catch((error) => console.warn("TEMPVS: avviso acustico non disponibile", error));
   }
   refreshAudioControls() {
@@ -3353,7 +3445,7 @@ var TempvsPlugin = class extends import_obsidian4.Plugin {
     const active = this.active();
     const audible = Boolean(active && !active.paused && getPhase(active).kind === "work");
     const started = this.ambient.start(this.audioKind, this.audioVolume / 100, audible);
-    if (!await started) new import_obsidian4.Notice("Impossibile avviare l'audio: verifica i permessi su Obsidian e iPadOS.");
+    if (!await started) new import_obsidian5.Notice("Impossibile avviare l'audio: verifica i permessi su Obsidian e iPadOS.");
     else this.syncAmbient();
   }
   async selectAmbient(kind) {
@@ -3364,7 +3456,7 @@ var TempvsPlugin = class extends import_obsidian4.Plugin {
       this.audioVolume / 100,
       getAmbientFocusMode(this.state.sessions.filter((s) => !s.finished)) === "focus" && !this.active()?.paused
     ) : null;
-    if (restarted && !await restarted) new import_obsidian4.Notice("Impossibile cambiare il rumore ambientale.");
+    if (restarted && !await restarted) new import_obsidian5.Notice("Impossibile cambiare il rumore ambientale.");
     this.syncAmbient();
     await this.persist();
   }
@@ -3427,7 +3519,7 @@ var TempvsPlugin = class extends import_obsidian4.Plugin {
     if (this.dirty && now - this.lastSave >= 15e3) {
       this.persist().then(() => {
         this.cloud?.changed();
-      }).catch((e) => new import_obsidian4.Notice("TEMPVS: salvataggio fallito: " + e.message));
+      }).catch((e) => new import_obsidian5.Notice("TEMPVS: salvataggio fallito: " + e.message));
       this.lastSave = now;
     }
     if (Math.floor(now / 15e3) !== Math.floor((now - 1e3) / 15e3)) this.daily?.refresh();
@@ -3440,7 +3532,7 @@ var TempvsPlugin = class extends import_obsidian4.Plugin {
     const notifications = { sound: this.chimeEnabled };
     const dailyNotes = JSON.parse(JSON.stringify(this.dailyNotes || {}));
     const write = this.writeChain.catch(() => {
-    }).then(() => this.saveData({ archive, cloudData, ui: { compact: this.compact, layout: this.layout }, audio, notifications, dailyNotes }));
+    }).then(() => this.saveData({ archive, cloudData, ui: { compact: this.compact, layout: this.layout, timerStyle: this.timerStyle, clockSize: this.clockSize }, audio, notifications, dailyNotes }));
     this.writeChain = write;
     await write;
     if (JSON.stringify(this.state) === JSON.stringify(archive)) this.dirty = false;
@@ -3465,7 +3557,7 @@ var TempvsPlugin = class extends import_obsidian4.Plugin {
         this.cloud?.changed();
         await this.persist();
       } catch (error) {
-        new import_obsidian4.Notice("TEMPVS: dati salvati in locale; sincronizzazione da riprovare. " + error.message);
+        new import_obsidian5.Notice("TEMPVS: dati salvati in locale; sincronizzazione da riprovare. " + error.message);
       }
       this.refresh(true);
     } finally {
@@ -3473,12 +3565,18 @@ var TempvsPlugin = class extends import_obsidian4.Plugin {
     }
     await this.daily?.archiveChanged();
   }
-  async setSessionNote(ids, input, removePath) {
+  setSessionNote(ids, input, options = {}) {
+    const operation = (this.noteWrite || Promise.resolve()).then(() => this.applySessionNote(ids, input, options));
+    this.noteWrite = operation.catch(() => {
+    });
+    return operation;
+  }
+  async applySessionNote(ids, input, options) {
     const updates = /* @__PURE__ */ new Map();
     for (const id of ids) {
       const session = this.state.sessions.find((s) => s.id === id);
       if (!session) throw Error("La sessione non \xE8 pi\xF9 disponibile.");
-      updates.set(id, updatedSessionNotes(session, input, { removePath, estimates: this.estimates?.notes || [] }));
+      updates.set(id, updatedSessionNotes(session, input, { ...options, estimates: this.estimates?.notes || [] }));
     }
     const bindings = new Set(ids.map((id) => this.state.sessions.find((s) => s.id === id).noteBlockId).filter(Boolean));
     if (bindings.size) {
@@ -3504,13 +3602,13 @@ var TempvsPlugin = class extends import_obsidian4.Plugin {
     if (!area) throw Error("Area TEMPVS non valida.");
     const updated = appendNoteLink(area.description, file.path);
     if (updated === area.description) {
-      new import_obsidian4.Notice("Nota gi\xE0 collegata all'area.");
+      new import_obsidian5.Notice("Nota gi\xE0 collegata all'area.");
       return;
     }
     await this.change(() => {
       area.description = updated;
     });
-    new import_obsidian4.Notice("Nota collegata all'area " + areaName + ".");
+    new import_obsidian5.Notice("Nota collegata all'area " + areaName + ".");
   }
   remapArea(from, to) {
     for (const session of this.state.sessions) {
@@ -3567,7 +3665,7 @@ var TempvsPlugin = class extends import_obsidian4.Plugin {
     );
     if (result.remainder || !result.sessions?.length) throw Error("Programmazione incompleta.");
     await this.change(() => this.state.sessions.push(...result.sessions));
-    new import_obsidian4.Notice("TEMPVS: " + result.sessions.length + " sessioni programmate.");
+    new import_obsidian5.Notice("TEMPVS: " + result.sessions.length + " sessioni programmate.");
   }
   async togglePause() {
     const s = this.active();
