@@ -692,7 +692,8 @@ var NoteEstimates = class {
     await this.plugin.change(() => {
       var _a;
       const notes = (_a = this.plugin.config).noteEstimates ?? (_a.noteEstimates = {});
-      const id = old?.id || "note:" + encodeURIComponent(this.vault) + "/" + encodeURIComponent(file.path);
+      const preferred = "note:" + encodeURIComponent(this.vault) + "/" + encodeURIComponent(file.path);
+      const id = old?.id || (notes[preferred] ? preferred + "/" + uid() : preferred);
       notes[id] = { ...old, id, vault: this.vault, path: file.path, title: file.basename, entries, archived: false, completed: old?.completed || false };
     });
   }
@@ -701,17 +702,6 @@ var NoteEstimates = class {
     if (!note || note.archived) return;
     await this.plugin.change(() => {
       this.plugin.config.noteEstimates[note.id].archived = true;
-    });
-  }
-  async rename(file, oldPath) {
-    const notes = this.notes.filter((n) => n.vault === this.vault && (n.path === oldPath || n.path.startsWith(oldPath + "/")));
-    if (!notes.length) return;
-    await this.plugin.change(() => {
-      for (const note of notes) {
-        const n = this.plugin.config.noteEstimates[note.id];
-        n.path = file.path + n.path.slice(oldPath.length);
-        n.title = n.path.split("/").pop().replace(/\.md$/i, "");
-      }
     });
   }
   available(session) {
@@ -808,6 +798,43 @@ var NoteEstimates = class {
     select.onchange = () => this.assign(session.id, select.value).catch((e) => new import_obsidian2.Notice(e.message));
   }
 };
+
+// obsidian/moved-links.js
+function movedTarget(target, oldPath, newPath, sourcePath, resolve) {
+  const match = /^([^#]+)(#.*)?$/.exec(target);
+  if (!match) return target;
+  const [, raw, fragment = ""] = match;
+  let local = raw;
+  if (/^\.{1,2}\//.test(raw) && sourcePath) {
+    const parts = sourcePath.split("/").slice(0, -1);
+    for (const part of raw.split("/")) {
+      if (part === "..") parts.pop();
+      else if (part && part !== ".") parts.push(part);
+    }
+    local = parts.join("/");
+  }
+  const path = local.replace(/^\//, "");
+  const withoutMd = (value) => value.replace(/\.md$/i, "");
+  let destination;
+  if (withoutMd(path) === withoutMd(oldPath)) {
+    destination = newPath;
+  } else if (path.startsWith(oldPath + "/")) {
+    destination = newPath + path.slice(oldPath.length);
+  } else if (withoutMd(oldPath).endsWith("/" + withoutMd(path))) {
+    const other = resolve?.(path, sourcePath);
+    if (other && other.path !== newPath) return target;
+    destination = newPath;
+  } else {
+    return target;
+  }
+  return (raw.startsWith("/") ? "/" : "") + (/\.md$/i.test(path) ? destination : withoutMd(destination)) + fragment;
+}
+function moveBlockLinks(source, move) {
+  return source.replace(/\[\[([^\]|\n]+)(\|[^\]\n]*)?\]\]/g, (original, path, alias = "") => {
+    const next = move(path.trim());
+    return next === path.trim() ? original : "[[" + next + alias + "]]";
+  });
+}
 
 // obsidian/daily-blocks.js
 var import_obsidian3 = require("obsidian");
@@ -1124,14 +1151,8 @@ var DailyBlocks = class {
         this.plugin.estimates?.archive(file.path).catch((e) => new import_obsidian3.Notice(e.message));
       }));
       this.plugin.registerEvent(vault.on("rename", (file, oldPath) => {
-        this.plugin.estimates?.rename(file, oldPath).catch((e) => new import_obsidian3.Notice(e.message));
-        let changed = false;
-        for (const binding of Object.values(this.bindings)) if (binding.path === oldPath || binding.path.startsWith(oldPath + "/")) {
-          binding.path = file.path + binding.path.slice(oldPath.length);
-          changed = true;
-        }
-        if (changed) this.plugin.persist().catch((e) => new import_obsidian3.Notice("TEMPVS: " + e.message));
-        this.refresh();
+        const newPath = file.path;
+        this.queue(() => this.moveReferences(oldPath, newPath)).catch((e) => new import_obsidian3.Notice("TEMPVS: " + e.message));
       }));
     }
     if (vault?.on) this.plugin.registerEvent(vault.on("create", (file) => {
@@ -1143,6 +1164,46 @@ var DailyBlocks = class {
     } });
     this.plugin.addCommand({ id: "insert-daily-plan", name: "Inserisci blocco TEMPVS nella nota", editorCallback: (editor) => editor.replaceSelection("```TEMPVS\n\n```\n") });
     this.plugin.app.workspace.onLayoutReady?.(() => this.initialize().catch((error) => new import_obsidian3.Notice("TEMPVS: " + error.message)));
+  }
+  async moveReferences(oldPath, newPath) {
+    const plugin = this.plugin, cache = plugin.app.metadataCache;
+    const resolve = (path, source) => cache?.getFirstLinkpathDest?.(path, source);
+    const move = (path, source = "") => movedTarget(path, oldPath, newPath, source, resolve);
+    const relocated = (path) => path === oldPath || path.startsWith(oldPath + "/") ? newPath + path.slice(oldPath.length) : path;
+    const bindings = Object.entries(this.bindings);
+    const affected = bindings.filter(([, b]) => typeof b.source === "string" && moveBlockLinks(b.source, (p) => move(p, b.path)) !== b.source);
+    const notes = (plugin.estimates?.notes || []).filter((n) => n.vault === plugin.estimates.vault && relocated(n.path) !== n.path);
+    const records = [...plugin.state.sessions, ...plugin.state.history || []];
+    const sourceOf = (r) => this.bindings[r.noteBlockId]?.path || "";
+    const changes = records.filter((r) => r.linkedNotes?.some((n) => move(n.path, sourceOf(r)) !== n.path));
+    if (!affected.length && !notes.length && !changes.length && !bindings.some(([, b]) => relocated(b.path) !== b.path)) return;
+    this.applying = true;
+    try {
+      await plugin.change(() => {
+        for (const r of changes) for (const n of r.linkedNotes) {
+          const path = move(n.path, sourceOf(r));
+          if (n.path === n.label) n.label = path;
+          n.path = path;
+        }
+        for (const n of notes) {
+          n.path = relocated(n.path);
+          n.title = n.path.split("/").pop().replace(/\.md$/i, "");
+        }
+        for (const [, b] of bindings) b.path = relocated(b.path);
+      });
+      for (const [id, b] of affected) {
+        const context = await this.context(b.path);
+        if (!context || context.kind) continue;
+        const original = context.block.source, next = moveBlockLinks(original, (p) => move(p, b.path));
+        if (original !== next) await this.writeSource(context.file, id, original, next, context.block.lineStart);
+        if (b.source === original || moveBlockLinks(b.source, (p) => move(p, b.path)) === next) b.source = next;
+        this.schedule(b.path);
+      }
+      if (affected.length) await plugin.persist();
+    } finally {
+      this.applying = false;
+      this.refresh();
+    }
   }
   queue(work) {
     const result = this.chain.catch(() => {
