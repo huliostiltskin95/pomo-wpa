@@ -1,3 +1,4 @@
+import {movedTarget,moveBlockLinks} from './moved-links.js';
 import {isEstimateSource} from '../core/tempo-estimates.js';
 import {MarkdownRenderChild,Notice,moment} from 'obsidian';
 import {normalizeArchive} from '../core/tempo-simple.js';
@@ -30,15 +31,48 @@ export class DailyBlocks {
    this.plugin.registerEvent(vault.on('modify',file=>{if(file.extension==='md')this.schedule(file.path);}));
    this.plugin.registerEvent(vault.on('delete',file=>{this.plugin.estimates?.archive(file.path).catch(e=>new Notice(e.message));}));
    this.plugin.registerEvent(vault.on('rename',(file,oldPath)=>{
-    this.plugin.estimates?.rename(file,oldPath).catch(e=>new Notice(e.message));
-    let changed=false;for(const binding of Object.values(this.bindings))if(binding.path===oldPath||binding.path.startsWith(oldPath+'/')){binding.path=file.path+binding.path.slice(oldPath.length);changed=true;}
-    if(changed)this.plugin.persist().catch(e=>new Notice('TEMPVS: '+e.message));this.refresh();
+    const newPath=file.path;
+    this.queue(()=>this.moveReferences(oldPath,newPath)).catch(e=>new Notice('TEMPVS: '+e.message));
    }));
   }
   if(vault?.on)this.plugin.registerEvent(vault.on('create',file=>{if(file.extension==='md')this.schedule(file.path);}));
   this.plugin.addCommand({id:'unlink-daily-plan',name:'Scollega TEMPVS dalla nota attiva (conserva sessioni)',callback:()=>{const file=this.plugin.app.workspace.getActiveFile();if(file)this.detach(file.path).catch(error=>new Notice('TEMPVS: '+error.message));}});
   this.plugin.addCommand({id:'insert-daily-plan',name:'Inserisci blocco TEMPVS nella nota',editorCallback:editor=>editor.replaceSelection('```TEMPVS\n\n```\n')});
   this.plugin.app.workspace.onLayoutReady?.(()=>this.initialize().catch(error=>new Notice('TEMPVS: '+error.message)));
+ }
+ async moveReferences(oldPath,newPath){
+  const plugin=this.plugin,cache=plugin.app.metadataCache;
+  const resolve=(path,source)=>cache?.getFirstLinkpathDest?.(path,source);
+  const move=(path,source='')=>movedTarget(path,oldPath,newPath,source,resolve);
+  const relocated=path=>path===oldPath||path.startsWith(oldPath+'/')?newPath+path.slice(oldPath.length):path;
+  const bindings=Object.entries(this.bindings);
+  const affected=bindings.filter(([,b])=>typeof b.source==='string'&&moveBlockLinks(b.source,p=>move(p,b.path))!==b.source);
+  const notes=(plugin.estimates?.notes||[]).filter(n=>n.vault===plugin.estimates.vault&&relocated(n.path)!==n.path);
+  const records=[...plugin.state.sessions,...(plugin.state.history||[])];
+  const sourceOf=r=>this.bindings[r.noteBlockId]?.path||'';
+  const changes=records.filter(r=>r.linkedNotes?.some(n=>move(n.path,sourceOf(r))!==n.path));
+  if(!affected.length&&!notes.length&&!changes.length&&!bindings.some(([,b])=>relocated(b.path)!==b.path))return;
+  this.applying=true;
+  try{
+   await plugin.change(()=>{
+    for(const r of changes)for(const n of r.linkedNotes){
+     const path=move(n.path,sourceOf(r));
+     if(n.path===n.label)n.label=path;
+     n.path=path;
+    }
+    for(const n of notes){n.path=relocated(n.path);n.title=n.path.split('/').pop().replace(/\.md$/i,'');}
+    for(const [,b] of bindings)b.path=relocated(b.path);
+   });
+   for(const [id,b] of affected){
+    const context=await this.context(b.path);
+    if(!context||context.kind)continue;
+    const original=context.block.source,next=moveBlockLinks(original,p=>move(p,b.path));
+    if(original!==next)await this.writeSource(context.file,id,original,next,context.block.lineStart);
+    if(b.source===original||moveBlockLinks(b.source,p=>move(p,b.path))===next)b.source=next;
+    this.schedule(b.path);
+   }
+   if(affected.length)await plugin.persist();
+  }finally{this.applying=false;this.refresh();}
  }
  queue(work){const result=this.chain.catch(()=>{}).then(()=>{if(this.destroyed)throw Error('TEMPVS non è attivo.');return work();});this.chain=result;return result;}
  refresh(path){for(const child of this.children)if(!path||child.ctx.sourcePath===path)child.refresh();}

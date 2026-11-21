@@ -13,18 +13,14 @@ export class NoteEstimates {
   const {file,block}=context,entries=parseEstimate(block.source,this.plugin.config.areas),old=this.find(file.path);
   if(old&&!old.archived&&JSON.stringify(old.entries)===JSON.stringify(entries))return;
   await this.plugin.change(()=>{
-   const notes=this.plugin.config.noteEstimates??={};const id=old?.id||'note:'+encodeURIComponent(this.vault)+'/'+encodeURIComponent(file.path);
+   const notes=this.plugin.config.noteEstimates??={};const preferred='note:'+encodeURIComponent(this.vault)+'/'+encodeURIComponent(file.path);
+   const id=old?.id||(notes[preferred]?preferred+'/'+uid():preferred);
    notes[id]={...old,id,vault:this.vault,path:file.path,title:file.basename,entries,archived:false,completed:old?.completed||false};
   });
  }
  async archive(path){
   const note=this.find(path);if(!note||note.archived)return;
   await this.plugin.change(()=>{this.plugin.config.noteEstimates[note.id].archived=true;});
- }
- async rename(file,oldPath){
-  const notes=this.notes.filter(n=>n.vault===this.vault&&(n.path===oldPath||n.path.startsWith(oldPath+'/')));
-  if(!notes.length)return;
-  await this.plugin.change(()=>{for(const note of notes){const n=this.plugin.config.noteEstimates[note.id];n.path=file.path+n.path.slice(oldPath.length);n.title=n.path.split('/').pop().replace(/\.md$/i,'');}});
  }
  available(session){return this.notes.filter(n=>!n.archived&&!n.completed&&n.entries.some(e=>matchesArea(e,session)));}
  async assign(sessionId,noteId){

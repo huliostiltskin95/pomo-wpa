@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import {updatedSessionNotes} from '../obsidian/session-notes.js';
+import * as movedLinks from '../obsidian/moved-links.js';
 import * as estimates from '../core/tempo-estimates.js';
 import * as core from '../core/tempo-core.js';
 import * as simple from '../core/tempo-simple.js';
@@ -55,7 +56,7 @@ function fixture(){
  Object.defineProperty(plugin,'config',{get:()=>plugin.state.defaults.simple});
  let markdown='```TEMPVS\n'+source+'\n```';let file={path:'zettel/Platone.md',basename:'Platone',extension:'md'};
  Object.assign(plugin.app.vault,{getAbstractFileByPath:p=>p===file.path?file:null,read:async()=>markdown});
- const context={...estimates,...core,...simple,...dailyPlan,Notice:class{},MarkdownRenderChild:class{},moment:()=>({isValid:()=>false}),module:{exports:{}},console,setTimeout,clearTimeout,crypto:globalThis.crypto};
+ const context={...movedLinks,...estimates,...core,...simple,...dailyPlan,Notice:class{},MarkdownRenderChild:class{},moment:()=>({isValid:()=>false}),module:{exports:{}},console,setTimeout,clearTimeout,crypto:globalThis.crypto};
  vm.createContext(context);
  for(const [path,name] of [['note-estimates.js','NoteEstimates'],['daily-blocks.js','DailyBlocks']]){
   const code=fs.readFileSync(new URL('../obsidian/'+path,import.meta.url),'utf8').replace(/^import .*;\n/gm,'').replace(/export /g,'');
@@ -82,7 +83,12 @@ test('assignment respects area and occupied assignments, rename retains identity
  p.state.sessions=[session(p.state),{...session(p.state,'16:00','17:00'),id:'other-session',noteEstimateId:'other-note'}];
  await p.estimates.assignDay(n,'2099-11-15');assert.equal(p.state.sessions[0].linkedNotes[0].path,n.path);assert.equal(p.state.sessions[0].noteEstimateId,undefined);assert.equal(p.state.sessions[1].noteEstimateId,'other-note');
  p.state.sessions[0].noteWork={[n.id]:60};
- await p.estimates.rename({path:'zettel/Platone nuovo.md'},f.file.path);n=p.estimates.notes[0];assert.equal(n.path,'zettel/Platone nuovo.md');assert.equal(estimateProgress(n,p.state).done,60);
+ p.state.sessions[0].actualSeconds=90;
+ p.state.history=[{sessionId:'archived',area:'Studio',measured:true,minutes:2,linkedNotes:[{path:'Platone#Studio',label:'Lettura'}]}];
+ await p.daily.moveReferences(f.file.path,'zettel/Platone nuovo.md');
+ assert.equal(p.state.sessions[0].linkedNotes[0].path,'zettel/Platone nuovo.md');
+ assert.equal(p.state.history[0].linkedNotes[0].path,'zettel/Platone nuovo#Studio');
+ assert.equal(p.state.history[0].linkedNotes[0].label,'Lettura');n=p.estimates.notes[0];assert.equal(n.path,'zettel/Platone nuovo.md');assert.equal(estimateProgress(n,p.state).done,210);
  p.daily.destroy();
 });
 
@@ -157,5 +163,27 @@ test('gross note estimate is imported by ordinary-note controller and retains th
  await p.daily.syncFile(f.file.path);
  assert.equal(p.estimates.notes[0].id,id);
  assert.equal(p.estimates.notes[0].entries[0].grossMinutes,720);
+ p.daily.destroy();
+});
+
+test('folder move updates the daily block without changing aliases, unrelated links or prose',async()=>{
+ const f=fixture(),p=f.plugin;
+ const daily={path:'daily/2099-11-15.md',basename:'2099-11-15',extension:'md'};
+ const source='Studio +15:00-16:00 -60m [[zettel/Platone#^ref|Leggi]] [[zettel-alt/Risorsa]]';
+ const wrap=s=>'Prima [[zettel/Platone]]\n\n```TEMPVS\n'+s+'\n```\nDopo';
+ let markdown=wrap(source);
+ Object.assign(p.app.vault,{
+  getAbstractFileByPath:path=>path===daily.path?daily:null,
+  read:async()=>markdown,
+  process:async(file,edit)=>{markdown=edit(markdown);}
+ });
+ await p.daily.syncFile(daily.path);
+ await p.daily.moveReferences('zettel','archivio/z');
+ const expected=source.replace('zettel/Platone','archivio/z/Platone');
+ assert.equal(markdown,wrap(expected));
+ assert.equal(Object.values(p.dailyNotes)[0].source,expected);
+ await p.daily.syncFile(daily.path,{force:true});
+ assert.equal(p.state.sessions.length,1);
+ assert.equal(p.state.sessions[0].linkedNotes[0].path,'archivio/z/Platone#^ref');
  p.daily.destroy();
 });

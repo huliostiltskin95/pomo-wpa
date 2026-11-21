@@ -1,7 +1,7 @@
 {
   "id": "tempo-pomodoro",
   "name": "Tempo — Pomodoro",
-  "version": "0.5.20",
+  "version": "0.5.21",
   "minAppVersion": "1.5.0",
   "description": "TEMPVS: timer, agenda con note collegate e gruppi di sessioni, stime e sincronizzazione Dropbox.",
   "author": "Tempo",
