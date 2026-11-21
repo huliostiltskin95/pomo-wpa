@@ -835,6 +835,42 @@ function moveBlockLinks(source, move) {
     return next === path.trim() ? original : "[[" + next + alias + "]]";
   });
 }
+function archivedLinkResolver(files, estimates, vaultName) {
+  const key2 = (path) => path.replace(/^\//, "").replace(/\.md$/i, "");
+  const basename = (path) => path.split("/").pop();
+  const paths = new Set(files.map((file) => key2(file.path)));
+  const candidates = /* @__PURE__ */ new Map();
+  const add = (from, to) => {
+    if (!candidates.has(from)) candidates.set(from, /* @__PURE__ */ new Set());
+    candidates.get(from).add(to);
+  };
+  for (const file of files) add(basename(key2(file.path)), file.path);
+  const archiveOnly = (path) => /^(?:archive|archivio)\//i.test(path);
+  const prefix = "note:" + encodeURIComponent(vaultName) + "/";
+  for (const note of estimates) {
+    if (!archiveOnly(note.path) || !paths.has(key2(note.path)) || !note.id.startsWith(prefix)) continue;
+    const encoded = note.id.slice(prefix.length);
+    if (encoded.includes("/")) continue;
+    let original;
+    try {
+      original = key2(decodeURIComponent(encoded));
+    } catch {
+      continue;
+    }
+    add(original, note.path);
+    add(basename(original), note.path);
+  }
+  return (target) => {
+    const [, raw, fragment = ""] = /^([^#]*)(#.*)?$/.exec(target);
+    const path = key2(raw);
+    if (!path || paths.has(path) || raw.includes(".") && !/\.md$/i.test(raw) && !candidates.has(basename(path))) return target;
+    const matches = candidates.get(path) || candidates.get(basename(path));
+    if (matches?.size !== 1) return target;
+    const [destination] = matches;
+    if (!archiveOnly(destination)) return target;
+    return (/\.md$/i.test(raw) ? destination : key2(destination)) + fragment;
+  };
+}
 
 // obsidian/daily-blocks.js
 var import_obsidian3 = require("obsidian");
@@ -1170,6 +1206,10 @@ var DailyBlocks = class {
     const resolve = (path, source) => cache?.getFirstLinkpathDest?.(path, source);
     const move = (path, source = "") => movedTarget(path, oldPath, newPath, source, resolve);
     const relocated = (path) => path === oldPath || path.startsWith(oldPath + "/") ? newPath + path.slice(oldPath.length) : path;
+    return this.rewriteReferences(move, relocated);
+  }
+  async rewriteReferences(move, relocated = (path) => path) {
+    const plugin = this.plugin;
     const bindings = Object.entries(this.bindings);
     const affected = bindings.filter(([, b]) => typeof b.source === "string" && moveBlockLinks(b.source, (p) => move(p, b.path)) !== b.source);
     const notes = (plugin.estimates?.notes || []).filter((n) => n.vault === plugin.estimates.vault && relocated(n.path) !== n.path);
@@ -1230,7 +1270,11 @@ var DailyBlocks = class {
     }, 350));
   }
   async initialize() {
-    for (const file of this.plugin.app.vault.getMarkdownFiles()) {
+    const files = this.plugin.app.vault.getMarkdownFiles();
+    const estimates = this.plugin.estimates;
+    const move = archivedLinkResolver(files, estimates?.notes || [], estimates?.vault || "");
+    await this.queue(() => this.rewriteReferences(move));
+    for (const file of files) {
       if (this.destroyed) return;
       try {
         await this.syncFile(file.path, { force: true });
