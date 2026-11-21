@@ -2,6 +2,7 @@ import {isEstimateSource} from '../core/tempo-estimates.js';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import * as movedLinks from '../obsidian/moved-links.js';
 import vm from 'node:vm';
 import * as dailyPlan from '../obsidian/daily-plan.js';
 import {normalizeArchive} from '../core/tempo-simple.js';
@@ -32,7 +33,7 @@ test('removing completed rows preserves the archive and accepts the new plan',()
 });
 // Exercise the controller source independently of whether a bundle was built first.
 const code=fs.readFileSync(new URL('../obsidian/daily-blocks.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'').replace(/export /g,'');
-const context={...dailyPlan,normalizeArchive,isEstimateSource,MarkdownRenderChild:class{},Notice:class{},moment:()=>({isValid:()=>false}),module:{exports:{}},console,setTimeout,clearTimeout,crypto:globalThis.crypto};
+const context={...movedLinks,...dailyPlan,normalizeArchive,isEstimateSource,MarkdownRenderChild:class{},Notice:class{},moment:()=>({isValid:()=>false}),module:{exports:{}},console,setTimeout,clearTimeout,crypto:globalThis.crypto};
 vm.createContext(context);vm.runInContext(code+'\nmodule.exports.DailyBlocks=DailyBlocks;',context);
 function fixture(date=day){
  let text='# Daily\n\n```TEMPVS\n'+initial+'\n```\n\nOther text';
