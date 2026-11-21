@@ -113,4 +113,4 @@ jobs:
             obsidian/dist/styles.css#styles.css \
             --target "${{ github.sha }}" \
             --title "TEMPVS $VERSION" \
-            --notes "Collegamenti aggiornati dopo lo spostamento delle note, anche nello storico e nei blocchi TEMPVS."
+            --notes "Recupero dei collegamenti storici alle note archiviate nelle sessioni e nelle note giornaliere."

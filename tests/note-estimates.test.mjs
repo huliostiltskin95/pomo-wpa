@@ -187,3 +187,12 @@ test('folder move updates the daily block without changing aliases, unrelated li
  assert.equal(p.state.sessions[0].linkedNotes[0].path,'archivio/z/Platone#^ref');
  p.daily.destroy();
 });
+
+test('historical links use the old estimate identity and unique archive names only',()=>{
+ const files=['archivio/lirica-duecentesca.md','archivio/livio.md','archivio/svetonio.md','archivio/Alfa.md','attive/Alfa.md','drafts/Attiva.md'].map(path=>({path}));
+ const move=movedLinks.archivedLinkResolver(files,[{id:'note:Test/drafts%2Flirica-200esca.md',path:files[0].path}],'Test');
+ assert.equal(move('drafts/lirica-200esca.md'),files[0].path);
+ assert.equal(move('drafts/livio#Capitolo'),'archivio/livio#Capitolo');
+ assert.equal(move('svetonio'),'archivio/svetonio');
+ for(const path of ['Alfa','old/Alfa','drafts/Attiva.md','Ignoto','archivio/livio'])assert.equal(move(path),path);
+});

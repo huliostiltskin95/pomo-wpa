@@ -1,4 +1,4 @@
-import {movedTarget,moveBlockLinks} from './moved-links.js';
+import {movedTarget,moveBlockLinks,archivedLinkResolver} from './moved-links.js';
 import {isEstimateSource} from '../core/tempo-estimates.js';
 import {MarkdownRenderChild,Notice,moment} from 'obsidian';
 import {normalizeArchive} from '../core/tempo-simple.js';
@@ -45,6 +45,10 @@ export class DailyBlocks {
   const resolve=(path,source)=>cache?.getFirstLinkpathDest?.(path,source);
   const move=(path,source='')=>movedTarget(path,oldPath,newPath,source,resolve);
   const relocated=path=>path===oldPath||path.startsWith(oldPath+'/')?newPath+path.slice(oldPath.length):path;
+  return this.rewriteReferences(move,relocated);
+ }
+ async rewriteReferences(move,relocated=path=>path){
+  const plugin=this.plugin;
   const bindings=Object.entries(this.bindings);
   const affected=bindings.filter(([,b])=>typeof b.source==='string'&&moveBlockLinks(b.source,p=>move(p,b.path))!==b.source);
   const notes=(plugin.estimates?.notes||[]).filter(n=>n.vault===plugin.estimates.vault&&relocated(n.path)!==n.path);
@@ -82,7 +86,11 @@ export class DailyBlocks {
   this.timers.set(path,setTimeout(()=>{this.timers.delete(path);this.syncFile(path).catch(error=>{this.errors.set(path,error.message);this.plugin.refresh?.(true);this.refresh(path);});},350));
  }
  async initialize(){
-  for(const file of this.plugin.app.vault.getMarkdownFiles()){
+  const files=this.plugin.app.vault.getMarkdownFiles();
+  const estimates=this.plugin.estimates;
+  const move=archivedLinkResolver(files,estimates?.notes||[],estimates?.vault||'');
+  await this.queue(()=>this.rewriteReferences(move));
+  for(const file of files){
    if(this.destroyed)return;
    try{await this.syncFile(file.path,{force:true});}catch(error){this.errors.set(file.path,error.message);}
   }

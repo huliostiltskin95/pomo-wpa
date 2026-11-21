@@ -35,3 +35,37 @@ export function moveBlockLinks(source, move) {
     return next === path.trim() ? original : '[[' + next + alias + ']]';
   });
 }
+
+export function archivedLinkResolver(files, estimates, vaultName) {
+  const key = path => path.replace(/^\//, '').replace(/\.md$/i, '');
+  const basename = path => path.split('/').pop();
+  const paths = new Set(files.map(file => key(file.path)));
+  const candidates = new Map();
+  const add = (from, to) => {
+    if (!candidates.has(from)) candidates.set(from, new Set());
+    candidates.get(from).add(to);
+  };
+  // Include other folders here so an ambiguous basename never identifies an archive note.
+  for (const file of files) add(basename(key(file.path)), file.path);
+  const archiveOnly = path => /^(?:archive|archivio)\//i.test(path);
+  const prefix = 'note:' + encodeURIComponent(vaultName) + '/';
+  for (const note of estimates) {
+    if (!archiveOnly(note.path) || !paths.has(key(note.path)) || !note.id.startsWith(prefix)) continue;
+    const encoded = note.id.slice(prefix.length);
+    if (encoded.includes('/')) continue;
+    let original;
+    try { original = key(decodeURIComponent(encoded)); } catch { continue; }
+    add(original, note.path);
+    add(basename(original), note.path);
+  }
+  return target => {
+    const [, raw, fragment = ''] = /^([^#]*)(#.*)?$/.exec(target);
+    const path = key(raw);
+    if (!path || paths.has(path) || (raw.includes('.') && !/\.md$/i.test(raw) && !candidates.has(basename(path)))) return target;
+    const matches = candidates.get(path) || candidates.get(basename(path));
+    if (matches?.size !== 1) return target;
+    const [destination] = matches;
+    if (!archiveOnly(destination)) return target;
+    return (/\.md$/i.test(raw) ? destination : key(destination)) + fragment;
+  };
+}
