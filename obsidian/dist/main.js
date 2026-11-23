@@ -60,163 +60,6 @@ function appendNoteLink(description = "", path) {
   return String(description).trimEnd() + (String(description).trim() ? "\n" : "") + "- [[" + path + "]]";
 }
 
-// obsidian/area-register.js
-var quantity = "(\\d+(?:[.,]\\d+)?)([hms]?)";
-var time = "((?:[01]\\d|2[0-3]):[0-5]\\d)";
-var areaLine = new RegExp("^(.+?)\\s+@" + quantity + "$", "i");
-var taskLine = new RegExp("^-\\s*(\\[\\[[^\\]\\[]+\\]\\])\\s+@" + quantity + "\\s*=\\s*(\\d+)(?:\\s+\\+" + time + ")?$", "i");
-var possibleTask = new RegExp("^-?\\s*(\\[\\[[^\\]\\[]+\\]\\])\\s*[@*]?\\s*" + quantity + "\\s*=?\\s+(\\d+)(?:\\s*\\+?\\s*" + time + ")?$", "i");
-var possibleArea = new RegExp("^(.+?)\\s+[@*]?" + quantity + "$", "i");
-var isAreaRegister = (source) => source?.split(/\r?\n/).some((line) => {
-  const text = line.trim();
-  return areaLine.test(text) || /^\s*-?\s*\[\[.*\]\]\s+[@*\d]/.test(text) || !/[+=]/.test(text) && !text.startsWith("@") && possibleArea.test(text);
-});
-function readableDuration(seconds) {
-  const h = Math.floor(seconds / 3600), m = Math.floor(seconds % 3600 / 60), s = Math.round(seconds % 60);
-  return [h && h + " h", m && m + " min", s && s + " s"].filter(Boolean).join(" ") || "0 min";
-}
-function secondsOf(value, unit) {
-  const seconds = Math.round(Number(value.replace(",", ".")) * { s: 1, m: 60, h: 3600 }[(unit || "h").toLowerCase()] * 1e7) / 1e7;
-  if (!Number.isSafeInteger(seconds) || seconds < 1) throw Error("Usa una durata positiva esprimibile in secondi interi.");
-  return seconds;
-}
-function suggestion(line) {
-  const task = line.match(possibleTask);
-  if (task) return "- " + task[1] + " @" + task[2] + task[3] + " = " + task[4] + (task[5] ? " +" + task[5] : "");
-  const incomplete = line.match(new RegExp("^-?\\s*(\\[\\[[^\\]\\[]+\\]\\])\\s+[@*]?" + quantity + "$", "i"));
-  if (incomplete) return "- " + incomplete[1] + " @" + incomplete[2] + incomplete[3] + " = 1";
-  const area = line.match(possibleArea);
-  return area ? area[1] + " @" + area[2] + area[3] : "- [[Nota]] @1h = 2 +14:00";
-}
-function parseAreaRegister(source, areas) {
-  const budgets = [], slots = [];
-  let budget;
-  for (const [index, raw] of source.split(/\r?\n/).entries()) {
-    const line = raw.trim();
-    if (!line || /^date:\s*\d{4}-\d\d-\d\d$/i.test(line) || /^<!-- tempvs-block:[\w-]+ -->$/.test(line)) continue;
-    try {
-      const heading = line.match(areaLine);
-      if (heading && !line.includes("[[")) {
-        const area = areas.find((a) => a.name.toLowerCase() === heading[1].trim().toLowerCase());
-        if (!area) throw Error("Area sconosciuta. Aree disponibili: " + areas.map((a) => a.name).join(", "));
-        budget = { area: area.name, areaId: area.id, seconds: secondsOf(heading[2], heading[3]), assigned: 0 };
-        budgets.push(budget);
-        continue;
-      }
-      if ((line.match(/\[\[/g) || []).length > 1) throw Error("Usa un solo wikilink per riga. Scrivi il secondo compito su una nuova riga con la sua durata.");
-      const task = line.match(taskLine);
-      if (!task) throw Error("Sintassi da correggere. Prova: " + suggestion(line));
-      if (!budget) throw Error("Inserisci prima l\u2019area, per esempio Studio @8h.");
-      const [, link, value, unit, countText, start] = task, linkedNotes = noteLinks(link);
-      if (linkedNotes.length !== 1) throw Error("Indica una nota tra parentesi quadre doppie.");
-      const seconds = secondsOf(value, unit), count = Number(countText);
-      if (count < 1 || count > seconds || count > 86400) throw Error("Indica almeno un pomodoro, con almeno un secondo ciascuno (massimo 86400).");
-      budget.assigned += seconds;
-      let offset = 0;
-      for (let i = 0; i < count; i++) {
-        const duration = Math.floor(seconds / count) + Number(i < seconds % count);
-        slots.push({ area: budget.area, areaId: budget.areaId, minutes: duration / 60, linkedNotes, start: start || null, offset });
-        offset += duration;
-      }
-    } catch (error) {
-      throw Error("Riga " + (index + 1) + ": " + error.message);
-    }
-  }
-  return { budgets, slots };
-}
-
-// obsidian/note-picker.js
-var import_obsidian = require("obsidian");
-var fold = (text) => String(text).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase();
-var safeLabel = (text) => String(text).replace(/[\r\n|\[\]]/g, " ").trim();
-var SessionNotePicker = class extends import_obsidian.Modal {
-  constructor(app, save) {
-    super(app);
-    this.save = save;
-    this.activeFile = app.workspace.getActiveFile?.() || app.workspace.getMostRecentLeaf?.()?.view?.file;
-  }
-  onOpen() {
-    this.contentEl.addClass("tempvs-picker");
-    this.files = (this.app.vault?.getMarkdownFiles?.() || []).map((file) => {
-      const meta = this.app.metadataCache?.getFileCache(file)?.frontmatter || {};
-      const title = String(meta.title || file.basename);
-      const aliases = [].concat(meta.aliases || meta.alias || []);
-      return { file, title, search: fold([title, file.path, ...aliases].join(" ")) };
-    });
-    this.searchFiles();
-  }
-  choice(parent, title, action2, subtitle) {
-    const button2 = parent.createEl("button", { attr: { type: "button" } });
-    button2.createSpan({ text: title });
-    if (subtitle) button2.createEl("small", { text: subtitle });
-    button2.onclick = action2;
-    return button2;
-  }
-  searchFiles() {
-    const el = this.contentEl;
-    el.empty();
-    el.createEl("h3", { text: "Collega nota" });
-    const input = el.createEl("input", { attr: { type: "search", "aria-label": "Cerca nota", placeholder: "Titolo, alias, nome file o [[wikilink]]" } });
-    const results = el.createDiv({ cls: "tempvs-picker-results" });
-    const render = () => {
-      results.empty();
-      const query = input.value.trim();
-      if (query.startsWith("[[")) {
-        this.choice(results, "Collega wikilink", () => this.commit(query), query);
-        return;
-      }
-      const words = fold(query).split(/\s+/);
-      const active = this.files.find((entry) => entry.file.path === this.activeFile?.path);
-      if (!query && active) this.choice(results, "Usa la nota aperta", () => this.selectFile(active), active.title);
-      const matches = this.files.filter((entry) => words.every((word) => entry.search.includes(word)));
-      for (const entry of matches.slice(0, 50)) this.choice(results, entry.title, () => this.selectFile(entry), entry.file.path);
-      if (!matches.length) results.createEl("p", { text: "Nessuna nota trovata." });
-      if (matches.length > 50) results.createEl("small", { text: "Affina la ricerca per vedere altri risultati." });
-    };
-    input.oninput = render;
-    input.onkeydown = (event) => {
-      if (event.key === "Enter") results.querySelector("button")?.click();
-      if (event.key === "ArrowDown") {
-        event.preventDefault();
-        results.querySelector("button")?.focus();
-      }
-    };
-    render();
-    input.focus();
-  }
-  selectFile({ file, title }) {
-    const path = file.path.replace(/\.md$/i, "");
-    const link = (target, label) => this.commit("[[" + target + "|" + safeLabel(label) + "]]");
-    const headings = this.app.metadataCache?.getFileCache(file)?.headings || [];
-    if (!headings.length) return link(path, title);
-    const el = this.contentEl;
-    el.empty();
-    el.createEl("h3", { text: title });
-    this.choice(el, "Collega nota intera", () => link(path, title)).focus();
-    const results = el.createDiv({ cls: "tempvs-picker-results" });
-    for (const { heading, level } of headings) {
-      this.choice(results, heading, () => link(path + "#" + heading, heading), "H" + level);
-    }
-    this.choice(el, "Torna alla ricerca", () => this.searchFiles());
-  }
-  async commit(value) {
-    if (this.saving) return;
-    this.saving = true;
-    try {
-      await this.save(value);
-      this.close();
-    } catch (error) {
-      new import_obsidian.Notice(error.message);
-    } finally {
-      this.saving = false;
-    }
-  }
-  onClose() {
-    this.contentEl.empty();
-    this.files = [];
-  }
-};
-
 // core/tempo-core.js
 var DEFAULTS = Object.freeze({ workMinutes: 25, breakEnabled: true });
 function localDateString(date = /* @__PURE__ */ new Date()) {
@@ -360,36 +203,69 @@ function getAmbientFocusMode(sessions, now = /* @__PURE__ */ new Date()) {
   return getNextSession(sessions, now) ? "waiting" : "finished";
 }
 
-// obsidian/session-notes.js
-function sessionNotes(session, estimates = []) {
-  if (session.linkedNotes?.length) return session.linkedNotes;
-  const legacy = estimates.find((n) => n.id === session.noteEstimateId);
-  return legacy ? [{ path: legacy.path, label: legacy.title }] : [];
+// obsidian/area-register.js
+var quantity = "(\\d+(?:[.,]\\d+)?)([hms]?)";
+var time = "((?:[01]\\d|2[0-3]):[0-5]\\d)";
+var areaLine = new RegExp("^(.+?)\\s+@" + quantity + "$", "i");
+var taskLine = new RegExp("^-\\s*(\\[\\[[^\\]\\[]+\\]\\])\\s+@" + quantity + "\\s*=\\s*(\\d+)(?:\\s+\\+" + time + ")?$", "i");
+var possibleTask = new RegExp("^-?\\s*(\\[\\[[^\\]\\[]+\\]\\])\\s*[@*]?\\s*" + quantity + "\\s*=?\\s+(\\d+)(?:\\s*\\+?\\s*" + time + ")?$", "i");
+var possibleArea = new RegExp("^(.+?)\\s+[@*]?" + quantity + "$", "i");
+var isAreaRegister = (source) => source?.split(/\r?\n/).some((line) => {
+  const text = line.trim();
+  return areaLine.test(text) || /^\s*-?\s*\[\[.*\]\]\s+[@*\d]/.test(text) || !/[+=]/.test(text) && !text.startsWith("@") && possibleArea.test(text);
+});
+function readableDuration(seconds) {
+  const h = Math.floor(seconds / 3600), m = Math.floor(seconds % 3600 / 60), s = Math.round(seconds % 60);
+  return [h && h + " h", m && m + " min", s && s + " s"].filter(Boolean).join(" ") || "0 min";
 }
-function updatedSessionNotes(session, input, { removePath, primaryPath, replacePrimary = false, estimates = [] } = {}) {
-  const previous = sessionNotes(session, estimates);
-  if (removePath !== void 0) return previous.filter((n) => n.path !== removePath);
-  if (primaryPath !== void 0) {
-    const primary = previous.find((note) => note.path === primaryPath);
-    return primary ? [primary, ...previous.filter((note) => note !== primary)] : previous;
-  }
-  const text = input.trim();
-  if (!text) return replacePrimary ? previous.slice(1) : previous;
-  const links = noteLinks(text.startsWith("[[") ? text : "[[" + text + "]]");
-  if (links.length !== 1 || /[\r\n]/.test(text) || text.startsWith("[[") && !/^\[\[[^\]\n]+\]\]$/.test(text)) throw Error("Scegli una sola nota: [[nota|titolo]].");
-  if (replacePrimary) return [links[0], ...previous.slice(1).filter((note) => note.path !== links[0].path)];
-  return previous.some((note) => note.path === links[0].path) ? previous : [...previous, links[0]];
+function secondsOf(value, unit) {
+  const seconds = Math.round(Number(value.replace(",", ".")) * { s: 1, m: 60, h: 3600 }[(unit || "h").toLowerCase()] * 1e7) / 1e7;
+  if (!Number.isSafeInteger(seconds) || seconds < 1) throw Error("Usa una durata positiva esprimibile in secondi interi.");
+  return seconds;
 }
-function groupSessions(sessions, estimates = []) {
-  const groups = [];
-  for (const session of sessions) {
-    const notes = sessionNotes(session, estimates);
-    const key2 = JSON.stringify([session.areaId || session.area || session.title, session.noteBlockId || "", session.date, notes]);
-    const last = groups.at(-1);
-    if (last && last.key === key2 && +sessionBounds(last.sessions.at(-1)).end === +sessionBounds(session).start) last.sessions.push(session);
-    else groups.push({ key: key2, notes, sessions: [session] });
+function suggestion(line) {
+  const task = line.match(possibleTask);
+  if (task) return "- " + task[1] + " @" + task[2] + task[3] + " = " + task[4] + (task[5] ? " +" + task[5] : "");
+  const incomplete = line.match(new RegExp("^-?\\s*(\\[\\[[^\\]\\[]+\\]\\])\\s+[@*]?" + quantity + "$", "i"));
+  if (incomplete) return "- " + incomplete[1] + " @" + incomplete[2] + incomplete[3] + " = 1";
+  const area = line.match(possibleArea);
+  return area ? area[1] + " @" + area[2] + area[3] : "- [[Nota]] @1h = 2 +14:00";
+}
+function parseAreaRegister(source, areas) {
+  const budgets = [], slots = [];
+  let budget;
+  for (const [index, raw] of source.split(/\r?\n/).entries()) {
+    const line = raw.trim();
+    if (!line || /^date:\s*\d{4}-\d\d-\d\d$/i.test(line) || /^<!-- tempvs-block:[\w-]+ -->$/.test(line)) continue;
+    try {
+      const heading = line.match(areaLine);
+      if (heading && !line.includes("[[")) {
+        const area = areas.find((a) => a.name.toLowerCase() === heading[1].trim().toLowerCase());
+        if (!area) throw Error("Area sconosciuta. Aree disponibili: " + areas.map((a) => a.name).join(", "));
+        budget = { area: area.name, areaId: area.id, seconds: secondsOf(heading[2], heading[3]), assigned: 0 };
+        budgets.push(budget);
+        continue;
+      }
+      if ((line.match(/\[\[/g) || []).length > 1) throw Error("Usa un solo wikilink per riga. Scrivi il secondo compito su una nuova riga con la sua durata.");
+      const task = line.match(taskLine);
+      if (!task) throw Error("Sintassi da correggere. Prova: " + suggestion(line));
+      if (!budget) throw Error("Inserisci prima l\u2019area, per esempio Studio @8h.");
+      const [, link, value, unit, countText, start] = task, linkedNotes = noteLinks(link);
+      if (linkedNotes.length !== 1) throw Error("Indica una nota tra parentesi quadre doppie.");
+      const seconds = secondsOf(value, unit), count = Number(countText);
+      if (count < 1 || count > seconds || count > 86400) throw Error("Indica almeno un pomodoro, con almeno un secondo ciascuno (massimo 86400).");
+      budget.assigned += seconds;
+      let offset = 0;
+      for (let i = 0; i < count; i++) {
+        const duration = Math.floor(seconds / count) + Number(i < seconds % count);
+        slots.push({ area: budget.area, areaId: budget.areaId, minutes: duration / 60, linkedNotes, start: start || null, offset });
+        offset += duration;
+      }
+    } catch (error) {
+      throw Error("Riga " + (index + 1) + ": " + error.message);
+    }
   }
-  return groups;
+  return { budgets, slots };
 }
 
 // obsidian/daily-register.js
@@ -529,9 +405,6 @@ function creditedWork(state, resolve, bindingPath) {
   }
   return totals;
 }
-
-// obsidian/note-estimates.js
-var import_obsidian2 = require("obsidian");
 
 // core/tempo-estimates.js
 var isEstimateSource = (source) => /^\s*@/m.test(source);
@@ -868,230 +741,6 @@ function measuredFocus(session, from, to) {
   return total / 1e3;
 }
 
-// obsidian/note-estimates.js
-var uid = () => globalThis.crypto?.randomUUID?.() || Date.now().toString(36) + "-" + Math.random().toString(36).slice(2);
-var action = (el, label, fn) => {
-  const b = el.createEl("button", { text: label });
-  b.onclick = () => Promise.resolve().then(fn).catch((e) => new import_obsidian2.Notice(e.message));
-  return b;
-};
-var NoteEstimates = class {
-  constructor(plugin) {
-    this.plugin = plugin;
-    this.preferences = /* @__PURE__ */ new Map();
-  }
-  get notes() {
-    return estimatesOf(this.plugin.state);
-  }
-  get vault() {
-    return this.plugin.app.vault?.getName?.() || "";
-  }
-  find(path) {
-    return this.notes.find((n) => n.path === path && n.vault === this.vault);
-  }
-  async sync(context) {
-    const { file, block } = context, entries = parseEstimate(block.source, this.plugin.config.areas), old = this.find(file.path);
-    if (old && !old.archived && JSON.stringify(old.entries) === JSON.stringify(entries)) return;
-    await this.plugin.change(() => {
-      var _a;
-      const notes = (_a = this.plugin.config).noteEstimates ?? (_a.noteEstimates = {});
-      const preferred = "note:" + encodeURIComponent(this.vault) + "/" + encodeURIComponent(file.path);
-      const id = old?.id || (notes[preferred] ? preferred + "/" + uid() : preferred);
-      notes[id] = { ...old, id, vault: this.vault, path: file.path, title: file.basename, entries, archived: false, completed: old?.completed || false };
-    });
-  }
-  async archive(path) {
-    const note = this.find(path);
-    if (!note || note.archived) return;
-    await this.plugin.change(() => {
-      this.plugin.config.noteEstimates[note.id].archived = true;
-    });
-  }
-  available(session) {
-    return this.notes.filter((n) => !n.archived && !n.completed && n.entries.some((e) => matchesArea(e, session)));
-  }
-  async assign(sessionId, noteId) {
-    const note = this.notes.find((n) => n.id === noteId);
-    await this.plugin.setSessionNote([sessionId], note ? "[[" + note.path + "|" + note.title + "]]" : "", { replacePrimary: true });
-  }
-  async assignDay(note, day) {
-    const sessions = this.plugin.state.sessions.filter((s) => s.date === day && !s.linkedNotes?.length && !s.noteEstimateId && !s.finished && sessionBounds(s).start > /* @__PURE__ */ new Date() && note.entries.some((e) => matchesArea(e, s)));
-    for (const s of sessions) await this.assign(s.id, note.id);
-    new import_obsidian2.Notice(sessions.length ? `${sessions.length} sessioni collegate a ${note.title}.` : "Nessuna sessione futura libera.");
-  }
-  async start(note, entry) {
-    if (entry.kind === "total") throw Error("La stima @14h non imposta un\u2019area: avvia una sessione dall\u2019agenda e collega la nota.");
-    const plugin = this.plugin, now = /* @__PURE__ */ new Date(), end = manualSessionEnd(now, entry.minutes), cycle = grossCycle(entry.minutes);
-    const session = { id: uid(), title: entry.area, area: entry.area, areaId: entry.areaId, date: localDateString(now), start: formatTime(now), end: formatTime(end), timerStartedAt: now.toISOString(), timerEndsAt: end.toISOString(), workMinutes: cycle.focusMinutes, cycleMinutes: entry.minutes, breakEnabled: true, actualSeconds: 0, linkedNotes: [{ path: note.path, label: note.title }] };
-    if (plugin.state.sessions.some((s) => !s.finished && sessionBounds(s).start < end && sessionBounds(s).end > now)) throw Error("Questo intervallo \xE8 gi\xE0 occupato. Assegna la nota alla sessione in agenda.");
-    await plugin.change(() => plugin.state.sessions.push(session));
-  }
-  totals() {
-    const cache = this.plugin.app.metadataCache;
-    return creditedWork(this.plugin.state, (p, source) => cache?.getFirstLinkpathDest?.(p, source)?.path, (id) => this.plugin.dailyNotes?.[id]?.path);
-  }
-  progress(note, totals) {
-    const { estimated } = estimateProgress(note, this.plugin.state), done = totals.get(note.path) || 0;
-    return { estimated, done, remaining: Math.max(0, estimated - done), difference: done - estimated, percent: 100 * done / estimated };
-  }
-  render(parent, note, day = localDateString(), panel = false, totals = this.totals()) {
-    const p = this.progress(note, totals), box = parent.createDiv({ cls: "tempvs-estimate" });
-    if (panel) action(box, note.title, () => this.plugin.app.workspace.openLinkText(note.path, "", false));
-    const names = [...new Set(note.entries.map((entry) => entry.area).filter(Boolean))];
-    box.createEl("p", { text: (names.join(" / ") || "Tutte le aree") + " \xB7 Tempo registrato " + estimateTime(p.done) + " su " + estimateTime(p.estimated) });
-    box.createEl("strong", { text: estimateResult(note, p) });
-    const actions = box.createDiv({ cls: "tempvs-estimate-actions" });
-    const choices = this.preferences.get(note.id) || {};
-    const areas = this.plugin.config.areas.filter((area2) => note.entries.some((entry) => matchesArea(entry, { area: area2.name, areaId: area2.id })));
-    const area = areas.find((a) => a.id === choices.areaId) || areas[0];
-    if (!note.completed && area) {
-      action(actions, "Avvia " + area.name, () => {
-        const selected = areas.find((a) => a.id === choices.areaId) || area;
-        return this.start(note, { area: selected.name, areaId: selected.id, minutes: choices.minutes || 30 });
-      });
-    }
-    const menu = actions.createEl("details", { cls: "tempvs-estimate-menu" });
-    menu.createEl("summary", { text: "\u22EF", attr: { "aria-label": "Azioni studio" } });
-    if (!note.completed) {
-      if (areas.length > 1) {
-        const select = menu.createEl("select", { attr: { "aria-label": "Area di avvio" } });
-        for (const a of areas) select.createEl("option", { text: a.name, attr: { value: a.id } });
-        select.value = area.id;
-        select.onchange = () => {
-          choices.areaId = select.value;
-          this.preferences.set(note.id, choices);
-          this.plugin.refresh(true);
-        };
-      }
-      const label = menu.createEl("label", { text: "Durata sessione " });
-      const input = label.createEl("input", { attr: { type: "number", min: 1, max: 1439, value: choices.minutes || 30 } });
-      input.onchange = () => {
-        const minutes = input.valueAsNumber;
-        if (!Number.isInteger(minutes) || minutes < 1 || minutes > 1439) {
-          input.value = String(choices.minutes || 30);
-          new import_obsidian2.Notice("Scegli da 1 a 1439 minuti.");
-          return;
-        }
-        choices.minutes = minutes;
-        this.preferences.set(note.id, choices);
-      };
-      action(menu, "Collega alle sessioni libere del giorno", () => this.assignDay(note, day));
-    }
-    action(menu, note.completed ? "Riapri attivit\xE0" : "Segna completata", () => this.plugin.change(() => {
-      setEstimateCompleted(this.plugin.config.noteEstimates[note.id], this.plugin.state, !note.completed);
-    }));
-    return box;
-  }
-  renderPanel(parent, day) {
-    const open = new Set([...parent.querySelectorAll(".tempvs-estimate-details[open]")].map((el) => el.dataset.noteId));
-    const menus = new Set([...parent.querySelectorAll(".tempvs-estimate-menu[open]")].map((el) => el.closest(".tempvs-estimate-details").dataset.noteId));
-    parent.empty();
-    const notes = this.notes.filter((n) => !n.archived);
-    const totals = this.totals(), estimatedPaths = new Set(notes.map((n) => n.path));
-    if (!notes.length && !totals.size) return;
-    parent.createEl("h4", { text: "Note e stime" });
-    for (const [path, seconds] of totals) if (!estimatedPaths.has(path)) {
-      const row = parent.createDiv();
-      action(row, path.split("/").pop().replace(/\.md$/i, ""), () => this.plugin.app.workspace.openLinkText(path, "", false));
-      row.createSpan({ text: " \xB7 " + estimateTime(seconds) });
-    }
-    for (const note of notes) {
-      const details = parent.createEl("details", { cls: "tempvs-estimate-details" });
-      details.dataset.noteId = note.id;
-      details.open = open.has(note.id);
-      details.createEl("summary", { text: note.title + " \xB7 " + (note.completed ? "completato" : Math.floor(this.progress(note, totals).percent) + "%") });
-      this.render(details, note, day, true, totals);
-      details.querySelector(".tempvs-estimate-menu").open = menus.has(note.id);
-    }
-  }
-  selector(parent, session) {
-    const notes = this.available(session), current = this.notes.find((n) => n.id === session.noteEstimateId);
-    if (!notes.length && !current) return;
-    if (current && !notes.includes(current)) notes.push(current);
-    const select = parent.createEl("select", { cls: "tempvs-note-assignment", attr: { "aria-label": "Nota della sessione " + session.start } });
-    select.createEl("option", { value: "", text: "Solo area \xB7 nessuna nota" });
-    for (const n of notes) select.createEl("option", { value: n.id, text: n.title + (n.completed ? " (completata)" : "") });
-    select.value = session.noteEstimateId || "";
-    select.onchange = () => this.assign(session.id, select.value).catch((e) => new import_obsidian2.Notice(e.message));
-  }
-};
-
-// obsidian/moved-links.js
-function movedTarget(target, oldPath, newPath, sourcePath, resolve) {
-  const match = /^([^#]+)(#.*)?$/.exec(target);
-  if (!match) return target;
-  const [, raw, fragment = ""] = match;
-  let local = raw;
-  if (/^\.{1,2}\//.test(raw) && sourcePath) {
-    const parts = sourcePath.split("/").slice(0, -1);
-    for (const part of raw.split("/")) {
-      if (part === "..") parts.pop();
-      else if (part && part !== ".") parts.push(part);
-    }
-    local = parts.join("/");
-  }
-  const path = local.replace(/^\//, "");
-  const withoutMd = (value) => value.replace(/\.md$/i, "");
-  let destination;
-  if (withoutMd(path) === withoutMd(oldPath)) {
-    destination = newPath;
-  } else if (path.startsWith(oldPath + "/")) {
-    destination = newPath + path.slice(oldPath.length);
-  } else if (withoutMd(oldPath).endsWith("/" + withoutMd(path))) {
-    const other = resolve?.(path, sourcePath);
-    if (other && other.path !== newPath) return target;
-    destination = newPath;
-  } else {
-    return target;
-  }
-  return (raw.startsWith("/") ? "/" : "") + (/\.md$/i.test(path) ? destination : withoutMd(destination)) + fragment;
-}
-function moveBlockLinks(source, move) {
-  return source.replace(/\[\[([^\]|\n]+)(\|[^\]\n]*)?\]\]/g, (original, path, alias = "") => {
-    const next = move(path.trim());
-    return next === path.trim() ? original : "[[" + next + alias + "]]";
-  });
-}
-function archivedLinkResolver(files, estimates, vaultName) {
-  const key2 = (path) => path.replace(/^\//, "").replace(/\.md$/i, "");
-  const basename = (path) => path.split("/").pop();
-  const paths = new Set(files.map((file) => key2(file.path)));
-  const candidates = /* @__PURE__ */ new Map();
-  const add = (from, to) => {
-    if (!candidates.has(from)) candidates.set(from, /* @__PURE__ */ new Set());
-    candidates.get(from).add(to);
-  };
-  for (const file of files) add(basename(key2(file.path)), file.path);
-  const archiveOnly = (path) => /^(?:archive|archivio)\//i.test(path);
-  const prefix = "note:" + encodeURIComponent(vaultName) + "/";
-  for (const note of estimates) {
-    if (!archiveOnly(note.path) || !paths.has(key2(note.path)) || !note.id.startsWith(prefix)) continue;
-    const encoded = note.id.slice(prefix.length);
-    if (encoded.includes("/")) continue;
-    let original;
-    try {
-      original = key2(decodeURIComponent(encoded));
-    } catch {
-      continue;
-    }
-    add(original, note.path);
-    add(basename(original), note.path);
-  }
-  return (target) => {
-    const [, raw, fragment = ""] = /^([^#]*)(#.*)?$/.exec(target);
-    const path = key2(raw);
-    if (!path || paths.has(path) || raw.includes(".") && !/\.md$/i.test(raw) && !candidates.has(basename(path))) return target;
-    const matches = candidates.get(path) || candidates.get(basename(path));
-    if (matches?.size !== 1) return target;
-    const [destination] = matches;
-    if (!archiveOnly(destination)) return target;
-    return (/\.md$/i.test(raw) ? destination : key2(destination)) + fragment;
-  };
-}
-
-// obsidian/daily-blocks.js
-var import_obsidian3 = require("obsidian");
-
 // obsidian/daily-plan.js
 var blockPattern = /^\s*<!-- tempvs-block:([^\s>]+) -->\s*$/;
 var rowPattern = /\s*<!-- tempvs-session:([^\s>]+)(?: day:([01]))? -->\s*$/;
@@ -1126,7 +775,7 @@ function resolveDailyDate(source, file, { format = "YYYY-MM-DD", moment: moment2
   }
   throw Error("Data della daily note non riconosciuta. Aggiungi \xABdate: YYYY-MM-DD\xBB al blocco TEMPVS.");
 }
-function findDailyBlocks(markdown2) {
+function findDailyBlocks(markdown2, includeUnclosed = false) {
   const lines = markdown2.match(/[^\n]*\n|[^\n]+$/g) || [];
   let fence = null, offset = 0;
   const blocks = [];
@@ -1143,6 +792,7 @@ function findDailyBlocks(markdown2) {
     }
     offset += lines[i].length;
   }
+  if (includeUnclosed && fence?.isTempvs) blocks.push({ start: fence.start, end: markdown2.length, lineStart: fence.line, source: markdown2.slice(fence.start) });
   return blocks;
 }
 function replaceDailyBlock(markdown2, block, source) {
@@ -1372,7 +1022,445 @@ function applyDailyPlan(state, proposal) {
   state.syncDeleted.sessions = [.../* @__PURE__ */ new Set([...state.syncDeleted.sessions, ...proposal.removeIds])];
 }
 
+// obsidian/syntax.js
+var tokens = /<!--.*?(?:-->|$)|\[\[[^\]]*(?:\]\]|$)|^\s*date:(?=\s|$)|\b\d{4}-\d{2}-\d{2}\b|\+?\d{2}:\d{2}(?:-\d{2}:\d{2})?|=\s*\d+|\b\d+(?:[.,]\d+)?[hms]\b|[@~-]\d+(?:[.,]\d+)?[hms]?|^\s*-(?=\s|$)/gi;
+function syntaxTokens(line) {
+  const parts = [];
+  const add = (from, to, kind) => {
+    if (to > from) parts.push({ from, to, kind });
+  };
+  const heading = line.match(/^(\s*)(@?[^@+\-=\s\d][^@+\[\]=]*?)(?=\s+(?:[@+]|\d))/);
+  let offset = 0;
+  if (heading && !/^\s*date:/i.test(line)) {
+    offset = heading[0].length;
+    add(heading[1].length, offset, "area");
+  }
+  for (const match of line.slice(offset).matchAll(tokens)) {
+    const value = match[0], from = offset + match.index, end = from + value.length;
+    if (value.startsWith("[[")) {
+      const closed = value.endsWith("]]"), targetEnd = closed ? end - 2 : end;
+      const alias = value.indexOf("|"), anchor = value.indexOf("#");
+      const separator = alias < 0 ? targetEnd : from + alias;
+      const section = anchor >= 0 && from + anchor < separator ? from + anchor : separator;
+      add(from, from + 2, "punctuation");
+      add(from + 2, section, "link");
+      add(section, separator, "section");
+      if (alias >= 0) {
+        add(separator, separator + 1, "punctuation");
+        add(separator + 1, targetEnd, "alias");
+      }
+      add(targetEnd, end, "punctuation");
+    } else {
+      let kind = "duration";
+      if (value.startsWith("<!--")) kind = "comment";
+      else if (value.includes(":")) kind = /date:/i.test(value) ? "keyword" : "time";
+      else if (/^\d{4}-/.test(value)) kind = "date";
+      else if (value.startsWith("=")) kind = "count";
+      else if (value.trim() === "-") kind = "punctuation";
+      add(from, end, kind);
+    }
+  }
+  return parts;
+}
+function renderSyntaxLine(parent, line, areas) {
+  let cursor = 0;
+  for (const { from, to, kind } of syntaxTokens(line)) {
+    parent.append(line.slice(cursor, from));
+    const value = line.slice(from, to);
+    const span = parent.createSpan({ text: value, cls: "tempvs-syntax-" + kind });
+    if (kind === "area") {
+      const area = areas.find((a) => a.name.toLowerCase() === value.replace(/^@/, "").toLowerCase());
+      if (area) {
+        span.addClass("tempvs-area-mark");
+        span.style.setProperty("--tempvs-area-color", area.color);
+      }
+    }
+    cursor = to;
+  }
+  parent.append(line.slice(cursor));
+}
+
+// obsidian/syntax-editor.js
+function syntaxExtension() {
+  const { Decoration, ViewPlugin } = require("@codemirror/view");
+  return ViewPlugin.fromClass(class {
+    constructor(view) {
+      this.rebuild(view, true);
+    }
+    update(update) {
+      if (update.docChanged || update.viewportChanged) this.rebuild(update.view, update.docChanged);
+    }
+    rebuild(view, documentChanged) {
+      const doc = view.state.doc;
+      if (documentChanged) this.blocks = findDailyBlocks(doc.toString(), true);
+      const marks = [];
+      for (const block of this.blocks) {
+        for (const visible of view.visibleRanges) {
+          const from = Math.max(block.start, visible.from), to = Math.min(block.end, visible.to);
+          if (from >= to) continue;
+          const first = doc.lineAt(from).number, last = doc.lineAt(to - 1).number;
+          for (let n = first; n <= last; n++) {
+            const line = doc.line(n);
+            for (const token of syntaxTokens(line.text)) {
+              const start = Math.max(from, line.from + token.from), end = Math.min(to, line.from + token.to);
+              if (start < end) marks.push(Decoration.mark({ class: "tempvs-syntax-" + token.kind }).range(start, end));
+            }
+          }
+        }
+      }
+      this.decorations = Decoration.set(marks, true);
+    }
+  }, { decorations: (instance) => instance.decorations });
+}
+
+// obsidian/note-picker.js
+var import_obsidian = require("obsidian");
+var fold = (text) => String(text).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase();
+var safeLabel = (text) => String(text).replace(/[\r\n|\[\]]/g, " ").trim();
+var SessionNotePicker = class extends import_obsidian.Modal {
+  constructor(app, save) {
+    super(app);
+    this.save = save;
+    this.activeFile = app.workspace.getActiveFile?.() || app.workspace.getMostRecentLeaf?.()?.view?.file;
+  }
+  onOpen() {
+    this.contentEl.addClass("tempvs-picker");
+    this.files = (this.app.vault?.getMarkdownFiles?.() || []).map((file) => {
+      const meta = this.app.metadataCache?.getFileCache(file)?.frontmatter || {};
+      const title = String(meta.title || file.basename);
+      const aliases = [].concat(meta.aliases || meta.alias || []);
+      return { file, title, search: fold([title, file.path, ...aliases].join(" ")) };
+    });
+    this.searchFiles();
+  }
+  choice(parent, title, action2, subtitle) {
+    const button2 = parent.createEl("button", { attr: { type: "button" } });
+    button2.createSpan({ text: title });
+    if (subtitle) button2.createEl("small", { text: subtitle });
+    button2.onclick = action2;
+    return button2;
+  }
+  searchFiles() {
+    const el = this.contentEl;
+    el.empty();
+    el.createEl("h3", { text: "Collega nota" });
+    const input = el.createEl("input", { attr: { type: "search", "aria-label": "Cerca nota", placeholder: "Titolo, alias, nome file o [[wikilink]]" } });
+    const results = el.createDiv({ cls: "tempvs-picker-results" });
+    const render = () => {
+      results.empty();
+      const query = input.value.trim();
+      if (query.startsWith("[[")) {
+        this.choice(results, "Collega wikilink", () => this.commit(query), query);
+        return;
+      }
+      const words = fold(query).split(/\s+/);
+      const active = this.files.find((entry) => entry.file.path === this.activeFile?.path);
+      if (!query && active) this.choice(results, "Usa la nota aperta", () => this.selectFile(active), active.title);
+      const matches = this.files.filter((entry) => words.every((word) => entry.search.includes(word)));
+      for (const entry of matches.slice(0, 50)) this.choice(results, entry.title, () => this.selectFile(entry), entry.file.path);
+      if (!matches.length) results.createEl("p", { text: "Nessuna nota trovata." });
+      if (matches.length > 50) results.createEl("small", { text: "Affina la ricerca per vedere altri risultati." });
+    };
+    input.oninput = render;
+    input.onkeydown = (event) => {
+      if (event.key === "Enter") results.querySelector("button")?.click();
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        results.querySelector("button")?.focus();
+      }
+    };
+    render();
+    input.focus();
+  }
+  selectFile({ file, title }) {
+    const path = file.path.replace(/\.md$/i, "");
+    const link = (target, label) => this.commit("[[" + target + "|" + safeLabel(label) + "]]");
+    const headings = this.app.metadataCache?.getFileCache(file)?.headings || [];
+    if (!headings.length) return link(path, title);
+    const el = this.contentEl;
+    el.empty();
+    el.createEl("h3", { text: title });
+    this.choice(el, "Collega nota intera", () => link(path, title)).focus();
+    const results = el.createDiv({ cls: "tempvs-picker-results" });
+    for (const { heading, level } of headings) {
+      this.choice(results, heading, () => link(path + "#" + heading, heading), "H" + level);
+    }
+    this.choice(el, "Torna alla ricerca", () => this.searchFiles());
+  }
+  async commit(value) {
+    if (this.saving) return;
+    this.saving = true;
+    try {
+      await this.save(value);
+      this.close();
+    } catch (error) {
+      new import_obsidian.Notice(error.message);
+    } finally {
+      this.saving = false;
+    }
+  }
+  onClose() {
+    this.contentEl.empty();
+    this.files = [];
+  }
+};
+
+// obsidian/session-notes.js
+function sessionNotes(session, estimates = []) {
+  if (session.linkedNotes?.length) return session.linkedNotes;
+  const legacy = estimates.find((n) => n.id === session.noteEstimateId);
+  return legacy ? [{ path: legacy.path, label: legacy.title }] : [];
+}
+function updatedSessionNotes(session, input, { removePath, primaryPath, replacePrimary = false, estimates = [] } = {}) {
+  const previous = sessionNotes(session, estimates);
+  if (removePath !== void 0) return previous.filter((n) => n.path !== removePath);
+  if (primaryPath !== void 0) {
+    const primary = previous.find((note) => note.path === primaryPath);
+    return primary ? [primary, ...previous.filter((note) => note !== primary)] : previous;
+  }
+  const text = input.trim();
+  if (!text) return replacePrimary ? previous.slice(1) : previous;
+  const links = noteLinks(text.startsWith("[[") ? text : "[[" + text + "]]");
+  if (links.length !== 1 || /[\r\n]/.test(text) || text.startsWith("[[") && !/^\[\[[^\]\n]+\]\]$/.test(text)) throw Error("Scegli una sola nota: [[nota|titolo]].");
+  if (replacePrimary) return [links[0], ...previous.slice(1).filter((note) => note.path !== links[0].path)];
+  return previous.some((note) => note.path === links[0].path) ? previous : [...previous, links[0]];
+}
+function groupSessions(sessions, estimates = []) {
+  const groups = [];
+  for (const session of sessions) {
+    const notes = sessionNotes(session, estimates);
+    const key2 = JSON.stringify([session.areaId || session.area || session.title, session.noteBlockId || "", session.date, notes]);
+    const last = groups.at(-1);
+    if (last && last.key === key2 && +sessionBounds(last.sessions.at(-1)).end === +sessionBounds(session).start) last.sessions.push(session);
+    else groups.push({ key: key2, notes, sessions: [session] });
+  }
+  return groups;
+}
+
+// obsidian/note-estimates.js
+var import_obsidian2 = require("obsidian");
+var uid = () => globalThis.crypto?.randomUUID?.() || Date.now().toString(36) + "-" + Math.random().toString(36).slice(2);
+var action = (el, label, fn) => {
+  const b = el.createEl("button", { text: label });
+  b.onclick = () => Promise.resolve().then(fn).catch((e) => new import_obsidian2.Notice(e.message));
+  return b;
+};
+var NoteEstimates = class {
+  constructor(plugin) {
+    this.plugin = plugin;
+    this.preferences = /* @__PURE__ */ new Map();
+  }
+  get notes() {
+    return estimatesOf(this.plugin.state);
+  }
+  get vault() {
+    return this.plugin.app.vault?.getName?.() || "";
+  }
+  find(path) {
+    return this.notes.find((n) => n.path === path && n.vault === this.vault);
+  }
+  async sync(context) {
+    const { file, block } = context, entries = parseEstimate(block.source, this.plugin.config.areas), old = this.find(file.path);
+    if (old && !old.archived && JSON.stringify(old.entries) === JSON.stringify(entries)) return;
+    await this.plugin.change(() => {
+      var _a;
+      const notes = (_a = this.plugin.config).noteEstimates ?? (_a.noteEstimates = {});
+      const preferred = "note:" + encodeURIComponent(this.vault) + "/" + encodeURIComponent(file.path);
+      const id = old?.id || (notes[preferred] ? preferred + "/" + uid() : preferred);
+      notes[id] = { ...old, id, vault: this.vault, path: file.path, title: file.basename, entries, archived: false, completed: old?.completed || false };
+    });
+  }
+  async archive(path) {
+    const note = this.find(path);
+    if (!note || note.archived) return;
+    await this.plugin.change(() => {
+      this.plugin.config.noteEstimates[note.id].archived = true;
+    });
+  }
+  available(session) {
+    return this.notes.filter((n) => !n.archived && !n.completed && n.entries.some((e) => matchesArea(e, session)));
+  }
+  async assign(sessionId, noteId) {
+    const note = this.notes.find((n) => n.id === noteId);
+    await this.plugin.setSessionNote([sessionId], note ? "[[" + note.path + "|" + note.title + "]]" : "", { replacePrimary: true });
+  }
+  async assignDay(note, day) {
+    const sessions = this.plugin.state.sessions.filter((s) => s.date === day && !s.linkedNotes?.length && !s.noteEstimateId && !s.finished && sessionBounds(s).start > /* @__PURE__ */ new Date() && note.entries.some((e) => matchesArea(e, s)));
+    for (const s of sessions) await this.assign(s.id, note.id);
+    new import_obsidian2.Notice(sessions.length ? `${sessions.length} sessioni collegate a ${note.title}.` : "Nessuna sessione futura libera.");
+  }
+  async start(note, entry) {
+    if (entry.kind === "total") throw Error("La stima @14h non imposta un\u2019area: avvia una sessione dall\u2019agenda e collega la nota.");
+    const plugin = this.plugin, now = /* @__PURE__ */ new Date(), end = manualSessionEnd(now, entry.minutes), cycle = grossCycle(entry.minutes);
+    const session = { id: uid(), title: entry.area, area: entry.area, areaId: entry.areaId, date: localDateString(now), start: formatTime(now), end: formatTime(end), timerStartedAt: now.toISOString(), timerEndsAt: end.toISOString(), workMinutes: cycle.focusMinutes, cycleMinutes: entry.minutes, breakEnabled: true, actualSeconds: 0, linkedNotes: [{ path: note.path, label: note.title }] };
+    if (plugin.state.sessions.some((s) => !s.finished && sessionBounds(s).start < end && sessionBounds(s).end > now)) throw Error("Questo intervallo \xE8 gi\xE0 occupato. Assegna la nota alla sessione in agenda.");
+    await plugin.change(() => plugin.state.sessions.push(session));
+  }
+  totals() {
+    const cache = this.plugin.app.metadataCache;
+    return creditedWork(this.plugin.state, (p, source) => cache?.getFirstLinkpathDest?.(p, source)?.path, (id) => this.plugin.dailyNotes?.[id]?.path);
+  }
+  progress(note, totals) {
+    const { estimated } = estimateProgress(note, this.plugin.state), done = totals.get(note.path) || 0;
+    return { estimated, done, remaining: Math.max(0, estimated - done), difference: done - estimated, percent: 100 * done / estimated };
+  }
+  render(parent, note, day = localDateString(), panel = false, totals = this.totals()) {
+    const p = this.progress(note, totals), box = parent.createDiv({ cls: "tempvs-estimate" });
+    if (panel) action(box, note.title, () => this.plugin.app.workspace.openLinkText(note.path, "", false));
+    const names = [...new Set(note.entries.map((entry) => entry.area).filter(Boolean))];
+    box.createEl("p", { text: (names.join(" / ") || "Tutte le aree") + " \xB7 Tempo registrato " + estimateTime(p.done) + " su " + estimateTime(p.estimated) });
+    box.createEl("strong", { text: estimateResult(note, p) });
+    const actions = box.createDiv({ cls: "tempvs-estimate-actions" });
+    const choices = this.preferences.get(note.id) || {};
+    const areas = this.plugin.config.areas.filter((area2) => note.entries.some((entry) => matchesArea(entry, { area: area2.name, areaId: area2.id })));
+    const area = areas.find((a) => a.id === choices.areaId) || areas[0];
+    if (!note.completed && area) {
+      action(actions, "Avvia " + area.name, () => {
+        const selected = areas.find((a) => a.id === choices.areaId) || area;
+        return this.start(note, { area: selected.name, areaId: selected.id, minutes: choices.minutes || 30 });
+      });
+    }
+    const menu = actions.createEl("details", { cls: "tempvs-estimate-menu" });
+    menu.createEl("summary", { text: "\u22EF", attr: { "aria-label": "Azioni studio" } });
+    if (!note.completed) {
+      if (areas.length > 1) {
+        const select = menu.createEl("select", { attr: { "aria-label": "Area di avvio" } });
+        for (const a of areas) select.createEl("option", { text: a.name, attr: { value: a.id } });
+        select.value = area.id;
+        select.onchange = () => {
+          choices.areaId = select.value;
+          this.preferences.set(note.id, choices);
+          this.plugin.refresh(true);
+        };
+      }
+      const label = menu.createEl("label", { text: "Durata sessione " });
+      const input = label.createEl("input", { attr: { type: "number", min: 1, max: 1439, value: choices.minutes || 30 } });
+      input.onchange = () => {
+        const minutes = input.valueAsNumber;
+        if (!Number.isInteger(minutes) || minutes < 1 || minutes > 1439) {
+          input.value = String(choices.minutes || 30);
+          new import_obsidian2.Notice("Scegli da 1 a 1439 minuti.");
+          return;
+        }
+        choices.minutes = minutes;
+        this.preferences.set(note.id, choices);
+      };
+      action(menu, "Collega alle sessioni libere del giorno", () => this.assignDay(note, day));
+    }
+    action(menu, note.completed ? "Riapri attivit\xE0" : "Segna completata", () => this.plugin.change(() => {
+      setEstimateCompleted(this.plugin.config.noteEstimates[note.id], this.plugin.state, !note.completed);
+    }));
+    return box;
+  }
+  renderPanel(parent, day) {
+    const open = new Set([...parent.querySelectorAll(".tempvs-estimate-details[open]")].map((el) => el.dataset.noteId));
+    const menus = new Set([...parent.querySelectorAll(".tempvs-estimate-menu[open]")].map((el) => el.closest(".tempvs-estimate-details").dataset.noteId));
+    parent.empty();
+    const notes = this.notes.filter((n) => !n.archived);
+    const totals = this.totals(), estimatedPaths = new Set(notes.map((n) => n.path));
+    if (!notes.length && !totals.size) return;
+    parent.createEl("h4", { text: "Note e stime" });
+    for (const [path, seconds] of totals) if (!estimatedPaths.has(path)) {
+      const row = parent.createDiv();
+      action(row, path.split("/").pop().replace(/\.md$/i, ""), () => this.plugin.app.workspace.openLinkText(path, "", false));
+      row.createSpan({ text: " \xB7 " + estimateTime(seconds) });
+    }
+    for (const note of notes) {
+      const details = parent.createEl("details", { cls: "tempvs-estimate-details" });
+      details.dataset.noteId = note.id;
+      details.open = open.has(note.id);
+      details.createEl("summary", { text: note.title + " \xB7 " + (note.completed ? "completato" : Math.floor(this.progress(note, totals).percent) + "%") });
+      this.render(details, note, day, true, totals);
+      details.querySelector(".tempvs-estimate-menu").open = menus.has(note.id);
+    }
+  }
+  selector(parent, session) {
+    const notes = this.available(session), current = this.notes.find((n) => n.id === session.noteEstimateId);
+    if (!notes.length && !current) return;
+    if (current && !notes.includes(current)) notes.push(current);
+    const select = parent.createEl("select", { cls: "tempvs-note-assignment", attr: { "aria-label": "Nota della sessione " + session.start } });
+    select.createEl("option", { value: "", text: "Solo area \xB7 nessuna nota" });
+    for (const n of notes) select.createEl("option", { value: n.id, text: n.title + (n.completed ? " (completata)" : "") });
+    select.value = session.noteEstimateId || "";
+    select.onchange = () => this.assign(session.id, select.value).catch((e) => new import_obsidian2.Notice(e.message));
+  }
+};
+
+// obsidian/moved-links.js
+function movedTarget(target, oldPath, newPath, sourcePath, resolve) {
+  const match = /^([^#]+)(#.*)?$/.exec(target);
+  if (!match) return target;
+  const [, raw, fragment = ""] = match;
+  let local = raw;
+  if (/^\.{1,2}\//.test(raw) && sourcePath) {
+    const parts = sourcePath.split("/").slice(0, -1);
+    for (const part of raw.split("/")) {
+      if (part === "..") parts.pop();
+      else if (part && part !== ".") parts.push(part);
+    }
+    local = parts.join("/");
+  }
+  const path = local.replace(/^\//, "");
+  const withoutMd = (value) => value.replace(/\.md$/i, "");
+  let destination;
+  if (withoutMd(path) === withoutMd(oldPath)) {
+    destination = newPath;
+  } else if (path.startsWith(oldPath + "/")) {
+    destination = newPath + path.slice(oldPath.length);
+  } else if (withoutMd(oldPath).endsWith("/" + withoutMd(path))) {
+    const other = resolve?.(path, sourcePath);
+    if (other && other.path !== newPath) return target;
+    destination = newPath;
+  } else {
+    return target;
+  }
+  return (raw.startsWith("/") ? "/" : "") + (/\.md$/i.test(path) ? destination : withoutMd(destination)) + fragment;
+}
+function moveBlockLinks(source, move) {
+  return source.replace(/\[\[([^\]|\n]+)(\|[^\]\n]*)?\]\]/g, (original, path, alias = "") => {
+    const next = move(path.trim());
+    return next === path.trim() ? original : "[[" + next + alias + "]]";
+  });
+}
+function archivedLinkResolver(files, estimates, vaultName) {
+  const key2 = (path) => path.replace(/^\//, "").replace(/\.md$/i, "");
+  const basename = (path) => path.split("/").pop();
+  const paths = new Set(files.map((file) => key2(file.path)));
+  const candidates = /* @__PURE__ */ new Map();
+  const add = (from, to) => {
+    if (!candidates.has(from)) candidates.set(from, /* @__PURE__ */ new Set());
+    candidates.get(from).add(to);
+  };
+  for (const file of files) add(basename(key2(file.path)), file.path);
+  const archiveOnly = (path) => /^(?:archive|archivio)\//i.test(path);
+  const prefix = "note:" + encodeURIComponent(vaultName) + "/";
+  for (const note of estimates) {
+    if (!archiveOnly(note.path) || !paths.has(key2(note.path)) || !note.id.startsWith(prefix)) continue;
+    const encoded = note.id.slice(prefix.length);
+    if (encoded.includes("/")) continue;
+    let original;
+    try {
+      original = key2(decodeURIComponent(encoded));
+    } catch {
+      continue;
+    }
+    add(original, note.path);
+    add(basename(original), note.path);
+  }
+  return (target) => {
+    const [, raw, fragment = ""] = /^([^#]*)(#.*)?$/.exec(target);
+    const path = key2(raw);
+    if (!path || paths.has(path) || raw.includes(".") && !/\.md$/i.test(raw) && !candidates.has(basename(path))) return target;
+    const matches = candidates.get(path) || candidates.get(basename(path));
+    if (matches?.size !== 1) return target;
+    const [destination] = matches;
+    if (!archiveOnly(destination)) return target;
+    return (/\.md$/i.test(raw) ? destination : key2(destination)) + fragment;
+  };
+}
+
 // obsidian/daily-blocks.js
+var import_obsidian3 = require("obsidian");
 var uid2 = () => globalThis.crypto?.randomUUID?.() || Date.now().toString(36) + "-" + Math.random().toString(36).slice(2);
 var plain = (source) => source.split(/\r?\n/).filter((line) => !/^\s*<!-- tempvs-block:/.test(line)).map((line) => line.replace(/\s*<!-- tempvs-session:[^>]+-->\s*$/, "")).join("\n");
 function restoreRowIds(original, edited) {
@@ -1847,13 +1935,7 @@ var DailyBlock = class extends import_obsidian3.MarkdownRenderChild {
       const lines = plain(this.source).split("\n");
       for (const [index, line] of lines.entries()) {
         if (index) code.append("\n");
-        const span = code.createSpan({ text: line });
-        const name = line.trim().split(/\s+(?=[+@])/)[0].toLocaleLowerCase();
-        const area = this.controller.plugin.config.areas.find((a) => a.name.toLocaleLowerCase() === name);
-        if (area) {
-          span.addClass("tempvs-area-mark");
-          span.style.setProperty("--tempvs-area-color", area.color);
-        }
+        renderSyntaxLine(code, line, this.controller.plugin.config.areas);
       }
       const error = this.controller.errors.get(this.ctx.sourcePath);
       const binding = this.controller.bindings[this.controller.bindingId(this.ctx.sourcePath)];
@@ -3732,6 +3814,7 @@ var TempvsPlugin = class extends import_obsidian5.Plugin {
       }
     });
     this.estimates = new NoteEstimates(this);
+    this.registerEditorExtension?.(syntaxExtension());
     this.daily = new DailyBlocks(this);
     this.daily.start();
     this.registerView(VIEW_TYPE, (leaf) => new TempvsView(leaf, this));

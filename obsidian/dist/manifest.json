@@ -1,7 +1,7 @@
 {
   "id": "tempo-pomodoro",
   "name": "Tempo — Pomodoro",
-  "version": "0.5.24",
+  "version": "0.5.25",
   "minAppVersion": "1.5.0",
   "description": "TEMPVS: timer, agenda con sessioni collegate alle note anche dopo l’archiviazione, stime e sincronizzazione Dropbox.",
   "author": "Tempo",
