@@ -122,3 +122,21 @@ L’avanzamento comprende la concentrazione registrata dal timer e, da 0.5.13, l
 La proiezione giornaliera considera tutto il focus ancora disponibile nelle sessioni programmate per le aree della nota nel giorno visualizzato, anche se assegnate ad altre note: è l’ipotesi «se dedicassi tutti questi slot a questa attività», non una modifica della programmazione. Non assume una giornata lavorativa di durata arbitraria. In mancanza di slot, la proiezione non viene calcolata.
 
 Modificare il blocco aggiorna la stima conservando l’avanzamento. Rimuovere il blocco nasconde la stima ma conserva i dati; reinserirlo nello stesso file la ripristina. Rinominare o spostare la nota mentre Obsidian è aperto conserva l’identità. Le stime, le assegnazioni e i progressi sono inclusi nel backup e nella sincronizzazione Dropbox; sono visibili anche nella PWA, che non legge direttamente i file del vault. La PWA permette di assegnare le note sincronizzate alle sessioni e registrarne il lavoro.
+
+## Registro giornaliero per sessione
+
+```TEMPVS
+date: 1995-01-01
+Studio @2h 14:00 = 4
+- [[Aritmetica]]
+- [[Geometria|Geo]]
+- [[Fisica]]
+Personale @1h = 1
+- [[Spesa]]
+```
+
+Ogni quota è registrata subito per intero, pause comprese. Le prime tre note ricevono 30 minuti ciascuna. La quarta quota di Studio conta solo per l’area. Spesa riceve 60 minuti senza orario. La data si può omettere nelle note quotidiane con data riconoscibile.
+
+L’orario sull’area avvia una sequenza. Una riga come `- 16:00 [[Fisica]]` fissa un nuovo inizio e le sessioni successive proseguono da lì. Una riga con il solo trattino lascia la quota all’area. I minuti indivisibili sono distribuiti sulle prime sessioni. Il timer segue gli intervalli con orario. Il registro conserva la durata dichiarata anche con Obsidian chiuso.
+
+Modificare la durata, il numero di quote o un wikilink aggiorna i totali. Le note senza stima compaiono nel pannello con il tempo svolto. Per una stima facoltativa si può usare la proprietà YAML `tempvs: 8h` oppure il blocco di stima `@8h`.

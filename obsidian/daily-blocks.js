@@ -3,7 +3,7 @@ import {isEstimateSource} from '../core/tempo-estimates.js';
 import {MarkdownRenderChild,Notice,moment} from 'obsidian';
 import {normalizeArchive} from '../core/tempo-simple.js';
 import {sessionBounds} from '../core/tempo-core.js';
-import {findDailyBlocks,blockIdentity,explicitDay,resolveDailyDate,replaceDailyBlock,prepareDailyPlan,applyDailyPlan,serializeDailyPlan,archivePlanningKey,daySessions,isLocked} from './daily-plan.js';
+import {isRegister,applyRegister,findDailyBlocks,blockIdentity,explicitDay,resolveDailyDate,replaceDailyBlock,prepareDailyPlan,applyDailyPlan,serializeDailyPlan,archivePlanningKey,daySessions,isLocked} from './daily-plan.js';
 
 const uid=()=>globalThis.crypto?.randomUUID?.()||Date.now().toString(36)+'-'+Math.random().toString(36).slice(2);
 const plain=source=>source.split(/\r?\n/).filter(line=>!/^\s*<!-- tempvs-block:/.test(line)).map(line=>line.replace(/\s*<!-- tempvs-session:[^>]+-->\s*$/,'')).join('\n');
@@ -123,7 +123,11 @@ export class DailyBlocks {
   const file=this.plugin.app.vault.getAbstractFileByPath(path);
   if(!file||file.extension!=='md')throw Error('La nota Markdown non è più disponibile.');
   const markdown=await this.readMarkdown(file),blocks=findDailyBlocks(markdown);
-  if(!blocks.length)return null;
+  if(!blocks.length){
+   const value=this.plugin.app.metadataCache?.getFileCache(file)?.frontmatter?.tempvs;
+   if(typeof value==='string'&&/^@?\d+(?:[.,]\d+)?[hm]$/i.test(value.trim()))return {file,kind:'estimate',block:{source:'@'+value.trim().replace(/^@/,'')}};
+   return null;
+  }
   if(blocks.length!==1)throw Error('Usa un solo blocco TEMPVS per nota giornaliera.');
   const block=blocks[0];
   if(!block.source.trim()&&this.plugin.estimates?.find(file.path))return {file,block,markdown,kind:"estimate-empty"};
@@ -147,7 +151,18 @@ export class DailyBlocks {
  syncFile(path,{force=false}={}){return this.queue(async()=>{
   if(this.detached.has(path))return;
   const context=await this.context(path);
-  if(!context){await this.syncEstimate(null,path);return;}
+  if(!context){
+   const id=this.bindingId(path);
+   if(id&&isRegister(this.bindings[id].source)){
+    this.applying=true;
+    try{await this.plugin.change(()=>{
+     const removeIds=this.plugin.state.sessions.filter(s=>s.noteBlockId===id).map(s=>s.id);
+     applyRegister(this.plugin.state,{blockId:id,sessions:[],records:[],removeIds});
+     delete this.bindings[id];
+    });}finally{this.applying=false;}
+   }
+   await this.syncEstimate(null,path);return;
+  }
   if(context.kind==="estimate-empty"){await this.syncEstimate(null,path);this.errors.delete(path);this.refresh(path);return;}
   if(context.kind==="estimate"){await this.syncEstimate(context,path);this.errors.delete(path);this.refresh(path);return;}
   await this.syncEstimate(null,path);
@@ -194,7 +209,7 @@ export class DailyBlocks {
   this.validateBinding(prepared.blockId,prepared.file.path,prepared.date);
   const newIds=prepared.sessions.filter(s=>!this.plugin.state.sessions.some(current=>current.id===s.id)).map(s=>s.id);
   const fresh=prepareDailyPlan({source:prepared.source,date:prepared.date,blockId:prepared.blockId,previousSource:prepared.previousSource,protectedBlockIds:prepared.protectedBlockIds,state:this.plugin.state,id:()=>newIds.shift()||uid()});
-  const body=prepared.keepSource?plain(prepared.source):serializeDailyPlan(fresh.sessions,prepared.date);
+  const body=prepared.keepSource||fresh.records?plain(prepared.source):serializeDailyPlan(fresh.sessions,prepared.date);
   const canonical=explicitDay(prepared.originalSource)&&!explicitDay(body)?'date: '+prepared.date+'\n'+body:body;
   const previousBinding=this.bindings[prepared.blockId];
   this.applying=true;
@@ -228,6 +243,7 @@ export class DailyBlocks {
   const binding=this.bindings[blockId];if(!binding)throw Error('Nota giornaliera non collegata.');
   const context=await this.context(binding.path);
   if(!context||context.block.source!==binding.source)throw Error('La nota giornaliera sta cambiando: attendi la sincronizzazione e riprova.');
+  if(isRegister(binding.source))throw Error("Modifica il wikilink nella riga della nota quotidiana.");
   const sessions=daySessions(this.plugin.state,binding.date,blockId).filter(s=>!binding.hiddenSessionIds?.includes(s.id)).map(s=>updates.has(s.id)?{...s,linkedNotes:updates.get(s.id)}:s);
   const body=serializeDailyPlan(sessions,binding.date);
   const source=explicitDay(binding.source)?'date: '+binding.date+'\n'+body:body;
@@ -262,6 +278,7 @@ export class DailyBlocks {
      // Edits in the note win. Never replace incomplete or unsaved user input.
      if(context.kind==="estimate"||binding.agendaVersion!==2||binding.ratioVersion!==1||context.block.source!==binding.source){this.schedule(binding.path);continue;}
      const sessions=daySessions(this.plugin.state,binding.date,blockId).filter(s=>!binding.hiddenSessionIds?.includes(s.id));
+     if(isRegister(binding.source)||sessions.some(s=>s.registerMinutes))continue;
      const body=serializeDailyPlan(sessions,binding.date);
      const source=explicitDay(binding.source)?'date: '+binding.date+'\n'+body:body;
      if(source===binding.source)continue;
@@ -324,9 +341,14 @@ class DailyBlock extends MarkdownRenderChild {
    }
    const error=this.controller.errors.get(this.ctx.sourcePath);
    const binding=this.controller.bindings[this.controller.bindingId(this.ctx.sourcePath)];
-   const manual=daySessions(this.controller.plugin.state,context.date,this.controller.bindingId(this.ctx.sourcePath)).filter(s=>s.actualSource==='manual');
-   const actual=manual.reduce((n,s)=>n+(s.actualSeconds||0),0)/60;
-   el.createEl('small',{text:error|| (binding?.source===this.source?'Intervalli sincronizzati'+(manual.length?' · '+new Intl.NumberFormat('it-IT',{maximumFractionDigits:2}).format(actual)+' min effettivi con correzioni manuali':'')+(binding.unusedMinutes?' · '+binding.unusedMinutes+' minuti finali liberi':''):'Aggiornamento automatico…'),cls:error?'tempvs-daily-error':'tempvs-muted',attr:{role:error?'alert':'status'}});
+   if(isRegister(this.source)){
+    const rows=this.controller.plugin.state.history.filter(h=>h.registerBlock===this.controller.bindingId(this.ctx.sourcePath));
+    el.createEl('small',{text:error||rows.reduce((sum,h)=>sum+h.minutes,0)+' min registrati, pause comprese',attr:{role:error?'alert':'status'}});
+    return;
+   }
+   const manual=daySessions(this.controller.plugin.state,context.date,this.controller.bindingId(this.ctx.sourcePath)).filter(s=>s.noteBlockId===this.controller.bindingId(this.ctx.sourcePath));
+   const actual=manual.reduce((n,s)=>n+(sessionBounds(s).end-sessionBounds(s).start),0)/60000;
+   el.createEl('small',{text:error|| (binding?.source===this.source?'Intervalli sincronizzati'+(manual.length?' · '+new Intl.NumberFormat('it-IT',{maximumFractionDigits:2}).format(actual)+' min registrati, pause comprese':'')+(binding.unusedMinutes?' · '+binding.unusedMinutes+' minuti finali liberi':''):'Aggiornamento automatico…'),cls:error?'tempvs-daily-error':'tempvs-muted',attr:{role:error?'alert':'status'}});
   }catch(error){if(this.disposed||version!==this.version)return;this.containerEl.empty();this.containerEl.createEl('p',{text:error.message,cls:'tempvs-daily-error'});}
  }
 }

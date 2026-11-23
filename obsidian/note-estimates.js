@@ -1,3 +1,4 @@
+import {creditedWork} from './daily-register.js';
 import {Notice} from 'obsidian';
 import {parseEstimate,estimatesOf,matchesArea,estimateProgress,estimateTime,estimateResult,setEstimateCompleted} from '../core/tempo-estimates.js';
 import {localDateString,sessionBounds,formatTime} from '../core/tempo-core.js';
@@ -39,8 +40,16 @@ export class NoteEstimates {
   if(plugin.state.sessions.some(s=>!s.finished&&sessionBounds(s).start<end&&sessionBounds(s).end>now))throw Error('Questo intervallo è già occupato. Assegna la nota alla sessione in agenda.');
   await plugin.change(()=>plugin.state.sessions.push(session));
  }
- render(parent,note,day=localDateString(),panel=false){
-  const state=this.plugin.state,p=estimateProgress(note,state),box=parent.createDiv({cls:'tempvs-estimate'});
+ totals(){
+  const cache=this.plugin.app.metadataCache;
+  return creditedWork(this.plugin.state,(p,source)=>cache?.getFirstLinkpathDest?.(p,source)?.path,id=>this.plugin.dailyNotes?.[id]?.path);
+ }
+ progress(note,totals){
+  const {estimated}=estimateProgress(note,this.plugin.state),done=totals.get(note.path)||0;
+  return {estimated,done,remaining:Math.max(0,estimated-done),difference:done-estimated,percent:100*done/estimated};
+ }
+ render(parent,note,day=localDateString(),panel=false,totals=this.totals()){
+  const p=this.progress(note,totals),box=parent.createDiv({cls:'tempvs-estimate'});
   if(panel)action(box,note.title,()=>this.plugin.app.workspace.openLinkText(note.path,'',false));
   const names=[...new Set(note.entries.map(entry=>entry.area).filter(Boolean))];
   box.createEl('p',{text:(names.join(' / ')||'Tutte le aree')+' · Tempo registrato '+estimateTime(p.done)+ ' su '+estimateTime(p.estimated)});
@@ -82,13 +91,19 @@ export class NoteEstimates {
   const open=new Set([...parent.querySelectorAll('.tempvs-estimate-details[open]')].map(el=>el.dataset.noteId));
   const menus=new Set([...parent.querySelectorAll('.tempvs-estimate-menu[open]')].map(el=>el.closest('.tempvs-estimate-details').dataset.noteId));
   parent.empty();const notes=this.notes.filter(n=>!n.archived);
-  if(!notes.length)return;
+  const totals=this.totals(),estimatedPaths=new Set(notes.map(n=>n.path));
+  if(!notes.length&&!totals.size)return;
   parent.createEl('h4',{text:'Note e stime'});
+  for(const [path,seconds] of totals)if(!estimatedPaths.has(path)){
+   const row=parent.createDiv();
+   action(row,path.split('/').pop().replace(/\.md$/i,''),()=>this.plugin.app.workspace.openLinkText(path,'',false));
+   row.createSpan({text:' · '+estimateTime(seconds)});
+  }
   for(const note of notes){
    const details=parent.createEl('details',{cls:'tempvs-estimate-details'});
    details.dataset.noteId=note.id;details.open=open.has(note.id);
-   details.createEl('summary',{text:note.title+' · '+(note.completed?'completato':Math.floor(estimateProgress(note,this.plugin.state).percent)+'%')});
-   this.render(details,note,day,true);
+   details.createEl('summary',{text:note.title+' · '+(note.completed?'completato':Math.floor(this.progress(note,totals).percent)+'%')});
+   this.render(details,note,day,true,totals);
    details.querySelector('.tempvs-estimate-menu').open=menus.has(note.id);
   }
  }

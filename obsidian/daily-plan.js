@@ -1,3 +1,5 @@
+import {isRegister,registerPlan,applyRegister} from './daily-register.js';
+export {isRegister,applyRegister};
 import {noteLinks} from './notes-integration.js';
 import {parseQuick,planSessions,normalizeArchive} from '../core/tempo-simple.js';
 import {localDateString,sessionBounds,dateTime,getPhase,sessionsOverlap,hasSessionOverlaps} from '../core/tempo-core.js';
@@ -136,10 +138,15 @@ function correctNoteWork(previous,seconds){
 }
 export function prepareDailyPlan({source,date,blockId,state,previousSource,protectedBlockIds,now=new Date(),id=()=>globalThis.crypto?.randomUUID?.()||Date.now().toString(36)+'-'+Math.random().toString(36).slice(2)}){
  if(!validDay(date))throw Error('Data non valida.');
+ const register=isRegister(source)||(!source.split(/\r?\n/).some(line=>line.trim()&&!datePattern.test(line)&&!blockPattern.test(line))&&isRegister(previousSource));
+ if(register){
+  blockIdentity(source);explicitDay(source);
+  return {...registerPlan({source,date,blockId,state,id,planningKey:archivePlanningKey(state)}),previousSource,protectedBlockIds};
+ }
  const areas=state.defaults.simple.areas,requests=parseDailySource(source,areas),owned=state.sessions.filter(s=>s.noteBlockId===blockId);
  const protectedBlocks=protectedBlockIds===undefined?null:new Set(protectedBlockIds);
  const foreign=s=>s.noteBlockId&&s.noteBlockId!==blockId&&(protectedBlocks===null||protectedBlocks.has(s.noteBlockId));
- const changes=rowChanges(source,previousSource,areas,owned,date),positions=new Map();
+ const changes=rowChanges(source,isRegister(previousSource)?undefined:previousSource,areas,owned,date),positions=new Map();
  const candidates=[],claimed=new Set(),correctionIds=[],correctedRows=new Set();
  for(const request of requests){
   const dateOf=request.dayOffset?dayAfter(date):date,start=dateTime(dateOf,request.start),elapsed=start<=now;
@@ -194,6 +201,12 @@ export function prepareDailyPlan({source,date,blockId,state,previousSource,prote
  return {date,blockId,sessions:candidates,correctionIds,supersededIds:superseded.map(s=>s.id),retainedIds,retireIds,removeIds:removed.map(s=>s.id),unusedMinutes:requests.reduce((n,r)=>n+(r.unusedMinutes||0),0),planningKey:archivePlanningKey(state),recordedAt:now.toISOString(),source,previousSource,protectedBlockIds};
 }
 export function applyDailyPlan(state,proposal){
+ if(proposal.records){applyRegister(state,proposal);return;}
+ const oldRecords=state.history.filter(h=>h.registerBlock===proposal.blockId);
+ if(oldRecords.length){
+  state.history=state.history.filter(h=>h.registerBlock!==proposal.blockId);
+  state.syncDeleted.history=[...new Set([...(state.syncDeleted.history||[]),...oldRecords.map(h=>h.sessionId)])];
+ }
  const corrected=new Set(proposal.correctionIds||[]),affected=new Set([...proposal.sessions.map(s=>s.id),...proposal.removeIds]),current=new Map(state.sessions.map(s=>[s.id,s]));
  state.sessions=state.sessions.filter(s=>!affected.has(s.id)).concat(proposal.sessions.map(s=>{
   const previous=current.get(s.id);

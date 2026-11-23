@@ -372,7 +372,24 @@ class TempvsView extends ItemView {
     const list=root.querySelector(".tempvs-sessions");
     list.empty();
     const now=new Date();
+    const registered=plugin.state.history.filter(h=>h.registerBlock&&h.registerDay===this.day);
+    if(registered.length){
+      const table=list.createEl('table'),head=table.createEl('thead').createEl('tr'),body=table.createEl('tbody');
+      for(const label of ['Area','Orario','Nota','Durata'])head.createEl('th',{text:label});
+      for(const record of registered){
+        const row=body.createEl('tr');
+        row.createEl('td',{text:record.area});row.createEl('td',{text:record.start||'—'});
+        const cell=row.createEl('td'),note=record.linkedNotes[0];
+        if(note)button(cell,note.label,()=>plugin.app.workspace.openLinkText(note.path,plugin.dailyNotes[record.registerBlock]?.path||'',false));
+        else cell.setText('—');
+        row.createEl('td',{text:record.minutes+' min'});
+      }
+      const totals=new Map();
+      for(const r of registered)totals.set(r.area,(totals.get(r.area)||0)+r.minutes);
+      list.createEl('small',{text:[...totals].map(([area,min])=>area+' '+min+' min').join(' · ')});
+    }
     const sessions=plugin.state.sessions.filter(s=>{
+      if(s.registerMinutes)return false;
       if(s.dailyRetired||s.manualSuperseded)return false;
       return s.date===this.day || (this.day===today()&&sessionBounds(s).start<=now&&sessionBounds(s).end>now);
     }).sort((a,b)=>sessionBounds(a).start-sessionBounds(b).start);
@@ -405,7 +422,7 @@ class TempvsView extends ItemView {
         iconButton(item,"trash-2","Elimina sessione "+(first.area||first.title),()=>plugin.removeSession(first.id));
       }
     }
-    if(!sessions.length){
+    if(!sessions.length&&!registered.length){
       const empty=list.createDiv({cls:"tempvs-empty"});
       setIcon(empty.createDiv({cls:"tempvs-empty-icon"}),"calendar-check");
       empty.createEl("strong",{text:"Spazio per i tuoi progetti"});
@@ -892,4 +909,3 @@ export default class TempvsPlugin extends Plugin {
     await this.writeChain.catch(() => {});
   }
 }
-
