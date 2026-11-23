@@ -33,7 +33,7 @@ export function resolveDailyDate(source,file,{format='YYYY-MM-DD',moment,frontma
  throw Error('Data della daily note non riconosciuta. Aggiungi «date: YYYY-MM-DD» al blocco TEMPVS.');
 }
 // Parse only top-level fences; never interpret an example inside another code fence.
-export function findDailyBlocks(markdown){
+export function findDailyBlocks(markdown,includeUnclosed=false){
  const lines=markdown.match(/[^\n]*\n|[^\n]+$/g)||[];let fence=null,offset=0;const blocks=[];
  for(let i=0;i<lines.length;i++){
   const line=lines[i].replace(/\r?\n$/,'');
@@ -46,6 +46,7 @@ export function findDailyBlocks(markdown){
   }
   offset+=lines[i].length;
  }
+ if(includeUnclosed&&fence?.isTempvs)blocks.push({start:fence.start,end:markdown.length,lineStart:fence.line,source:markdown.slice(fence.start)});
  return blocks;
 }
 export function replaceDailyBlock(markdown,block,source){

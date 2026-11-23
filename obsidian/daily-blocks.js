@@ -1,3 +1,4 @@
+import {renderSyntaxLine} from './syntax.js';
 import {movedTarget,moveBlockLinks,archivedLinkResolver} from './moved-links.js';
 import {isEstimateSource} from '../core/tempo-estimates.js';
 import {MarkdownRenderChild,Notice,moment} from 'obsidian';
@@ -334,10 +335,7 @@ class DailyBlock extends MarkdownRenderChild {
    const lines=plain(this.source).split('\n');
    for(const [index,line] of lines.entries()){
     if(index)code.append('\n');
-    const span=code.createSpan({text:line});
-    const name=line.trim().split(/\s+(?=[+@])/)[0].toLocaleLowerCase();
-    const area=this.controller.plugin.config.areas.find(a=>a.name.toLocaleLowerCase()===name);
-    if(area){span.addClass('tempvs-area-mark');span.style.setProperty('--tempvs-area-color',area.color);}
+    renderSyntaxLine(code,line,this.controller.plugin.config.areas);
    }
    const error=this.controller.errors.get(this.ctx.sourcePath);
    const binding=this.controller.bindings[this.controller.bindingId(this.ctx.sourcePath)];

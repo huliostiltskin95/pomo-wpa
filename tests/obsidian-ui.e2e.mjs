@@ -120,6 +120,8 @@ try {
   await page.waitForFunction(()=>plugin.state.sessions.filter(s=>s.date==='2099-11-06').length===4);
   assert.equal(await daily.locator('button').count(),0);
   assert.equal(await daily.locator('textarea').count(),0);
+  assert.ok(await daily.locator('code .tempvs-syntax-area').count()>0);
+  assert.ok(await daily.locator('code .tempvs-syntax-time').count()>0);
   assert.doesNotMatch(await daily.locator('code').textContent(),/tempvs-session/);
   const ids=await page.evaluate(()=>plugin.state.sessions.filter(s=>s.date==='2099-11-06').map(s=>s.id));
   await page.evaluate(()=>{

@@ -1,3 +1,4 @@
+import {syntaxExtension} from './syntax-editor.js';
 import {readableDuration} from './area-register.js';
 import {SessionNotePicker} from './note-picker.js';
 import {groupSessions,sessionNotes,updatedSessionNotes} from './session-notes.js';
@@ -626,6 +627,7 @@ export default class TempvsPlugin extends Plugin {
       }
     });
     this.estimates=new NoteEstimates(this);
+    this.registerEditorExtension?.(syntaxExtension());
     this.daily=new DailyBlocks(this);this.daily.start();
     this.registerView(VIEW_TYPE, leaf => new TempvsView(leaf, this));
     this.addSettingTab(new TempvsSettings(this.app,this));

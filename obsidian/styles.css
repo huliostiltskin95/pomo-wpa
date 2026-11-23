@@ -179,3 +179,16 @@
 .tempvs-estimate-menu[open] { flex-basis:100%; }
 .tempvs-estimate-menu[open] > :is(label,button,select) { display:block; margin:6px 0; }
 .tempvs-estimate-menu input { width:5em; }
+
+/* TEMPVS syntax uses the theme's code palette in Reading View and CodeMirror. */
+:is(.tempvs-daily,.cm-editor) .tempvs-syntax-area { color:var(--code-function,var(--text-accent)); font-weight:650; }
+:is(.tempvs-daily,.cm-editor) .tempvs-syntax-duration { color:var(--code-value,var(--text-normal)); }
+:is(.tempvs-daily,.cm-editor) .tempvs-syntax-count { color:var(--code-keyword,var(--text-accent)); font-weight:600; }
+:is(.tempvs-daily,.cm-editor) .tempvs-syntax-time,
+:is(.tempvs-daily,.cm-editor) .tempvs-syntax-date { color:var(--code-string,var(--text-normal)); }
+:is(.tempvs-daily,.cm-editor) .tempvs-syntax-keyword { color:var(--code-keyword,var(--text-accent)); }
+:is(.tempvs-daily,.cm-editor) .tempvs-syntax-link { color:var(--link-color,var(--text-accent)); }
+:is(.tempvs-daily,.cm-editor) .tempvs-syntax-section { color:var(--code-property,var(--text-accent)); }
+:is(.tempvs-daily,.cm-editor) .tempvs-syntax-alias { color:var(--link-color,var(--text-accent)); font-style:italic; }
+:is(.tempvs-daily,.cm-editor) .tempvs-syntax-comment,
+:is(.tempvs-daily,.cm-editor) .tempvs-syntax-punctuation { color:var(--text-muted); }
