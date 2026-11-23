@@ -208,7 +208,7 @@ var quantity = "(\\d+(?:[.,]\\d+)?)([hms]?)";
 var time = "((?:[01]\\d|2[0-3]):[0-5]\\d)";
 var areaLine = new RegExp("^(.+?)\\s+@" + quantity + "$", "i");
 var taskLine = new RegExp("^-\\s*(\\[\\[[^\\]\\[]+\\]\\])\\s+@" + quantity + "\\s*=\\s*(\\d+)(?:\\s+\\+" + time + ")?$", "i");
-var compactTask = new RegExp("^-\\s*(\\[\\[[^\\]\\[]+\\]\\])\\s+" + quantity + "\\s*=\\s*(\\d+)\\s+@(.+?)$", "i");
+var compactTask = new RegExp("^-\\s*(\\[\\[[^\\]\\[]+\\]\\])\\s+" + quantity + "\\s*=\\s*(\\d+)(?:\\s+\\+" + time + ")?\\s+@(.+?)$", "i");
 var possibleTask = new RegExp("^-?\\s*(\\[\\[[^\\]\\[]+\\]\\])\\s*[@*]?\\s*" + quantity + "\\s*=?\\s+(\\d+)(?:\\s*\\+?\\s*" + time + ")?$", "i");
 var possibleArea = new RegExp("^(.+?)\\s+[@*]?" + quantity + "$", "i");
 var isAreaRegister = (source) => source?.split(/\r?\n/).some((line) => {
@@ -251,15 +251,15 @@ function parseAreaRegister(source, areas) {
       const compact = line.match(compactTask);
       const task = compact || line.match(taskLine);
       if (!task) throw Error("Sintassi da correggere. Prova: " + suggestion(line));
-      const area = compact ? areas.find((a) => a.name.toLowerCase() === compact[5].trim().toLowerCase()) : budget;
-      if (compact && !area) throw Error("Area sconosciuta: " + compact[5]);
+      const area = compact ? areas.find((a) => a.name.toLowerCase() === compact[6].trim().toLowerCase()) : budget;
+      if (compact && !area) throw Error("Area sconosciuta: " + compact[6]);
       if (!area) throw Error("Inserisci prima l\u2019area, per esempio Studio @8h.");
       const [, link, value, unit, countText] = task, linkedNotes = noteLinks(link);
       if (linkedNotes.length !== 1) throw Error("Indica una nota tra parentesi quadre doppie.");
       const seconds = secondsOf(value, unit), count = Number(countText);
       if (count < 1 || count > seconds || count > 86400) throw Error("Indica almeno un pomodoro, con almeno un secondo ciascuno (massimo 86400).");
       if (!compact) budget.assigned += seconds;
-      const start = compact ? null : task[5];
+      const start = task[5];
       let offset = 0;
       for (let i = 0; i < count; i++) {
         const duration2 = Math.floor(seconds / count) + Number(i < seconds % count);
