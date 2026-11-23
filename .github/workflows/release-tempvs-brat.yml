@@ -92,7 +92,7 @@ jobs:
         with:
           artifact_name: github-pages-${{ github.run_attempt }}
   publish-plugin:
-    needs: [verify, deploy-pwa]
+    needs: verify
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
