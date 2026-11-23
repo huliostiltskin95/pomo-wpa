@@ -327,9 +327,6 @@ function groupSessions(sessions, estimates = []) {
   return groups;
 }
 
-// obsidian/note-estimates.js
-var import_obsidian2 = require("obsidian");
-
 // core/tempo-estimates.js
 var isEstimateSource = (source) => /^\s*@/m.test(source);
 function parseEstimate(source, areas) {
@@ -605,12 +602,12 @@ function parseQuick(text, areas) {
       if (range) {
         const area2 = areas.find((a) => a.name.trim().replace(/\s+/g, " ").toLocaleLowerCase() === range[1].trim().replace(/\s+/g, " ").toLocaleLowerCase());
         if (!area2) throw Error("Area sconosciuta: " + range[1].trim() + ".");
-        const minutesOf = (time) => {
+        const minutesOf2 = (time) => {
           const [hours, minutes2] = time.split(":").map(Number);
           return hours * 60 + minutes2;
         };
         const timeOf = (minutes2) => String(Math.floor(minutes2 % 1440 / 60)).padStart(2, "0") + ":" + String(minutes2 % 60).padStart(2, "0");
-        const from = minutesOf(range[2]), until = minutesOf(range[3]);
+        const from = minutesOf2(range[2]), until = minutesOf2(range[3]);
         const total = (until - from + 1440) % 1440, value = Number(range[4].replace(",", ".")) * (range[5].toLowerCase() === "h" ? 60 : 1);
         const each = Math.round(value);
         if (Math.abs(value - each) > 1e-9) throw Error("La durata lorda deve corrispondere a minuti interi.");
@@ -665,7 +662,128 @@ function measuredFocus(session, from, to) {
   return total / 1e3;
 }
 
+// obsidian/daily-register.js
+var clock = "(?:[01]\\d|2[0-3]):[0-5]\\d";
+var header = new RegExp("^(.+?)\\s+@(\\d+(?:[.,]\\d+)?)\\s*([hm])(?:\\s+(" + clock + "))?\\s*=\\s*(\\d+)$", "i");
+var assignment = new RegExp("^-\\s*(?:(" + clock + ")\\s*)?(\\[\\[[^\\]\\n]+\\]\\])?$");
+var isRegister = (source) => /^\s*[^\n]+\s+@[\d.,]+\s*[hm]\b[^\n]*=\s*\d+\s*$/im.test(source || "");
+var minutesOf = (time) => Number(time.slice(0, 2)) * 60 + Number(time.slice(3));
+function parseRegister(source, areas) {
+  const groups = [];
+  for (const [index, raw] of source.split(/\r?\n/).entries()) {
+    const line = raw.trim();
+    if (!line || /^date:\s*\d{4}-\d\d-\d\d$/i.test(line) || /^<!-- tempvs-block:[\w-]+ -->$/.test(line)) continue;
+    const fail2 = (message) => {
+      throw Error("Riga " + (index + 1) + ": " + message);
+    };
+    const match = line.match(header);
+    if (match) {
+      const [, name, value, unit, start, countText] = match;
+      const area = areas.find((a) => a.name.toLowerCase() === name.trim().toLowerCase());
+      if (!area) fail2("Area sconosciuta: " + name);
+      const minutes = Math.round(Number(value.replace(",", ".")) * (unit.toLowerCase() === "h" ? 60 : 1) * 1e8) / 1e8, count = Number(countText);
+      if (!Number.isInteger(minutes) || minutes < 1 || minutes > 1440 || count < 1 || count > minutes) fail2("Controlla durata e numero di sessioni: occorre almeno un minuto per sessione, entro 24 ore.");
+      groups.push({ area, minutes, count, start, items: [] });
+      continue;
+    }
+    const item = line.match(assignment), group = groups.at(-1);
+    if (!item || !group) fail2("Usa Area @2h 14:00 = 4 oppure - [[Nota]].");
+    if (group.items.length >= group.count) fail2("Le righe superano il numero di sessioni dichiarate.");
+    const links = noteLinks(item[2]);
+    if (item[2] && !links.length) fail2("Wikilink non valido.");
+    group.items.push({ time: item[1], links });
+  }
+  return groups.flatMap(({ area, minutes, count, start, items }) => {
+    let cursor = start ? minutesOf(start) : null;
+    return Array.from({ length: count }, (_, i) => {
+      const duration = Math.floor(minutes / count) + Number(i < minutes % count), item = items[i];
+      if (item?.time) cursor = minutesOf(item.time) + (cursor >= 1440 ? 1440 : 0);
+      const time = cursor === null ? null : String(Math.floor(cursor / 60) % 24).padStart(2, "0") + ":" + String(cursor % 60).padStart(2, "0");
+      const slot = { area: area.name, areaId: area.id, minutes: duration, start: time, dayOffset: cursor >= 1440 ? 1 : 0, linkedNotes: item?.links || [] };
+      if (cursor !== null) cursor += duration;
+      return slot;
+    });
+  });
+}
+function registerPlan({ source, date, blockId, state, id, planningKey: planningKey2 }) {
+  const slots = parseRegister(source, state.defaults.simple.areas);
+  const sessions = [], records = [], claimed = /* @__PURE__ */ new Set();
+  const previous = state.history.filter((h) => h.registerBlock === blockId);
+  for (const [index, slot] of slots.entries()) {
+    const day = /* @__PURE__ */ new Date(date + "T12:00:00");
+    day.setDate(day.getDate() + slot.dayOffset);
+    const dayText = localDateString(day);
+    const exact = (s) => s.date === dayText && s.start === slot.start && s.areaId === slot.areaId && sessionBounds(s).end - sessionBounds(s).start === slot.minutes * 6e4;
+    const match = slot.start && state.sessions.find((s) => !s.manualSuperseded && !s.dailyRetired && !claimed.has(s.id) && (!s.noteBlockId || s.noteBlockId === blockId) && exact(s));
+    const old = previous.find((h) => h.slotIndex === index);
+    const sessionId = match?.id || (old && !claimed.has(old.sessionId) ? old.sessionId : id());
+    claimed.add(sessionId);
+    const record = {
+      sessionId,
+      registerBlock: blockId,
+      noteBlockId: blockId,
+      slotIndex: index,
+      date: dayText,
+      registerDay: date,
+      title: slot.area,
+      area: slot.area,
+      areaId: slot.areaId,
+      start: slot.start,
+      minutes: slot.minutes,
+      measured: true,
+      linkedNotes: slot.linkedNotes
+    };
+    records.push(record);
+    if (slot.start) {
+      const request = { ...slot, dayOffset: 0, ...slot.minutes < 1440 ? { cycleMinutes: slot.minutes } : {} };
+      const session = planSessions([request], [], [], state.defaults, dateTime(dayText, slot.start), () => sessionId, dayText).sessions[0];
+      sessions.push({ ...session, noteBlockId: blockId, linkedNotes: slot.linkedNotes, registerMinutes: slot.minutes });
+    }
+  }
+  const other = state.sessions.filter((s) => !claimed.has(s.id) && s.noteBlockId !== blockId && !s.dailyRetired && !s.manualSuperseded);
+  if (hasSessionOverlaps(sessions) || sessions.some((s) => other.some((t) => sessionsOverlap(s, t)))) throw Error("Gli orari si sovrappongono. Correggi gli intervalli indicati.");
+  const removeIds = state.sessions.filter((s) => s.noteBlockId === blockId && !sessions.some((t) => t.id === s.id)).map((s) => s.id);
+  return { source, date, blockId, planningKey: planningKey2, sessions, records, removeIds, retainedIds: [], unusedMinutes: 0 };
+}
+function applyRegister(state, plan) {
+  const replaced = /* @__PURE__ */ new Set([...plan.removeIds, ...plan.records.map((r) => r.sessionId)]);
+  const existing = new Map(state.sessions.map((s) => [s.id, s]));
+  state.sessions = state.sessions.filter((s) => !replaced.has(s.id)).concat(plan.sessions.map((s) => ({ ...s, actualSeconds: existing.get(s.id)?.actualSeconds || 0 })));
+  const obsolete = state.history.filter((h) => (h.registerBlock === plan.blockId || replaced.has(h.sessionId)) && !plan.records.some((r) => r.sessionId === h.sessionId)).map((h) => h.sessionId);
+  state.history = state.history.filter((h) => h.registerBlock !== plan.blockId && !replaced.has(h.sessionId)).concat(plan.records);
+  for (const [key2, removed, live] of [["history", obsolete, plan.records.map((r) => r.sessionId)], ["sessions", plan.removeIds, plan.sessions.map((s) => s.id)]]) {
+    state.syncDeleted[key2] = [.../* @__PURE__ */ new Set([...state.syncDeleted[key2] || [], ...removed])].filter((id) => !live.includes(id));
+  }
+}
+function creditedWork(state, resolve, bindingPath) {
+  const totals = /* @__PURE__ */ new Map(), records = new Map(state.history.map((h) => [h.sessionId, h]));
+  for (const s of state.sessions) if (!records.get(s.id)?.registerBlock) records.set(s.id, s);
+  const estimates = state.defaults.simple.noteEstimates || {};
+  const add = (path, seconds, source) => {
+    if (!path || !(seconds > 0)) return;
+    const target = path.split("#")[0], key2 = resolve(target, source) || target.replace(/\.md$/i, "") + ".md";
+    totals.set(key2, (totals.get(key2) || 0) + seconds);
+  };
+  for (const r of records.values()) {
+    if (r.dailyRetired || r.manualSuperseded) continue;
+    const source = bindingPath(r.noteBlockId) || "";
+    const linked = r.linkedNotes?.[0]?.path || estimates[r.noteEstimateId]?.path;
+    if (r.registerBlock || r.noteBlockId && r.start && r.end) {
+      add(linked, r.registerBlock ? r.minutes * 60 : (sessionBounds(r).end - sessionBounds(r).start) / 1e3, source);
+    } else {
+      let allocated = 0;
+      for (const [id, seconds] of Object.entries(r.noteWork || {})) {
+        allocated += seconds;
+        add(estimates[id]?.path, seconds, source);
+      }
+      add(linked, (r.actualSeconds ?? (r.measured ? r.minutes * 60 : 0)) - allocated, source);
+    }
+  }
+  return totals;
+}
+
 // obsidian/note-estimates.js
+var import_obsidian2 = require("obsidian");
 var uid = () => globalThis.crypto?.randomUUID?.() || Date.now().toString(36) + "-" + Math.random().toString(36).slice(2);
 var action = (el, label, fn) => {
   const b = el.createEl("button", { text: label });
@@ -723,8 +841,16 @@ var NoteEstimates = class {
     if (plugin.state.sessions.some((s) => !s.finished && sessionBounds(s).start < end && sessionBounds(s).end > now)) throw Error("Questo intervallo \xE8 gi\xE0 occupato. Assegna la nota alla sessione in agenda.");
     await plugin.change(() => plugin.state.sessions.push(session));
   }
-  render(parent, note, day = localDateString(), panel = false) {
-    const state = this.plugin.state, p = estimateProgress(note, state), box = parent.createDiv({ cls: "tempvs-estimate" });
+  totals() {
+    const cache = this.plugin.app.metadataCache;
+    return creditedWork(this.plugin.state, (p, source) => cache?.getFirstLinkpathDest?.(p, source)?.path, (id) => this.plugin.dailyNotes?.[id]?.path);
+  }
+  progress(note, totals) {
+    const { estimated } = estimateProgress(note, this.plugin.state), done = totals.get(note.path) || 0;
+    return { estimated, done, remaining: Math.max(0, estimated - done), difference: done - estimated, percent: 100 * done / estimated };
+  }
+  render(parent, note, day = localDateString(), panel = false, totals = this.totals()) {
+    const p = this.progress(note, totals), box = parent.createDiv({ cls: "tempvs-estimate" });
     if (panel) action(box, note.title, () => this.plugin.app.workspace.openLinkText(note.path, "", false));
     const names = [...new Set(note.entries.map((entry) => entry.area).filter(Boolean))];
     box.createEl("p", { text: (names.join(" / ") || "Tutte le aree") + " \xB7 Tempo registrato " + estimateTime(p.done) + " su " + estimateTime(p.estimated) });
@@ -776,14 +902,20 @@ var NoteEstimates = class {
     const menus = new Set([...parent.querySelectorAll(".tempvs-estimate-menu[open]")].map((el) => el.closest(".tempvs-estimate-details").dataset.noteId));
     parent.empty();
     const notes = this.notes.filter((n) => !n.archived);
-    if (!notes.length) return;
+    const totals = this.totals(), estimatedPaths = new Set(notes.map((n) => n.path));
+    if (!notes.length && !totals.size) return;
     parent.createEl("h4", { text: "Note e stime" });
+    for (const [path, seconds] of totals) if (!estimatedPaths.has(path)) {
+      const row = parent.createDiv();
+      action(row, path.split("/").pop().replace(/\.md$/i, ""), () => this.plugin.app.workspace.openLinkText(path, "", false));
+      row.createSpan({ text: " \xB7 " + estimateTime(seconds) });
+    }
     for (const note of notes) {
       const details = parent.createEl("details", { cls: "tempvs-estimate-details" });
       details.dataset.noteId = note.id;
       details.open = open.has(note.id);
-      details.createEl("summary", { text: note.title + " \xB7 " + (note.completed ? "completato" : Math.floor(estimateProgress(note, this.plugin.state).percent) + "%") });
-      this.render(details, note, day, true);
+      details.createEl("summary", { text: note.title + " \xB7 " + (note.completed ? "completato" : Math.floor(this.progress(note, totals).percent) + "%") });
+      this.render(details, note, day, true, totals);
       details.querySelector(".tempvs-estimate-menu").open = menus.has(note.id);
     }
   }
@@ -1043,10 +1175,16 @@ function correctNoteWork(previous, seconds) {
 }
 function prepareDailyPlan({ source, date, blockId, state, previousSource, protectedBlockIds, now = /* @__PURE__ */ new Date(), id = () => globalThis.crypto?.randomUUID?.() || Date.now().toString(36) + "-" + Math.random().toString(36).slice(2) }) {
   if (!validDay(date)) throw Error("Data non valida.");
+  const register = isRegister(source) || !source.split(/\r?\n/).some((line) => line.trim() && !datePattern.test(line) && !blockPattern.test(line)) && isRegister(previousSource);
+  if (register) {
+    blockIdentity(source);
+    explicitDay(source);
+    return { ...registerPlan({ source, date, blockId, state, id, planningKey: archivePlanningKey(state) }), previousSource, protectedBlockIds };
+  }
   const areas = state.defaults.simple.areas, requests = parseDailySource(source, areas), owned = state.sessions.filter((s) => s.noteBlockId === blockId);
   const protectedBlocks = protectedBlockIds === void 0 ? null : new Set(protectedBlockIds);
   const foreign = (s) => s.noteBlockId && s.noteBlockId !== blockId && (protectedBlocks === null || protectedBlocks.has(s.noteBlockId));
-  const changes = rowChanges(source, previousSource, areas, owned, date), positions = /* @__PURE__ */ new Map();
+  const changes = rowChanges(source, isRegister(previousSource) ? void 0 : previousSource, areas, owned, date), positions = /* @__PURE__ */ new Map();
   const candidates = [], claimed = /* @__PURE__ */ new Set(), correctionIds = [], correctedRows = /* @__PURE__ */ new Set();
   for (const request of requests) {
     const dateOf = request.dayOffset ? dayAfter(date) : date, start = dateTime(dateOf, request.start), elapsed = start <= now;
@@ -1118,6 +1256,15 @@ function prepareDailyPlan({ source, date, blockId, state, previousSource, protec
   return { date, blockId, sessions: candidates, correctionIds, supersededIds: superseded.map((s) => s.id), retainedIds, retireIds, removeIds: removed.map((s) => s.id), unusedMinutes: requests.reduce((n, r) => n + (r.unusedMinutes || 0), 0), planningKey: archivePlanningKey(state), recordedAt: now.toISOString(), source, previousSource, protectedBlockIds };
 }
 function applyDailyPlan(state, proposal) {
+  if (proposal.records) {
+    applyRegister(state, proposal);
+    return;
+  }
+  const oldRecords = state.history.filter((h) => h.registerBlock === proposal.blockId);
+  if (oldRecords.length) {
+    state.history = state.history.filter((h) => h.registerBlock !== proposal.blockId);
+    state.syncDeleted.history = [.../* @__PURE__ */ new Set([...state.syncDeleted.history || [], ...oldRecords.map((h) => h.sessionId)])];
+  }
   const corrected = new Set(proposal.correctionIds || []), affected = /* @__PURE__ */ new Set([...proposal.sessions.map((s) => s.id), ...proposal.removeIds]), current = new Map(state.sessions.map((s) => [s.id, s]));
   state.sessions = state.sessions.filter((s) => !affected.has(s.id)).concat(proposal.sessions.map((s) => {
     const previous = current.get(s.id);
@@ -1325,7 +1472,11 @@ var DailyBlocks = class {
     const file = this.plugin.app.vault.getAbstractFileByPath(path);
     if (!file || file.extension !== "md") throw Error("La nota Markdown non \xE8 pi\xF9 disponibile.");
     const markdown2 = await this.readMarkdown(file), blocks = findDailyBlocks(markdown2);
-    if (!blocks.length) return null;
+    if (!blocks.length) {
+      const value = this.plugin.app.metadataCache?.getFileCache(file)?.frontmatter?.tempvs;
+      if (typeof value === "string" && /^@?\d+(?:[.,]\d+)?[hm]$/i.test(value.trim())) return { file, kind: "estimate", block: { source: "@" + value.trim().replace(/^@/, "") } };
+      return null;
+    }
     if (blocks.length !== 1) throw Error("Usa un solo blocco TEMPVS per nota giornaliera.");
     const block = blocks[0];
     if (!block.source.trim() && this.plugin.estimates?.find(file.path)) return { file, block, markdown: markdown2, kind: "estimate-empty" };
@@ -1356,6 +1507,19 @@ var DailyBlocks = class {
       if (this.detached.has(path)) return;
       const context = await this.context(path);
       if (!context) {
+        const id = this.bindingId(path);
+        if (id && isRegister(this.bindings[id].source)) {
+          this.applying = true;
+          try {
+            await this.plugin.change(() => {
+              const removeIds = this.plugin.state.sessions.filter((s) => s.noteBlockId === id).map((s) => s.id);
+              applyRegister(this.plugin.state, { blockId: id, sessions: [], records: [], removeIds });
+              delete this.bindings[id];
+            });
+          } finally {
+            this.applying = false;
+          }
+        }
         await this.syncEstimate(null, path);
         return;
       }
@@ -1422,7 +1586,7 @@ var DailyBlocks = class {
     this.validateBinding(prepared.blockId, prepared.file.path, prepared.date);
     const newIds = prepared.sessions.filter((s) => !this.plugin.state.sessions.some((current) => current.id === s.id)).map((s) => s.id);
     const fresh = prepareDailyPlan({ source: prepared.source, date: prepared.date, blockId: prepared.blockId, previousSource: prepared.previousSource, protectedBlockIds: prepared.protectedBlockIds, state: this.plugin.state, id: () => newIds.shift() || uid2() });
-    const body = prepared.keepSource ? plain(prepared.source) : serializeDailyPlan(fresh.sessions, prepared.date);
+    const body = prepared.keepSource || fresh.records ? plain(prepared.source) : serializeDailyPlan(fresh.sessions, prepared.date);
     const canonical = explicitDay(prepared.originalSource) && !explicitDay(body) ? "date: " + prepared.date + "\n" + body : body;
     const previousBinding = this.bindings[prepared.blockId];
     this.applying = true;
@@ -1467,6 +1631,7 @@ var DailyBlocks = class {
       if (!binding) throw Error("Nota giornaliera non collegata.");
       const context = await this.context(binding.path);
       if (!context || context.block.source !== binding.source) throw Error("La nota giornaliera sta cambiando: attendi la sincronizzazione e riprova.");
+      if (isRegister(binding.source)) throw Error("Modifica il wikilink nella riga della nota quotidiana.");
       const sessions = daySessions(this.plugin.state, binding.date, blockId).filter((s) => !binding.hiddenSessionIds?.includes(s.id)).map((s) => updates.has(s.id) ? { ...s, linkedNotes: updates.get(s.id) } : s);
       const body = serializeDailyPlan(sessions, binding.date);
       const source = explicitDay(binding.source) ? "date: " + binding.date + "\n" + body : body;
@@ -1515,6 +1680,7 @@ var DailyBlocks = class {
             continue;
           }
           const sessions = daySessions(this.plugin.state, binding.date, blockId).filter((s) => !binding.hiddenSessionIds?.includes(s.id));
+          if (isRegister(binding.source) || sessions.some((s) => s.registerMinutes)) continue;
           const body = serializeDailyPlan(sessions, binding.date);
           const source = explicitDay(binding.source) ? "date: " + binding.date + "\n" + body : body;
           if (source === binding.source) continue;
@@ -1606,9 +1772,14 @@ var DailyBlock = class extends import_obsidian3.MarkdownRenderChild {
       }
       const error = this.controller.errors.get(this.ctx.sourcePath);
       const binding = this.controller.bindings[this.controller.bindingId(this.ctx.sourcePath)];
-      const manual = daySessions(this.controller.plugin.state, context.date, this.controller.bindingId(this.ctx.sourcePath)).filter((s) => s.actualSource === "manual");
-      const actual = manual.reduce((n, s) => n + (s.actualSeconds || 0), 0) / 60;
-      el.createEl("small", { text: error || (binding?.source === this.source ? "Intervalli sincronizzati" + (manual.length ? " \xB7 " + new Intl.NumberFormat("it-IT", { maximumFractionDigits: 2 }).format(actual) + " min effettivi con correzioni manuali" : "") + (binding.unusedMinutes ? " \xB7 " + binding.unusedMinutes + " minuti finali liberi" : "") : "Aggiornamento automatico\u2026"), cls: error ? "tempvs-daily-error" : "tempvs-muted", attr: { role: error ? "alert" : "status" } });
+      if (isRegister(this.source)) {
+        const rows = this.controller.plugin.state.history.filter((h) => h.registerBlock === this.controller.bindingId(this.ctx.sourcePath));
+        el.createEl("small", { text: error || rows.reduce((sum, h) => sum + h.minutes, 0) + " min registrati, pause comprese", attr: { role: error ? "alert" : "status" } });
+        return;
+      }
+      const manual = daySessions(this.controller.plugin.state, context.date, this.controller.bindingId(this.ctx.sourcePath)).filter((s) => s.noteBlockId === this.controller.bindingId(this.ctx.sourcePath));
+      const actual = manual.reduce((n, s) => n + (sessionBounds(s).end - sessionBounds(s).start), 0) / 6e4;
+      el.createEl("small", { text: error || (binding?.source === this.source ? "Intervalli sincronizzati" + (manual.length ? " \xB7 " + new Intl.NumberFormat("it-IT", { maximumFractionDigits: 2 }).format(actual) + " min registrati, pause comprese" : "") + (binding.unusedMinutes ? " \xB7 " + binding.unusedMinutes + " minuti finali liberi" : "") : "Aggiornamento automatico\u2026"), cls: error ? "tempvs-daily-error" : "tempvs-muted", attr: { role: error ? "alert" : "status" } });
     } catch (error) {
       if (this.disposed || version !== this.version) return;
       this.containerEl.empty();
@@ -3038,10 +3209,10 @@ var TempvsView = class extends import_obsidian5.ItemView {
       volumeValue.textContent = slider.value + "%";
     });
     for (const [name, panel] of [["create", create], ["sound", sounds]]) {
-      const header = panel.createDiv({ cls: "tempvs-panel-heading" });
-      header.appendChild(panel.querySelector("h4"));
-      panel.prepend(header);
-      iconButton(header, "x", "Chiudi pannello", () => {
+      const header2 = panel.createDiv({ cls: "tempvs-panel-heading" });
+      header2.appendChild(panel.querySelector("h4"));
+      panel.prepend(header2);
+      iconButton(header2, "x", "Chiudi pannello", () => {
         this.togglePanel(null, true);
         root.querySelector(`[data-panel="${name}"]`)?.focus();
       });
@@ -3187,7 +3358,25 @@ var TempvsView = class extends import_obsidian5.ItemView {
     const list = root.querySelector(".tempvs-sessions");
     list.empty();
     const now = /* @__PURE__ */ new Date();
+    const registered = plugin.state.history.filter((h) => h.registerBlock && h.registerDay === this.day);
+    if (registered.length) {
+      const table = list.createEl("table"), head = table.createEl("thead").createEl("tr"), body = table.createEl("tbody");
+      for (const label of ["Area", "Orario", "Nota", "Durata"]) head.createEl("th", { text: label });
+      for (const record of registered) {
+        const row = body.createEl("tr");
+        row.createEl("td", { text: record.area });
+        row.createEl("td", { text: record.start || "\u2014" });
+        const cell = row.createEl("td"), note = record.linkedNotes[0];
+        if (note) button(cell, note.label, () => plugin.app.workspace.openLinkText(note.path, plugin.dailyNotes[record.registerBlock]?.path || "", false));
+        else cell.setText("\u2014");
+        row.createEl("td", { text: record.minutes + " min" });
+      }
+      const totals = /* @__PURE__ */ new Map();
+      for (const r of registered) totals.set(r.area, (totals.get(r.area) || 0) + r.minutes);
+      list.createEl("small", { text: [...totals].map(([area2, min]) => area2 + " " + min + " min").join(" \xB7 ") });
+    }
     const sessions = plugin.state.sessions.filter((s) => {
+      if (s.registerMinutes) return false;
       if (s.dailyRetired || s.manualSuperseded) return false;
       return s.date === this.day || this.day === today() && sessionBounds(s).start <= now && sessionBounds(s).end > now;
     }).sort((a, b) => sessionBounds(a).start - sessionBounds(b).start);
@@ -3224,7 +3413,7 @@ var TempvsView = class extends import_obsidian5.ItemView {
         iconButton(item, "trash-2", "Elimina sessione " + (first.area || first.title), () => plugin.removeSession(first.id));
       }
     }
-    if (!sessions.length) {
+    if (!sessions.length && !registered.length) {
       const empty = list.createDiv({ cls: "tempvs-empty" });
       (0, import_obsidian5.setIcon)(empty.createDiv({ cls: "tempvs-empty-icon" }), "calendar-check");
       empty.createEl("strong", { text: "Spazio per i tuoi progetti" });
