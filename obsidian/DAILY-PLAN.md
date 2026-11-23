@@ -1,3 +1,7 @@
+## 0.5.27 · Orario di inizio facoltativo
+
+`- [[Nota|Titolo]] 30m = 1 +11:45 @Studio` crea una sessione dalle 11:45 alle 12:15. Con più pomodori, l’orario indica l’inizio del primo. Ometti `+11:45` per registrare la durata senza orario.
+
 ## 0.5.26 · Registro per nota e area
 
 Nella nota giornaliera scrivi una riga per attività:

@@ -116,4 +116,4 @@ jobs:
             obsidian/dist/styles.css#styles.css \
             --target "${{ github.sha }}" \
             --title "TEMPVS $VERSION" \
-            --notes "Registro giornaliero compatto e totali per area nelle note collegate, con obiettivo facoltativo."
+            --notes "Righe giornaliere con durata, numero di pomodori e orario di inizio facoltativo."

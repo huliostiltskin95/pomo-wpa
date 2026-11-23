@@ -58,3 +58,12 @@ test('budget e tempo svolto indipendenti, timer con precisione al secondo',()=>{
  assert.throws(()=>plan('Studio @8h\n- [[A]] [[B]] @1h = 2'),/un solo wikilink/);
  assert.equal(plan('Personale @4h').records.length,0);
 });
+
+test('riga autonoma con alias, durata e inizio facoltativo',()=>{
+ const state=normalizeArchive({sessions:[]});
+ const source='- [[lo-sviluppo-sociale-e-le-relazioni-di-gruppo|Lo sviluppo sociale e le relazioni di gruppo]] 30m = 1 +11:45 @Studio';
+ const plan=prepareDailyPlan({state,source,date:'2026-11-23',blockId:'daily',id:()=>'one'});
+ assert.deepEqual(plan.sessions.map(s=>[s.area,s.start,s.end]),[['Studio','11:45','12:15']]);
+ assert.equal(plan.records[0].linkedNotes[0].label,'Lo sviluppo sociale e le relazioni di gruppo');
+ assert.equal(parseAreaRegister(source.replace(' +11:45',''),state.defaults.simple.areas).slots[0].start,null);
+});
