@@ -24,6 +24,107 @@ __export(main_exports, {
 });
 module.exports = __toCommonJS(main_exports);
 
+// obsidian/notes-integration.js
+var wiki = /!?\[\[([^\]\n]+)\]\]/g;
+var markdown = /\[([^\]\n]+)\]\(([^)\n]+)\)/g;
+function noteLinks(description = "") {
+  const found = [], seen = /* @__PURE__ */ new Set();
+  const add = (target, label) => {
+    target = String(target || "").trim();
+    if (!target || /^(?:https?:|javascript:|data:|file:)/i.test(target)) return;
+    if (target.startsWith("obsidian://open?")) {
+      try {
+        const url = new URL(target);
+        target = url.searchParams.get("file") || "";
+      } catch {
+        return;
+      }
+    } else if (target.includes("://")) return;
+    if (!target) return;
+    const key2 = target.toLowerCase();
+    if (seen.has(key2)) return;
+    seen.add(key2);
+    found.push({ path: target, label: String(label || target).trim() || target });
+  };
+  for (const m of String(description).matchAll(wiki)) {
+    const [path, alias] = m[1].split("|");
+    add(path, alias || path);
+  }
+  for (const m of String(description).matchAll(markdown)) add(m[2], m[1]);
+  return found;
+}
+function appendNoteLink(description = "", path) {
+  path = String(path || "").trim();
+  if (!path || path.includes("]]") || path.includes("\n")) throw Error("Percorso nota non valido.");
+  if (noteLinks(description).some((link) => link.path.toLowerCase() === path.toLowerCase())) return String(description);
+  return String(description).trimEnd() + (String(description).trim() ? "\n" : "") + "- [[" + path + "]]";
+}
+
+// obsidian/area-register.js
+var quantity = "(\\d+(?:[.,]\\d+)?)([hms]?)";
+var time = "((?:[01]\\d|2[0-3]):[0-5]\\d)";
+var areaLine = new RegExp("^(.+?)\\s+@" + quantity + "$", "i");
+var taskLine = new RegExp("^-\\s*(\\[\\[[^\\]\\[]+\\]\\])\\s+@" + quantity + "\\s*=\\s*(\\d+)(?:\\s+\\+" + time + ")?$", "i");
+var possibleTask = new RegExp("^-?\\s*(\\[\\[[^\\]\\[]+\\]\\])\\s*[@*]?\\s*" + quantity + "\\s*=?\\s+(\\d+)(?:\\s*\\+?\\s*" + time + ")?$", "i");
+var possibleArea = new RegExp("^(.+?)\\s+[@*]?" + quantity + "$", "i");
+var isAreaRegister = (source) => source?.split(/\r?\n/).some((line) => {
+  const text = line.trim();
+  return areaLine.test(text) || /^\s*-?\s*\[\[.*\]\]\s+[@*\d]/.test(text) || !/[+=]/.test(text) && !text.startsWith("@") && possibleArea.test(text);
+});
+function readableDuration(seconds) {
+  const h = Math.floor(seconds / 3600), m = Math.floor(seconds % 3600 / 60), s = Math.round(seconds % 60);
+  return [h && h + " h", m && m + " min", s && s + " s"].filter(Boolean).join(" ") || "0 min";
+}
+function secondsOf(value, unit) {
+  const seconds = Math.round(Number(value.replace(",", ".")) * { s: 1, m: 60, h: 3600 }[(unit || "h").toLowerCase()] * 1e7) / 1e7;
+  if (!Number.isSafeInteger(seconds) || seconds < 1) throw Error("Usa una durata positiva esprimibile in secondi interi.");
+  return seconds;
+}
+function suggestion(line) {
+  const task = line.match(possibleTask);
+  if (task) return "- " + task[1] + " @" + task[2] + task[3] + " = " + task[4] + (task[5] ? " +" + task[5] : "");
+  const incomplete = line.match(new RegExp("^-?\\s*(\\[\\[[^\\]\\[]+\\]\\])\\s+[@*]?" + quantity + "$", "i"));
+  if (incomplete) return "- " + incomplete[1] + " @" + incomplete[2] + incomplete[3] + " = 1";
+  const area = line.match(possibleArea);
+  return area ? area[1] + " @" + area[2] + area[3] : "- [[Nota]] @1h = 2 +14:00";
+}
+function parseAreaRegister(source, areas) {
+  const budgets = [], slots = [];
+  let budget;
+  for (const [index, raw] of source.split(/\r?\n/).entries()) {
+    const line = raw.trim();
+    if (!line || /^date:\s*\d{4}-\d\d-\d\d$/i.test(line) || /^<!-- tempvs-block:[\w-]+ -->$/.test(line)) continue;
+    try {
+      const heading = line.match(areaLine);
+      if (heading && !line.includes("[[")) {
+        const area = areas.find((a) => a.name.toLowerCase() === heading[1].trim().toLowerCase());
+        if (!area) throw Error("Area sconosciuta. Aree disponibili: " + areas.map((a) => a.name).join(", "));
+        budget = { area: area.name, areaId: area.id, seconds: secondsOf(heading[2], heading[3]), assigned: 0 };
+        budgets.push(budget);
+        continue;
+      }
+      if ((line.match(/\[\[/g) || []).length > 1) throw Error("Usa un solo wikilink per riga. Scrivi il secondo compito su una nuova riga con la sua durata.");
+      const task = line.match(taskLine);
+      if (!task) throw Error("Sintassi da correggere. Prova: " + suggestion(line));
+      if (!budget) throw Error("Inserisci prima l\u2019area, per esempio Studio @8h.");
+      const [, link, value, unit, countText, start] = task, linkedNotes = noteLinks(link);
+      if (linkedNotes.length !== 1) throw Error("Indica una nota tra parentesi quadre doppie.");
+      const seconds = secondsOf(value, unit), count = Number(countText);
+      if (count < 1 || count > seconds || count > 86400) throw Error("Indica almeno un pomodoro, con almeno un secondo ciascuno (massimo 86400).");
+      budget.assigned += seconds;
+      let offset = 0;
+      for (let i = 0; i < count; i++) {
+        const duration = Math.floor(seconds / count) + Number(i < seconds % count);
+        slots.push({ area: budget.area, areaId: budget.areaId, minutes: duration / 60, linkedNotes, start: start || null, offset });
+        offset += duration;
+      }
+    } catch (error) {
+      throw Error("Riga " + (index + 1) + ": " + error.message);
+    }
+  }
+  return { budgets, slots };
+}
+
 // obsidian/note-picker.js
 var import_obsidian = require("obsidian");
 var fold = (text) => String(text).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase();
@@ -127,8 +228,8 @@ function timeToMinutes(value) {
   const [h, m] = value.split(":").map(Number);
   return h * 60 + m;
 }
-function dateTime(date, time) {
-  const [y, mo, d] = date.split("-").map(Number), [h, mi] = time.split(":").map(Number);
+function dateTime(date, time2) {
+  const [y, mo, d] = date.split("-").map(Number), [h, mi] = time2.split(":").map(Number);
   return new Date(y, mo - 1, d, h, mi, 0, 0);
 }
 function formatTime(date) {
@@ -194,7 +295,7 @@ function getPhase(session, now = /* @__PURE__ */ new Date()) {
       totalRemaining: Math.max(0, Math.ceil((end - now) / 1e3))
     };
   }
-  const workMs = Math.round(session.workMinutes * 6e4);
+  const workMs = Math.round(session.registerMinutes ? (end - start) * 5 / 6 : session.workMinutes * 6e4);
   const elapsed = Math.max(0, now - start);
   const remainingSession = Math.max(0, end - now);
   if (!session.breakEnabled) {
@@ -209,7 +310,7 @@ function getPhase(session, now = /* @__PURE__ */ new Date()) {
       totalRemaining: Math.ceil(remainingSession / 1e3)
     };
   }
-  const breakMs = Math.round((session.cycleMinutes !== void 0 ? session.cycleMinutes - session.workMinutes : pauseMinutes(session.workMinutes)) * 6e4);
+  const breakMs = session.registerMinutes ? end - start - workMs : Math.round((session.cycleMinutes !== void 0 ? session.cycleMinutes - session.workMinutes : pauseMinutes(session.workMinutes)) * 6e4);
   const cycleMs = workMs + breakMs;
   const cycleIndex = Math.floor(elapsed / cycleMs);
   const within = elapsed % cycleMs;
@@ -259,42 +360,6 @@ function getAmbientFocusMode(sessions, now = /* @__PURE__ */ new Date()) {
   return getNextSession(sessions, now) ? "waiting" : "finished";
 }
 
-// obsidian/notes-integration.js
-var wiki = /!?\[\[([^\]\n]+)\]\]/g;
-var markdown = /\[([^\]\n]+)\]\(([^)\n]+)\)/g;
-function noteLinks(description = "") {
-  const found = [], seen = /* @__PURE__ */ new Set();
-  const add = (target, label) => {
-    target = String(target || "").trim();
-    if (!target || /^(?:https?:|javascript:|data:|file:)/i.test(target)) return;
-    if (target.startsWith("obsidian://open?")) {
-      try {
-        const url = new URL(target);
-        target = url.searchParams.get("file") || "";
-      } catch {
-        return;
-      }
-    } else if (target.includes("://")) return;
-    if (!target) return;
-    const key2 = target.toLowerCase();
-    if (seen.has(key2)) return;
-    seen.add(key2);
-    found.push({ path: target, label: String(label || target).trim() || target });
-  };
-  for (const m of String(description).matchAll(wiki)) {
-    const [path, alias] = m[1].split("|");
-    add(path, alias || path);
-  }
-  for (const m of String(description).matchAll(markdown)) add(m[2], m[1]);
-  return found;
-}
-function appendNoteLink(description = "", path) {
-  path = String(path || "").trim();
-  if (!path || path.includes("]]") || path.includes("\n")) throw Error("Percorso nota non valido.");
-  if (noteLinks(description).some((link) => link.path.toLowerCase() === path.toLowerCase())) return String(description);
-  return String(description).trimEnd() + (String(description).trim() ? "\n" : "") + "- [[" + path + "]]";
-}
-
 // obsidian/session-notes.js
 function sessionNotes(session, estimates = []) {
   if (session.linkedNotes?.length) return session.linkedNotes;
@@ -326,6 +391,147 @@ function groupSessions(sessions, estimates = []) {
   }
   return groups;
 }
+
+// obsidian/daily-register.js
+var clock = "(?:[01]\\d|2[0-3]):[0-5]\\d";
+var header = new RegExp("^(.+?)\\s+@(\\d+(?:[.,]\\d+)?)\\s*([hm])(?:\\s+(" + clock + "))?\\s*=\\s*(\\d+)$", "i");
+var assignment = new RegExp("^-\\s*(?:(" + clock + ")\\s*)?(\\[\\[[^\\]\\n]+\\]\\])?$");
+var isRegister = (source) => isAreaRegister(source) || /^\s*[^\n]+\s+@[\d.,]+\s*[hm]\b[^\n]*=\s*\d+\s*$/im.test(source || "");
+var minutesOf = (time2) => Number(time2.slice(0, 2)) * 60 + Number(time2.slice(3));
+function parseRegister(source, areas) {
+  const groups = [];
+  for (const [index, raw] of source.split(/\r?\n/).entries()) {
+    const line = raw.trim();
+    if (!line || /^date:\s*\d{4}-\d\d-\d\d$/i.test(line) || /^<!-- tempvs-block:[\w-]+ -->$/.test(line)) continue;
+    const fail2 = (message) => {
+      throw Error("Riga " + (index + 1) + ": " + message);
+    };
+    const match = line.match(header);
+    if (match) {
+      const [, name, value, unit, start, countText] = match;
+      const area = areas.find((a) => a.name.toLowerCase() === name.trim().toLowerCase());
+      if (!area) fail2("Area sconosciuta: " + name);
+      const minutes = Math.round(Number(value.replace(",", ".")) * (unit.toLowerCase() === "h" ? 60 : 1) * 1e8) / 1e8, count = Number(countText);
+      if (!Number.isInteger(minutes) || minutes < 1 || minutes > 1440 || count < 1 || count > minutes) fail2("Controlla durata e numero di sessioni: occorre almeno un minuto per sessione, entro 24 ore.");
+      groups.push({ area, minutes, count, start, items: [] });
+      continue;
+    }
+    const item = line.match(assignment), group = groups.at(-1);
+    if (!item || !group) fail2("Usa Area @2h 14:00 = 4 oppure - [[Nota]].");
+    if (group.items.length >= group.count) fail2("Le righe superano il numero di sessioni dichiarate.");
+    const links = noteLinks(item[2]);
+    if (item[2] && !links.length) fail2("Wikilink non valido.");
+    group.items.push({ time: item[1], links });
+  }
+  return groups.flatMap(({ area, minutes, count, start, items }) => {
+    let cursor = start ? minutesOf(start) : null;
+    return Array.from({ length: count }, (_, i) => {
+      const duration = Math.floor(minutes / count) + Number(i < minutes % count), item = items[i];
+      if (item?.time) cursor = minutesOf(item.time) + (cursor >= 1440 ? 1440 : 0);
+      const time2 = cursor === null ? null : String(Math.floor(cursor / 60) % 24).padStart(2, "0") + ":" + String(cursor % 60).padStart(2, "0");
+      const slot = { area: area.name, areaId: area.id, minutes: duration, start: time2, dayOffset: cursor >= 1440 ? 1 : 0, linkedNotes: item?.links || [] };
+      if (cursor !== null) cursor += duration;
+      return slot;
+    });
+  });
+}
+function registerPlan({ source, date, blockId, state, id, planningKey: planningKey2 }) {
+  const areas = state.defaults.simple.areas;
+  const { slots, budgets } = isAreaRegister(source) ? parseAreaRegister(source, areas) : { slots: parseRegister(source, areas), budgets: [] };
+  const sessions = [], records = [], claimed = /* @__PURE__ */ new Set();
+  const previous = state.history.filter((h) => h.registerBlock === blockId);
+  for (const [index, slot] of slots.entries()) {
+    const day = /* @__PURE__ */ new Date(date + "T12:00:00");
+    day.setDate(day.getDate() + (slot.dayOffset || 0));
+    const start = slot.start ? new Date(+dateTime(localDateString(day), slot.start) + (slot.offset || 0) * 1e3) : null;
+    const clock2 = (t) => [t.getHours(), t.getMinutes()].map((n) => String(n).padStart(2, "0")).join(":");
+    const dayText = localDateString(start || day), startTime = start && clock2(start);
+    const exact = (s) => s.date === dayText && +sessionBounds(s).start === +start && s.areaId === slot.areaId && sessionBounds(s).end - sessionBounds(s).start === Math.round(slot.minutes * 6e4);
+    const match = slot.start && state.sessions.find((s) => !s.manualSuperseded && !s.dailyRetired && !claimed.has(s.id) && (!s.noteBlockId || s.noteBlockId === blockId) && exact(s));
+    const old = previous.find((h) => h.slotIndex === index);
+    const sessionId = match?.id || (old && !claimed.has(old.sessionId) ? old.sessionId : id());
+    claimed.add(sessionId);
+    const record = {
+      sessionId,
+      registerBlock: blockId,
+      noteBlockId: blockId,
+      slotIndex: index,
+      date: dayText,
+      registerDay: date,
+      title: slot.area,
+      area: slot.area,
+      areaId: slot.areaId,
+      start: startTime && start.getSeconds() ? startTime + ":" + String(start.getSeconds()).padStart(2, "0") : startTime,
+      minutes: slot.minutes,
+      measured: true,
+      linkedNotes: slot.linkedNotes
+    };
+    records.push(record);
+    if (slot.start) {
+      const end = new Date(+start + Math.round(slot.minutes * 6e4));
+      const precise = { timerStartedAt: start.toISOString(), timerEndsAt: end.toISOString() };
+      const cycle = Number.isInteger(slot.minutes) && slot.minutes < 1440 ? { cycleMinutes: slot.minutes, workMinutes: slot.minutes * 5 / 6 } : { workMinutes: 25 };
+      sessions.push({
+        id: sessionId,
+        title: slot.area,
+        area: slot.area,
+        areaId: slot.areaId,
+        date: dayText,
+        start: startTime,
+        end: clock2(end),
+        ...precise,
+        ...cycle,
+        breakEnabled: true,
+        noteBlockId: blockId,
+        linkedNotes: slot.linkedNotes,
+        registerMinutes: slot.minutes
+      });
+    }
+  }
+  const other = state.sessions.filter((s) => !claimed.has(s.id) && s.noteBlockId !== blockId && !s.dailyRetired && !s.manualSuperseded);
+  if (hasSessionOverlaps(sessions) || sessions.some((s) => other.some((t) => sessionsOverlap(s, t)))) throw Error("Gli orari si sovrappongono. Correggi gli intervalli indicati.");
+  const removeIds = state.sessions.filter((s) => s.noteBlockId === blockId && !sessions.some((t) => t.id === s.id)).map((s) => s.id);
+  return { source, date, blockId, planningKey: planningKey2, sessions, records, budgets, removeIds, retainedIds: [], unusedMinutes: 0 };
+}
+function applyRegister(state, plan) {
+  const replaced = /* @__PURE__ */ new Set([...plan.removeIds, ...plan.records.map((r) => r.sessionId)]);
+  const existing = new Map(state.sessions.map((s) => [s.id, s]));
+  state.sessions = state.sessions.filter((s) => !replaced.has(s.id)).concat(plan.sessions.map((s) => ({ ...s, actualSeconds: existing.get(s.id)?.actualSeconds || 0 })));
+  const obsolete = state.history.filter((h) => (h.registerBlock === plan.blockId || replaced.has(h.sessionId)) && !plan.records.some((r) => r.sessionId === h.sessionId)).map((h) => h.sessionId);
+  state.history = state.history.filter((h) => h.registerBlock !== plan.blockId && !replaced.has(h.sessionId)).concat(plan.records);
+  for (const [key2, removed, live] of [["history", obsolete, plan.records.map((r) => r.sessionId)], ["sessions", plan.removeIds, plan.sessions.map((s) => s.id)]]) {
+    state.syncDeleted[key2] = [.../* @__PURE__ */ new Set([...state.syncDeleted[key2] || [], ...removed])].filter((id) => !live.includes(id));
+  }
+}
+function creditedWork(state, resolve, bindingPath) {
+  const totals = /* @__PURE__ */ new Map(), records = new Map(state.history.map((h) => [h.sessionId, h]));
+  for (const s of state.sessions) if (!records.get(s.id)?.registerBlock) records.set(s.id, s);
+  const estimates = state.defaults.simple.noteEstimates || {};
+  const add = (path, seconds, source) => {
+    if (!path || !(seconds > 0)) return;
+    const target = path.split("#")[0], key2 = resolve(target, source) || target.replace(/\.md$/i, "") + ".md";
+    totals.set(key2, (totals.get(key2) || 0) + seconds);
+  };
+  for (const r of records.values()) {
+    if (r.dailyRetired || r.manualSuperseded) continue;
+    const source = bindingPath(r.noteBlockId) || "";
+    const linked = r.linkedNotes?.[0]?.path || estimates[r.noteEstimateId]?.path;
+    if (r.registerBlock || r.noteBlockId && r.start && r.end) {
+      add(linked, r.registerBlock ? r.minutes * 60 : (sessionBounds(r).end - sessionBounds(r).start) / 1e3, source);
+    } else {
+      let allocated = 0;
+      for (const [id, seconds] of Object.entries(r.noteWork || {})) {
+        allocated += seconds;
+        add(estimates[id]?.path, seconds, source);
+      }
+      add(linked, (r.actualSeconds ?? (r.measured ? r.minutes * 60 : 0)) - allocated, source);
+    }
+  }
+  return totals;
+}
+
+// obsidian/note-estimates.js
+var import_obsidian2 = require("obsidian");
 
 // core/tempo-estimates.js
 var isEstimateSource = (source) => /^\s*@/m.test(source);
@@ -602,8 +808,8 @@ function parseQuick(text, areas) {
       if (range) {
         const area2 = areas.find((a) => a.name.trim().replace(/\s+/g, " ").toLocaleLowerCase() === range[1].trim().replace(/\s+/g, " ").toLocaleLowerCase());
         if (!area2) throw Error("Area sconosciuta: " + range[1].trim() + ".");
-        const minutesOf2 = (time) => {
-          const [hours, minutes2] = time.split(":").map(Number);
+        const minutesOf2 = (time2) => {
+          const [hours, minutes2] = time2.split(":").map(Number);
           return hours * 60 + minutes2;
         };
         const timeOf = (minutes2) => String(Math.floor(minutes2 % 1440 / 60)).padStart(2, "0") + ":" + String(minutes2 % 60).padStart(2, "0");
@@ -662,128 +868,7 @@ function measuredFocus(session, from, to) {
   return total / 1e3;
 }
 
-// obsidian/daily-register.js
-var clock = "(?:[01]\\d|2[0-3]):[0-5]\\d";
-var header = new RegExp("^(.+?)\\s+@(\\d+(?:[.,]\\d+)?)\\s*([hm])(?:\\s+(" + clock + "))?\\s*=\\s*(\\d+)$", "i");
-var assignment = new RegExp("^-\\s*(?:(" + clock + ")\\s*)?(\\[\\[[^\\]\\n]+\\]\\])?$");
-var isRegister = (source) => /^\s*[^\n]+\s+@[\d.,]+\s*[hm]\b[^\n]*=\s*\d+\s*$/im.test(source || "");
-var minutesOf = (time) => Number(time.slice(0, 2)) * 60 + Number(time.slice(3));
-function parseRegister(source, areas) {
-  const groups = [];
-  for (const [index, raw] of source.split(/\r?\n/).entries()) {
-    const line = raw.trim();
-    if (!line || /^date:\s*\d{4}-\d\d-\d\d$/i.test(line) || /^<!-- tempvs-block:[\w-]+ -->$/.test(line)) continue;
-    const fail2 = (message) => {
-      throw Error("Riga " + (index + 1) + ": " + message);
-    };
-    const match = line.match(header);
-    if (match) {
-      const [, name, value, unit, start, countText] = match;
-      const area = areas.find((a) => a.name.toLowerCase() === name.trim().toLowerCase());
-      if (!area) fail2("Area sconosciuta: " + name);
-      const minutes = Math.round(Number(value.replace(",", ".")) * (unit.toLowerCase() === "h" ? 60 : 1) * 1e8) / 1e8, count = Number(countText);
-      if (!Number.isInteger(minutes) || minutes < 1 || minutes > 1440 || count < 1 || count > minutes) fail2("Controlla durata e numero di sessioni: occorre almeno un minuto per sessione, entro 24 ore.");
-      groups.push({ area, minutes, count, start, items: [] });
-      continue;
-    }
-    const item = line.match(assignment), group = groups.at(-1);
-    if (!item || !group) fail2("Usa Area @2h 14:00 = 4 oppure - [[Nota]].");
-    if (group.items.length >= group.count) fail2("Le righe superano il numero di sessioni dichiarate.");
-    const links = noteLinks(item[2]);
-    if (item[2] && !links.length) fail2("Wikilink non valido.");
-    group.items.push({ time: item[1], links });
-  }
-  return groups.flatMap(({ area, minutes, count, start, items }) => {
-    let cursor = start ? minutesOf(start) : null;
-    return Array.from({ length: count }, (_, i) => {
-      const duration = Math.floor(minutes / count) + Number(i < minutes % count), item = items[i];
-      if (item?.time) cursor = minutesOf(item.time) + (cursor >= 1440 ? 1440 : 0);
-      const time = cursor === null ? null : String(Math.floor(cursor / 60) % 24).padStart(2, "0") + ":" + String(cursor % 60).padStart(2, "0");
-      const slot = { area: area.name, areaId: area.id, minutes: duration, start: time, dayOffset: cursor >= 1440 ? 1 : 0, linkedNotes: item?.links || [] };
-      if (cursor !== null) cursor += duration;
-      return slot;
-    });
-  });
-}
-function registerPlan({ source, date, blockId, state, id, planningKey: planningKey2 }) {
-  const slots = parseRegister(source, state.defaults.simple.areas);
-  const sessions = [], records = [], claimed = /* @__PURE__ */ new Set();
-  const previous = state.history.filter((h) => h.registerBlock === blockId);
-  for (const [index, slot] of slots.entries()) {
-    const day = /* @__PURE__ */ new Date(date + "T12:00:00");
-    day.setDate(day.getDate() + slot.dayOffset);
-    const dayText = localDateString(day);
-    const exact = (s) => s.date === dayText && s.start === slot.start && s.areaId === slot.areaId && sessionBounds(s).end - sessionBounds(s).start === slot.minutes * 6e4;
-    const match = slot.start && state.sessions.find((s) => !s.manualSuperseded && !s.dailyRetired && !claimed.has(s.id) && (!s.noteBlockId || s.noteBlockId === blockId) && exact(s));
-    const old = previous.find((h) => h.slotIndex === index);
-    const sessionId = match?.id || (old && !claimed.has(old.sessionId) ? old.sessionId : id());
-    claimed.add(sessionId);
-    const record = {
-      sessionId,
-      registerBlock: blockId,
-      noteBlockId: blockId,
-      slotIndex: index,
-      date: dayText,
-      registerDay: date,
-      title: slot.area,
-      area: slot.area,
-      areaId: slot.areaId,
-      start: slot.start,
-      minutes: slot.minutes,
-      measured: true,
-      linkedNotes: slot.linkedNotes
-    };
-    records.push(record);
-    if (slot.start) {
-      const request = { ...slot, dayOffset: 0, ...slot.minutes < 1440 ? { cycleMinutes: slot.minutes } : {} };
-      const session = planSessions([request], [], [], state.defaults, dateTime(dayText, slot.start), () => sessionId, dayText).sessions[0];
-      sessions.push({ ...session, noteBlockId: blockId, linkedNotes: slot.linkedNotes, registerMinutes: slot.minutes });
-    }
-  }
-  const other = state.sessions.filter((s) => !claimed.has(s.id) && s.noteBlockId !== blockId && !s.dailyRetired && !s.manualSuperseded);
-  if (hasSessionOverlaps(sessions) || sessions.some((s) => other.some((t) => sessionsOverlap(s, t)))) throw Error("Gli orari si sovrappongono. Correggi gli intervalli indicati.");
-  const removeIds = state.sessions.filter((s) => s.noteBlockId === blockId && !sessions.some((t) => t.id === s.id)).map((s) => s.id);
-  return { source, date, blockId, planningKey: planningKey2, sessions, records, removeIds, retainedIds: [], unusedMinutes: 0 };
-}
-function applyRegister(state, plan) {
-  const replaced = /* @__PURE__ */ new Set([...plan.removeIds, ...plan.records.map((r) => r.sessionId)]);
-  const existing = new Map(state.sessions.map((s) => [s.id, s]));
-  state.sessions = state.sessions.filter((s) => !replaced.has(s.id)).concat(plan.sessions.map((s) => ({ ...s, actualSeconds: existing.get(s.id)?.actualSeconds || 0 })));
-  const obsolete = state.history.filter((h) => (h.registerBlock === plan.blockId || replaced.has(h.sessionId)) && !plan.records.some((r) => r.sessionId === h.sessionId)).map((h) => h.sessionId);
-  state.history = state.history.filter((h) => h.registerBlock !== plan.blockId && !replaced.has(h.sessionId)).concat(plan.records);
-  for (const [key2, removed, live] of [["history", obsolete, plan.records.map((r) => r.sessionId)], ["sessions", plan.removeIds, plan.sessions.map((s) => s.id)]]) {
-    state.syncDeleted[key2] = [.../* @__PURE__ */ new Set([...state.syncDeleted[key2] || [], ...removed])].filter((id) => !live.includes(id));
-  }
-}
-function creditedWork(state, resolve, bindingPath) {
-  const totals = /* @__PURE__ */ new Map(), records = new Map(state.history.map((h) => [h.sessionId, h]));
-  for (const s of state.sessions) if (!records.get(s.id)?.registerBlock) records.set(s.id, s);
-  const estimates = state.defaults.simple.noteEstimates || {};
-  const add = (path, seconds, source) => {
-    if (!path || !(seconds > 0)) return;
-    const target = path.split("#")[0], key2 = resolve(target, source) || target.replace(/\.md$/i, "") + ".md";
-    totals.set(key2, (totals.get(key2) || 0) + seconds);
-  };
-  for (const r of records.values()) {
-    if (r.dailyRetired || r.manualSuperseded) continue;
-    const source = bindingPath(r.noteBlockId) || "";
-    const linked = r.linkedNotes?.[0]?.path || estimates[r.noteEstimateId]?.path;
-    if (r.registerBlock || r.noteBlockId && r.start && r.end) {
-      add(linked, r.registerBlock ? r.minutes * 60 : (sessionBounds(r).end - sessionBounds(r).start) / 1e3, source);
-    } else {
-      let allocated = 0;
-      for (const [id, seconds] of Object.entries(r.noteWork || {})) {
-        allocated += seconds;
-        add(estimates[id]?.path, seconds, source);
-      }
-      add(linked, (r.actualSeconds ?? (r.measured ? r.minutes * 60 : 0)) - allocated, source);
-    }
-  }
-  return totals;
-}
-
 // obsidian/note-estimates.js
-var import_obsidian2 = require("obsidian");
 var uid = () => globalThis.crypto?.randomUUID?.() || Date.now().toString(36) + "-" + Math.random().toString(36).slice(2);
 var action = (el, label, fn) => {
   const b = el.createEl("button", { text: label });
@@ -1604,7 +1689,7 @@ var DailyBlocks = class {
           const checked = prepareDailyPlan({ source: prepared.source, date: prepared.date, blockId: prepared.blockId, previousSource: prepared.previousSource, protectedBlockIds: prepared.protectedBlockIds, state: this.plugin.state, id: () => available.shift() || uid2() });
           applyDailyPlan(this.plugin.state, checked);
           this.plugin.state = normalizeArchive(this.plugin.state);
-          this.bindings[prepared.blockId] = { path: prepared.file.path, date: prepared.date, source: canonical, ratioVersion: 1, agendaVersion: 2, hiddenSessionIds: checked.retainedIds, unusedMinutes: fresh.unusedMinutes };
+          this.bindings[prepared.blockId] = { path: prepared.file.path, date: prepared.date, source: canonical, ratioVersion: 1, agendaVersion: 2, hiddenSessionIds: checked.retainedIds, budgets: fresh.budgets, unusedMinutes: fresh.unusedMinutes };
         });
       } catch (error) {
         if (previousBinding) this.bindings[prepared.blockId] = previousBinding;
@@ -1774,7 +1859,7 @@ var DailyBlock = class extends import_obsidian3.MarkdownRenderChild {
       const binding = this.controller.bindings[this.controller.bindingId(this.ctx.sourcePath)];
       if (isRegister(this.source)) {
         const rows = this.controller.plugin.state.history.filter((h) => h.registerBlock === this.controller.bindingId(this.ctx.sourcePath));
-        el.createEl("small", { text: error || rows.reduce((sum, h) => sum + h.minutes, 0) + " min registrati, pause comprese", attr: { role: error ? "alert" : "status" } });
+        el.createEl("small", { text: error || new Intl.NumberFormat("it-IT", { maximumFractionDigits: 2 }).format(rows.reduce((sum, h) => sum + h.minutes, 0)) + " min registrati, pause comprese", attr: { role: error ? "alert" : "status" } });
         return;
       }
       const manual = daySessions(this.controller.plugin.state, context.date, this.controller.bindingId(this.ctx.sourcePath)).filter((s) => s.noteBlockId === this.controller.bindingId(this.ctx.sourcePath));
@@ -3299,7 +3384,7 @@ var TempvsView = class extends import_obsidian5.ItemView {
       if (index > 0) iconButton(row, "arrow-up", "Rendi principale " + label, () => this.plugin.setSessionNote(ids, "", { primaryPath: note.path }));
       iconButton(row, "x", "Scollega " + label, () => this.plugin.setSessionNote(ids, "", { removePath: note.path }));
     }
-    button(resources, "\uFF0B Collega nota", () => new SessionNotePicker(this.plugin.app, (value) => this.plugin.setSessionNote(ids, value)).open());
+    button(resources, notes.length ? "Cambia nota" : "\uFF0B Collega nota", () => new SessionNotePicker(this.plugin.app, (value) => this.plugin.setSessionNote(ids, value)).open());
   }
   update(full = false) {
     const root = this.containerEl.children[1];
@@ -3359,6 +3444,11 @@ var TempvsView = class extends import_obsidian5.ItemView {
     list.empty();
     const now = /* @__PURE__ */ new Date();
     const registered = plugin.state.history.filter((h) => h.registerBlock && h.registerDay === this.day);
+    const budgets = Object.values(plugin.dailyNotes || {}).find((b) => b.date === this.day)?.budgets || [];
+    for (const b of budgets) {
+      const difference = b.seconds - b.assigned;
+      list.createEl("p", { text: b.area + " \xB7 " + readableDuration(b.assigned) + " su " + readableDuration(b.seconds) + (difference ? " \xB7 " + readableDuration(Math.abs(difference)) + (difference > 0 ? " disponibili" : " oltre il budget") : "") });
+    }
     if (registered.length) {
       const table = list.createEl("table"), head = table.createEl("thead").createEl("tr"), body = table.createEl("tbody");
       for (const label of ["Area", "Orario", "Nota", "Durata"]) head.createEl("th", { text: label });
@@ -3369,11 +3459,11 @@ var TempvsView = class extends import_obsidian5.ItemView {
         const cell = row.createEl("td"), note = record.linkedNotes[0];
         if (note) button(cell, note.label, () => plugin.app.workspace.openLinkText(note.path, plugin.dailyNotes[record.registerBlock]?.path || "", false));
         else cell.setText("\u2014");
-        row.createEl("td", { text: record.minutes + " min" });
+        row.createEl("td", { text: readableDuration(Math.round(record.minutes * 60)) });
       }
       const totals = /* @__PURE__ */ new Map();
       for (const r of registered) totals.set(r.area, (totals.get(r.area) || 0) + r.minutes);
-      list.createEl("small", { text: [...totals].map(([area2, min]) => area2 + " " + min + " min").join(" \xB7 ") });
+      if (!budgets.length) list.createEl("small", { text: [...totals].map(([area2, min]) => area2 + " " + min + " min").join(" \xB7 ") });
     }
     const sessions = plugin.state.sessions.filter((s) => {
       if (s.registerMinutes) return false;
@@ -3413,7 +3503,7 @@ var TempvsView = class extends import_obsidian5.ItemView {
         iconButton(item, "trash-2", "Elimina sessione " + (first.area || first.title), () => plugin.removeSession(first.id));
       }
     }
-    if (!sessions.length && !registered.length) {
+    if (!sessions.length && !registered.length && !budgets.length) {
       const empty = list.createDiv({ cls: "tempvs-empty" });
       (0, import_obsidian5.setIcon)(empty.createDiv({ cls: "tempvs-empty-icon" }), "calendar-check");
       empty.createEl("strong", { text: "Spazio per i tuoi progetti" });
@@ -3863,7 +3953,8 @@ var TempvsPlugin = class extends import_obsidian5.Plugin {
     for (const id of ids) {
       const session = this.state.sessions.find((s) => s.id === id);
       if (!session) throw Error("La sessione non \xE8 pi\xF9 disponibile.");
-      updates.set(id, updatedSessionNotes(session, input, { ...options, estimates: this.estimates?.notes || [] }));
+      const links = updatedSessionNotes(session, input, { ...options, replacePrimary: true, estimates: this.estimates?.notes || [] });
+      updates.set(id, input.trim() ? links.slice(0, 1) : links);
     }
     const bindings = new Set(ids.map((id) => this.state.sessions.find((s) => s.id === id).noteBlockId).filter(Boolean));
     if (bindings.size) {
