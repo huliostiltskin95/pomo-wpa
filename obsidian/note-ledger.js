@@ -18,9 +18,9 @@ export function updateLedger(markdown,totals){
  const block=ledgers[0];
  const remaining=new Map([...totals].map(([area,seconds])=>[area.toLowerCase(),{area,seconds}]));
  const seen=new Set(),lines=[];
- function format(area,seconds,target,unit){
+ function format(area,seconds,target,unit,explicitUnit){
   const done=duration(seconds);
-  const left=done.value+(target&&done.unit===unit?'':done.unit);
+  const left=done.value+(target&&!explicitUnit&&done.unit===unit?'':done.unit);
   return 'T: '+left+(target?'/'+target+unit:'')+' @'+area;
  }
  for(const line of block?.source.split(/\r?\n/)||[]){
@@ -30,7 +30,7 @@ export function updateLedger(markdown,totals){
   const [, , ,target,unit,area]=match,key=area.toLowerCase();
   if(seen.has(key))throw Error('Indica un solo totale per area.');
   seen.add(key);
-  lines.push(format(area,remaining.get(key)?.seconds||0,target,unit));
+  lines.push(format(area,remaining.get(key)?.seconds||0,target,unit,match[2]===unit));
   remaining.delete(key);
  }
  for(const {area,seconds} of remaining.values())lines.push(format(area,seconds));

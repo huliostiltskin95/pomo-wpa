@@ -1,3 +1,16 @@
+## 0.5.28 · Elenco quotidiano
+
+```TEMPVS
+- [[Platone#Repubblica|Repubblica]] [[Bibliografia]] 30m +11:45 @Studio
+- [[Spesa]] 15m @Personale
+- [[Tucidide]] 1h = 2 @Studio
+Studio +14:00-16:00 -30m
+```
+
+Ogni attività indica la propria area. Scrivi la durata lorda con unità (h, m o s). Un solo pomodoro è implicito. Con `= 2` dividi la durata fra due pomodori. L’orario facoltativo vale per i pomodori della riga. Una fascia crea sessioni consecutive anche oltre mezzanotte.
+
+Il primo wikilink riceve subito il credito per l’intero file e per l’area. Gli altri sono risorse. Nella nota collegata puoi aggiungere un obiettivo al totale automatico, per esempio `T: 30m/7h @Studio`. Una correzione della nota quotidiana aggiorna il totale. Le sezioni seguenti documentano anche i formati storici.
+
 ## 0.5.27 · Orario di inizio facoltativo
 
 `- [[Nota|Titolo]] 30m = 1 +11:45 @Studio` crea una sessione dalle 11:45 alle 12:15. Con più pomodori, l’orario indica l’inizio del primo. Ometti `+11:45` per registrare la durata senza orario.

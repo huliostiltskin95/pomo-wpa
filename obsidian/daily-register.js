@@ -74,7 +74,7 @@ export function registerPlan({source,date,blockId,state,id,planningKey}){
  const other=state.sessions.filter(s=>!claimed.has(s.id)&&s.noteBlockId!==blockId&&!s.dailyRetired&&!s.manualSuperseded);
  if(hasSessionOverlaps(sessions)||sessions.some(s=>other.some(t=>sessionsOverlap(s,t))))throw Error('Gli orari si sovrappongono. Correggi gli intervalli indicati.');
  const removeIds=state.sessions.filter(s=>s.noteBlockId===blockId&&!sessions.some(t=>t.id===s.id)).map(s=>s.id);
- return {source,date,blockId,planningKey,sessions,records,budgets,removeIds,retainedIds:[],unusedMinutes:0};
+ return {source,date,blockId,planningKey,sessions,records,budgets,removeIds,retainedIds:[],unusedMinutes:slots.reduce((sum,slot)=>sum+(slot.unusedMinutes||0),0)};
 }
 
 export function applyRegister(state,plan){
