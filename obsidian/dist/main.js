@@ -1652,7 +1652,7 @@ var DailyBlocks = class {
   }
   async syncLedgers(forcePath) {
     const { app, state } = this.plugin, vault = app.vault;
-    if (!vault.process) return;
+    if (!vault?.process) return;
     const totals = /* @__PURE__ */ new Map();
     creditedWork(state, (path, source) => app.metadataCache?.getFirstLinkpathDest?.(path, source)?.path, (id) => this.bindings[id]?.path, totals);
     const paths = forcePath ? [forcePath] : /* @__PURE__ */ new Set([...totals.keys(), ...this.ledgerVersions.keys()]);
