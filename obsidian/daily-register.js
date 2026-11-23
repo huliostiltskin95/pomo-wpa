@@ -1,11 +1,11 @@
 import {noteLinks} from './notes-integration.js';
 import {dateTime,localDateString,sessionBounds,hasSessionOverlaps,sessionsOverlap} from '../core/tempo-core.js';
-import {planSessions} from '../core/tempo-simple.js';
+import {isAreaRegister,parseAreaRegister} from './area-register.js';
 
 const clock='(?:[01]\\d|2[0-3]):[0-5]\\d';
 const header=new RegExp('^(.+?)\\s+@(\\d+(?:[.,]\\d+)?)\\s*([hm])(?:\\s+('+clock+'))?\\s*=\\s*(\\d+)$','i');
 const assignment=new RegExp('^-\\s*(?:('+clock+')\\s*)?(\\[\\[[^\\]\\n]+\\]\\])?$');
-export const isRegister=source=>/^\s*[^\n]+\s+@[\d.,]+\s*[hm]\b[^\n]*=\s*\d+\s*$/im.test(source||'');
+export const isRegister=source=>isAreaRegister(source)||/^\s*[^\n]+\s+@[\d.,]+\s*[hm]\b[^\n]*=\s*\d+\s*$/im.test(source||'');
 const minutesOf=time=>Number(time.slice(0,2))*60+Number(time.slice(3));
 
 export function parseRegister(source,areas){
@@ -44,32 +44,37 @@ export function parseRegister(source,areas){
 }
 
 export function registerPlan({source,date,blockId,state,id,planningKey}){
- const slots=parseRegister(source,state.defaults.simple.areas);
+ const areas=state.defaults.simple.areas;
+ const {slots,budgets}=isAreaRegister(source)?parseAreaRegister(source,areas):{slots:parseRegister(source,areas),budgets:[]};
  const sessions=[],records=[],claimed=new Set();
  const previous=state.history.filter(h=>h.registerBlock===blockId);
  for(const [index,slot] of slots.entries()){
-  const day=new Date(date+'T12:00:00');day.setDate(day.getDate()+slot.dayOffset);
-  const dayText=localDateString(day);
-  const exact=s=>s.date===dayText&&s.start===slot.start&&s.areaId===slot.areaId&&
-   (sessionBounds(s).end-sessionBounds(s).start)===slot.minutes*60000;
+  const day=new Date(date+'T12:00:00');day.setDate(day.getDate()+(slot.dayOffset||0));
+  const start=slot.start?new Date(+dateTime(localDateString(day),slot.start)+(slot.offset||0)*1000):null;
+  const clock=t=>[t.getHours(),t.getMinutes()].map(n=>String(n).padStart(2,'0')).join(':');
+  const dayText=localDateString(start||day),startTime=start&&clock(start);
+  const exact=s=>s.date===dayText&&+sessionBounds(s).start===+start&&s.areaId===slot.areaId&&
+   (sessionBounds(s).end-sessionBounds(s).start)===Math.round(slot.minutes*60000);
   const match=slot.start&&state.sessions.find(s=>!s.manualSuperseded&&!s.dailyRetired&&!claimed.has(s.id)&&
    (!s.noteBlockId||s.noteBlockId===blockId)&&exact(s));
   const old=previous.find(h=>h.slotIndex===index);
   const sessionId=match?.id||(old&&!claimed.has(old.sessionId)?old.sessionId:id());
   claimed.add(sessionId);
   const record={sessionId,registerBlock:blockId,noteBlockId:blockId,slotIndex:index,date:dayText,registerDay:date,
-   title:slot.area,area:slot.area,areaId:slot.areaId,start:slot.start,minutes:slot.minutes,measured:true,linkedNotes:slot.linkedNotes};
+   title:slot.area,area:slot.area,areaId:slot.areaId,start:startTime&&start.getSeconds()?startTime+':'+String(start.getSeconds()).padStart(2,'0'):startTime,minutes:slot.minutes,measured:true,linkedNotes:slot.linkedNotes};
   records.push(record);
   if(slot.start){
-   const request={...slot,dayOffset:0,...(slot.minutes<1440?{cycleMinutes:slot.minutes}:{})};
-   const session=planSessions([request],[],[],state.defaults,dateTime(dayText,slot.start),()=>sessionId,dayText).sessions[0];
-   sessions.push({...session,noteBlockId:blockId,linkedNotes:slot.linkedNotes,registerMinutes:slot.minutes});
+   const end=new Date(+start+Math.round(slot.minutes*60000));
+   const precise={timerStartedAt:start.toISOString(),timerEndsAt:end.toISOString()};
+   const cycle=Number.isInteger(slot.minutes)&&slot.minutes<1440?{cycleMinutes:slot.minutes,workMinutes:slot.minutes*5/6}:{workMinutes:25};
+   sessions.push({id:sessionId,title:slot.area,area:slot.area,areaId:slot.areaId,date:dayText,start:startTime,end:clock(end),
+    ...precise,...cycle,breakEnabled:true,noteBlockId:blockId,linkedNotes:slot.linkedNotes,registerMinutes:slot.minutes});
   }
  }
  const other=state.sessions.filter(s=>!claimed.has(s.id)&&s.noteBlockId!==blockId&&!s.dailyRetired&&!s.manualSuperseded);
  if(hasSessionOverlaps(sessions)||sessions.some(s=>other.some(t=>sessionsOverlap(s,t))))throw Error('Gli orari si sovrappongono. Correggi gli intervalli indicati.');
  const removeIds=state.sessions.filter(s=>s.noteBlockId===blockId&&!sessions.some(t=>t.id===s.id)).map(s=>s.id);
- return {source,date,blockId,planningKey,sessions,records,removeIds,retainedIds:[],unusedMinutes:0};
+ return {source,date,blockId,planningKey,sessions,records,budgets,removeIds,retainedIds:[],unusedMinutes:0};
 }
 
 export function applyRegister(state,plan){

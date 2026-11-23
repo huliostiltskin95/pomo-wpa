@@ -1,3 +1,4 @@
+import {readableDuration} from './area-register.js';
 import {SessionNotePicker} from './note-picker.js';
 import {groupSessions,sessionNotes,updatedSessionNotes} from './session-notes.js';
 import {NoteEstimates} from './note-estimates.js';
@@ -315,7 +316,7 @@ class TempvsView extends ItemView {
       if(index>0)iconButton(row,'arrow-up','Rendi principale '+label,()=>this.plugin.setSessionNote(ids,'',{primaryPath:note.path}));
       iconButton(row,'x','Scollega '+label,()=>this.plugin.setSessionNote(ids,'',{removePath:note.path}));
     }
-    button(resources,'＋ Collega nota',()=>new SessionNotePicker(this.plugin.app, value=>this.plugin.setSessionNote(ids,value)).open());
+    button(resources,notes.length?'Cambia nota':'＋ Collega nota',()=>new SessionNotePicker(this.plugin.app, value=>this.plugin.setSessionNote(ids,value)).open());
   }
   update(full=false) {
     const root=this.containerEl.children[1];
@@ -373,6 +374,12 @@ class TempvsView extends ItemView {
     list.empty();
     const now=new Date();
     const registered=plugin.state.history.filter(h=>h.registerBlock&&h.registerDay===this.day);
+    const budgets=Object.values(plugin.dailyNotes||{}).find(b=>b.date===this.day)?.budgets||[];
+    for(const b of budgets){
+      const difference=b.seconds-b.assigned;
+      list.createEl('p',{text:b.area+' · '+readableDuration(b.assigned)+' su '+readableDuration(b.seconds)+
+        (difference?' · '+readableDuration(Math.abs(difference))+(difference>0?' disponibili':' oltre il budget'):'')});
+    }
     if(registered.length){
       const table=list.createEl('table'),head=table.createEl('thead').createEl('tr'),body=table.createEl('tbody');
       for(const label of ['Area','Orario','Nota','Durata'])head.createEl('th',{text:label});
@@ -382,11 +389,11 @@ class TempvsView extends ItemView {
         const cell=row.createEl('td'),note=record.linkedNotes[0];
         if(note)button(cell,note.label,()=>plugin.app.workspace.openLinkText(note.path,plugin.dailyNotes[record.registerBlock]?.path||'',false));
         else cell.setText('—');
-        row.createEl('td',{text:record.minutes+' min'});
+        row.createEl('td',{text:readableDuration(Math.round(record.minutes*60))});
       }
       const totals=new Map();
       for(const r of registered)totals.set(r.area,(totals.get(r.area)||0)+r.minutes);
-      list.createEl('small',{text:[...totals].map(([area,min])=>area+' '+min+' min').join(' · ')});
+      if(!budgets.length)list.createEl('small',{text:[...totals].map(([area,min])=>area+' '+min+' min').join(' · ')});
     }
     const sessions=plugin.state.sessions.filter(s=>{
       if(s.registerMinutes)return false;
@@ -422,7 +429,7 @@ class TempvsView extends ItemView {
         iconButton(item,"trash-2","Elimina sessione "+(first.area||first.title),()=>plugin.removeSession(first.id));
       }
     }
-    if(!sessions.length&&!registered.length){
+    if(!sessions.length&&!registered.length&&!budgets.length){
       const empty=list.createDiv({cls:"tempvs-empty"});
       setIcon(empty.createDiv({cls:"tempvs-empty-icon"}),"calendar-check");
       empty.createEl("strong",{text:"Spazio per i tuoi progetti"});
@@ -798,7 +805,8 @@ export default class TempvsPlugin extends Plugin {
     for(const id of ids){
       const session=this.state.sessions.find(s=>s.id===id);
       if(!session)throw Error('La sessione non è più disponibile.');
-      updates.set(id,updatedSessionNotes(session,input,{...options,estimates:this.estimates?.notes||[]}));
+      const links=updatedSessionNotes(session,input,{...options,replacePrimary:true,estimates:this.estimates?.notes||[]});
+      updates.set(id,input.trim()?links.slice(0,1):links);
     }
     const bindings=new Set(ids.map(id=>this.state.sessions.find(s=>s.id===id).noteBlockId).filter(Boolean));
     if(bindings.size){

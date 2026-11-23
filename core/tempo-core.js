@@ -100,7 +100,7 @@ export function getPhase(session, now = new Date()) {
       progress:Math.min(100,Math.max(0,(now-phaseStart)/Math.max(1,phaseEnd-phaseStart)*100)),
       sessionEnd:end,totalRemaining:Math.max(0,Math.ceil((end-now)/1000))};
   }
-  const workMs = Math.round(session.workMinutes * 60000);
+  const workMs = Math.round(session.registerMinutes ? (end-start)*5/6 : session.workMinutes*60000);
   const elapsed = Math.max(0, now - start);
   const remainingSession = Math.max(0, end - now);
   if (!session.breakEnabled) {
@@ -109,7 +109,7 @@ export function getPhase(session, now = new Date()) {
       progress: Math.min(100, elapsed / Math.max(1, end - start) * 100),
       sessionEnd: end, totalRemaining: Math.ceil(remainingSession / 1000) };
   }
-  const breakMs = Math.round((session.cycleMinutes!==undefined?session.cycleMinutes-session.workMinutes:pauseMinutes(session.workMinutes)) * 60000);
+  const breakMs = session.registerMinutes ? (end-start)-workMs : Math.round((session.cycleMinutes!==undefined?session.cycleMinutes-session.workMinutes:pauseMinutes(session.workMinutes)) * 60000);
   const cycleMs = workMs + breakMs;
   const cycleIndex = Math.floor(elapsed / cycleMs);
   const within = elapsed % cycleMs;

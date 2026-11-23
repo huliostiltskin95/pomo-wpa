@@ -227,7 +227,7 @@ export class DailyBlocks {
      const checked=prepareDailyPlan({source:prepared.source,date:prepared.date,blockId:prepared.blockId,previousSource:prepared.previousSource,protectedBlockIds:prepared.protectedBlockIds,state:this.plugin.state,id:()=>available.shift()||uid()});
      applyDailyPlan(this.plugin.state,checked);
      this.plugin.state=normalizeArchive(this.plugin.state);
-     this.bindings[prepared.blockId]={path:prepared.file.path,date:prepared.date,source:canonical,ratioVersion:1,agendaVersion:2,hiddenSessionIds:checked.retainedIds,unusedMinutes:fresh.unusedMinutes};
+     this.bindings[prepared.blockId]={path:prepared.file.path,date:prepared.date,source:canonical,ratioVersion:1,agendaVersion:2,hiddenSessionIds:checked.retainedIds,budgets:fresh.budgets,unusedMinutes:fresh.unusedMinutes};
     });
    }catch(error){
     if(previousBinding)this.bindings[prepared.blockId]=previousBinding;else delete this.bindings[prepared.blockId];
@@ -343,7 +343,7 @@ class DailyBlock extends MarkdownRenderChild {
    const binding=this.controller.bindings[this.controller.bindingId(this.ctx.sourcePath)];
    if(isRegister(this.source)){
     const rows=this.controller.plugin.state.history.filter(h=>h.registerBlock===this.controller.bindingId(this.ctx.sourcePath));
-    el.createEl('small',{text:error||rows.reduce((sum,h)=>sum+h.minutes,0)+' min registrati, pause comprese',attr:{role:error?'alert':'status'}});
+    el.createEl('small',{text:error||new Intl.NumberFormat('it-IT',{maximumFractionDigits:2}).format(rows.reduce((sum,h)=>sum+h.minutes,0))+' min registrati, pause comprese',attr:{role:error?'alert':'status'}});
     return;
    }
    const manual=daySessions(this.controller.plugin.state,context.date,this.controller.bindingId(this.ctx.sourcePath)).filter(s=>s.noteBlockId===this.controller.bindingId(this.ctx.sourcePath));

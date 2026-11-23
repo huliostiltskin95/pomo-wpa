@@ -123,7 +123,22 @@ La proiezione giornaliera considera tutto il focus ancora disponibile nelle sess
 
 Modificare il blocco aggiorna la stima conservando l’avanzamento. Rimuovere il blocco nasconde la stima ma conserva i dati; reinserirlo nello stesso file la ripristina. Rinominare o spostare la nota mentre Obsidian è aperto conserva l’identità. Le stime, le assegnazioni e i progressi sono inclusi nel backup e nella sincronizzazione Dropbox; sono visibili anche nella PWA, che non legge direttamente i file del vault. La PWA permette di assegnare le note sincronizzate alle sessioni e registrarne il lavoro.
 
-## Registro giornaliero per sessione
+## Pianificazione per area e compito
+
+```TEMPVS
+Studio @8h
+- [[Matematica#Fibonacci|Fibonacci]] @1h = 2
+- [[Geografia#Vaticano|Vaticano]] @1h = 1
+- [[Greco]] @6h = 12
+Personale @4h
+- [[Personale#Budapest|Budapest]] @1h = 2 +02:50
+```
+
+La riga dell’area indica il tempo disponibile. Ogni compito assegna la propria durata lorda a una sola nota e la divide in pomodori consecutivi. Budapest riceve un’ora e rimangono tre ore disponibili per Personale. Con Obsidian aperto il timer segue gli orari specificati. I conteggi si aggiornano anche alla riapertura e seguono le correzioni nel blocco.
+
+Le durate accettano h, m e s. Senza unità si intendono ore. Una durata indivisibile distribuisce i secondi residui sui primi pomodori. Un orario si applica solo al compito sulla stessa riga. Un budget superato viene evidenziato nel pannello. Per una stima facoltativa della nota si può usare la proprietà YAML `tempvs: 8h` oppure il blocco di stima `@8h`.
+
+## Formato precedente per sessione
 
 ```TEMPVS
 date: 1995-01-01

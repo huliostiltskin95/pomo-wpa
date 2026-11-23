@@ -30,3 +30,31 @@ test('ripartizione esatta e orario per sessione',()=>{
  assert.equal(rows[0].start,null);assert.equal(rows[2].dayOffset,1);
  assert.throws(()=>parseRegister('Studio @1h = 1\n- [[A]]\n- [[B]]',areas));
 });
+
+import {parseAreaRegister} from '../obsidian/area-register.js';
+import {getPhase,sessionBounds} from '../core/tempo-core.js';
+test('budget e tempo svolto indipendenti, timer con precisione al secondo',()=>{
+ const state=normalizeArchive({sessions:[]}),date='2026-11-23',blockId='budget';
+ let next=0;
+ const plan=source=>prepareDailyPlan({source,date,blockId,state,id:()=>String(++next)});
+ const source='Studio @8\n- [[Matematica#Fibonacci|Fibonacci]] @1 = 2\n- [[Geografia#Vaticano|Vaticano]] @60m = 1\n- [[Greco]] @6h = 12\nPersonale @4h\n- [[Personale#Budapest|Budapest]] @1h = 2 +02:50';
+ const result=plan(source);
+ assert.deepEqual(result.budgets.map(b=>[b.seconds,b.assigned]),[[28800,28800],[14400,3600]]);
+ applyDailyPlan(state,result);assert.equal(state.history.length,17);
+ assert.deepEqual(state.sessions.map(s=>[s.start,s.end]),[['02:50','03:20'],['03:20','03:50']]);
+ assert.equal(creditedWork(state,()=>null,()=>null).get('Personale.md'),3600);
+ const short=plan('Studio @60\n- [[Greco]] @65s = 2 +23:59');
+ applyDailyPlan(state,short);normalizeArchive(state);
+ assert.equal(short.budgets[0].seconds,216000);
+ const [first,second]=state.sessions.map(sessionBounds);
+ assert.equal(second.start-first.start,33000);assert.equal(second.end-second.start,32000);
+ assert.equal(getPhase(state.sessions[0],new Date(+first.start+30000)).kind,'break');
+ assert.deepEqual(state.history.map(h=>Math.round(h.minutes*60)),[33,32]);
+ assert.equal(getPhase(state.sessions[1],second.start).kind,'work');
+ const areas=state.defaults.simple.areas;
+ for(const bad of ['[[Greco]] 1h 2 02:50','- [[Greco]] @1h 2 +02:50']){
+  assert.throws(()=>parseAreaRegister('Studio @8h\n'+bad,areas),/Prova: - \[\[Greco\]\] @1h = 2 \+02:50/);
+ }
+ assert.throws(()=>plan('Studio @8h\n- [[A]] [[B]] @1h = 2'),/un solo wikilink/);
+ assert.equal(plan('Personale @4h').records.length,0);
+});

@@ -182,11 +182,11 @@ try {
     plugin.app.vault.getMarkdownFiles=()=>[file];
     plugin.app.metadataCache={...plugin.app.metadataCache,getFileCache:()=>({frontmatter:{title:'Quaderno',aliases:['Taccuino']},headings:[{heading:'Lettura',level:2}]})};
   });
-  await cycle.getByRole('button',{name:'＋ Collega nota'}).click();
+  await cycle.getByRole('button',{name:'Cambia nota'}).click();
   await page.getByLabel('Cerca nota').fill('Taccuino');
   await page.getByRole('button',{name:/Quaderno.*Appunti/}).click();
   await page.getByRole('button',{name:/Lettura.*H2/}).click();
-  await page.waitForFunction(()=>plugin.state.sessions.find(s=>s.start==='18:00'&&s.date==='2099-11-06').linkedNotes?.[1]?.path==='Appunti#Lettura');
+  await page.waitForFunction(()=>plugin.state.sessions.find(s=>s.start==='18:00'&&s.date==='2099-11-06').linkedNotes?.[0]?.path==='Appunti#Lettura');
   assert(await page.evaluate(()=>dailyText.includes('[[Appunti#Lettura|Lettura]]')));
   assert.equal(await page.locator('.tempvs-session').count(),2);
   await estimates.getByRole('button',{name:'Segna completata',exact:true}).click();
@@ -213,7 +213,7 @@ try {
   });
   assert.equal(await page.evaluate(()=>plugin.state.sessions.filter(s=>s.date==='2020-11-10').reduce((n,s)=>n+s.actualSeconds,0)),6000);
   await page.evaluate(async()=>{window.pastText=pastText.replace('+10:00-12:00','+10:15-11:15');await plugin.daily.syncFile('Daily/2020-11-10.md');});
-  await page.waitForFunction(()=>document.querySelector('.past-container small')?.textContent.includes('50 min effettivi'));
+  await page.waitForFunction(()=>document.querySelector('.past-container small')?.textContent.includes('60 min registrati, pause comprese'));
   assert.equal(await page.evaluate(()=>plugin.state.sessions.filter(s=>s.date==='2020-11-10').reduce((n,s)=>n+s.actualSeconds,0)),3000);
   assert.match(await page.locator('.past-container code').textContent(),/10:15-11:15/);
   console.log('Retrospective blocks: corrected intervals, manual net totals and no duplicate historical credits passed.');
@@ -257,8 +257,14 @@ try {
   assert.deepEqual(await page.evaluate(()=>openedResource),['personal-management#Serie TV','agenda/15 novembre 2026.md',false]);
   await page.setViewportSize({width:320,height:800});
   assert(await page.locator('.tempvs-session-resource').first().isVisible());
+  await page.evaluate(async()=>{
+    window.screenshotNote=['```TEMPVS','date: 2026-11-15','Studio @8h','- [[Greco]] @6h = 12','Personale @4h','- [[Personale#Budapest|Budapest]] @1h = 2 +02:50','```'].join('\n');
+    await plugin.daily.syncFile('agenda/15 novembre 2026.md');
+  });
+  await page.waitForFunction(()=>document.querySelector('.tempvs-sessions')?.textContent.includes('3 h disponibili'));
+  assert.equal(await page.locator('.tempvs-sessions tbody tr').count(),14);
+  assert.match(await page.locator('.tempvs-sessions tbody tr').last().textContent(),/03:20.*Budapest.*30 min/);
   assert.deepEqual(errors,[]);
   assert.deepEqual(await page.evaluate(()=>notices.filter(n=>/errore|invalid|sovrappost/i.test(n))),[]);
   console.log('Obsidian UI: creation, planning, pause/resume, finish, volume, Escape, drafts and responsive layouts passed.');
 } finally { await browser.close(); }
-
