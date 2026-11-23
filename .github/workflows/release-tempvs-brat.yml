@@ -116,4 +116,4 @@ jobs:
             obsidian/dist/styles.css#styles.css \
             --target "${{ github.sha }}" \
             --title "TEMPVS $VERSION" \
-            --notes "Evidenziazione della sintassi TEMPVS in lettura e durante la modifica."
+            --notes "Registro giornaliero compatto e totali per area nelle note collegate, con obiettivo facoltativo."
