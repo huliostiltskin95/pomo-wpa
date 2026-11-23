@@ -1,11 +1,11 @@
 // Offsets refer to the original line so rendering never rewrites Markdown.
-const tokens = /<!--.*?(?:-->|$)|\[\[[^\]]*(?:\]\]|$)|^\s*date:(?=\s|$)|\b\d{4}-\d{2}-\d{2}\b|\+?\d{2}:\d{2}(?:-\d{2}:\d{2})?|=\s*\d+|\b\d+(?:[.,]\d+)?[hms]\b|[@~-]\d+(?:[.,]\d+)?[hms]?|^\s*-(?=\s|$)/gi;
+const tokens = /^\s*T:|(?<=\s)@[^\d\s][^\n]*$|<!--.*?(?:-->|$)|\[\[[^\]]*(?:\]\]|$)|^\s*date:(?=\s|$)|\b\d{4}-\d{2}-\d{2}\b|\+?\d{2}:\d{2}(?:-\d{2}:\d{2})?|=\s*\d+|\b\d+(?:[.,]\d+)?[hms]\b|[@~-]\d+(?:[.,]\d+)?[hms]?|^\s*-(?=\s|$)/gi;
 export function syntaxTokens(line){
   const parts=[];
   const add=(from,to,kind)=>{if(to>from)parts.push({from,to,kind});};
   const heading=line.match(/^(\s*)(@?[^@+\-=\s\d][^@+\[\]=]*?)(?=\s+(?:[@+]|\d))/);
   let offset=0;
-  if(heading&&!/^\s*date:/i.test(line)){
+  if(heading&&!/^\s*(?:date|T):/i.test(line)){
     offset=heading[0].length;
     add(heading[1].length,offset,'area');
   }
@@ -22,7 +22,9 @@ export function syntaxTokens(line){
       add(targetEnd,end,'punctuation');
     }else{
       let kind='duration';
-      if(value.startsWith('<!--'))kind='comment';
+      if(/^@[^\d]/.test(value))kind='area';
+      else if(value.trim().toUpperCase()==='T:')kind='keyword';
+      else if(value.startsWith('<!--'))kind='comment';
       else if(value.includes(':'))kind=/date:/i.test(value)?'keyword':'time';
       else if(/^\d{4}-/.test(value))kind='date';
       else if(value.startsWith('='))kind='count';

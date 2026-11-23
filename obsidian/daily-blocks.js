@@ -1,3 +1,5 @@
+import {creditedWork} from './daily-register.js';
+import {isLedger,updateLedger} from './note-ledger.js';
 import {renderSyntaxLine} from './syntax.js';
 import {movedTarget,moveBlockLinks,archivedLinkResolver} from './moved-links.js';
 import {isEstimateSource} from '../core/tempo-estimates.js';
@@ -22,7 +24,7 @@ export function restoreRowIds(original,edited){
  }).join('\n');
 }
 export class DailyBlocks {
- constructor(plugin){this.plugin=plugin;this.children=new Set();this.chain=Promise.resolve();this.destroyed=false;this.applying=false;this.timers=new Map();this.errors=new Map();this.detached=new Set();}
+ constructor(plugin){this.plugin=plugin;this.children=new Set();this.chain=Promise.resolve();this.destroyed=false;this.applying=false;this.timers=new Map();this.errors=new Map();this.detached=new Set();this.ledgerVersions=new Map();}
  get bindings(){return this.plugin.dailyNotes;}
  start(){
   for(const language of ['TEMPVS','tempvs','TEMPUS','tempus'])this.plugin.registerMarkdownCodeBlockProcessor(language,(source,el,ctx)=>ctx.addChild(new DailyBlock(el,this,ctx,source)));
@@ -36,7 +38,7 @@ export class DailyBlocks {
     this.queue(()=>this.moveReferences(oldPath,newPath)).catch(e=>new Notice('TEMPVS: '+e.message));
    }));
   }
-  if(vault?.on)this.plugin.registerEvent(vault.on('create',file=>{if(file.extension==='md')this.schedule(file.path);}));
+  if(vault?.on)this.plugin.registerEvent(vault.on('create',file=>{if(file.extension==='md'){this.schedule(file.path);this.queue(()=>this.syncLedgers()).catch(error=>new Notice(error.message));}}));
   this.plugin.addCommand({id:'unlink-daily-plan',name:'Scollega TEMPVS dalla nota attiva (conserva sessioni)',callback:()=>{const file=this.plugin.app.workspace.getActiveFile();if(file)this.detach(file.path).catch(error=>new Notice('TEMPVS: '+error.message));}});
   this.plugin.addCommand({id:'insert-daily-plan',name:'Inserisci blocco TEMPVS nella nota',editorCallback:editor=>editor.replaceSelection('```TEMPVS\n\n```\n')});
   this.plugin.app.workspace.onLayoutReady?.(()=>this.initialize().catch(error=>new Notice('TEMPVS: '+error.message)));
@@ -86,6 +88,29 @@ export class DailyBlocks {
   clearTimeout(this.timers.get(path));
   this.timers.set(path,setTimeout(()=>{this.timers.delete(path);this.syncFile(path).catch(error=>{this.errors.set(path,error.message);this.plugin.refresh?.(true);this.refresh(path);});},350));
  }
+ async syncLedgers(forcePath){
+  const {app,state}=this.plugin,vault=app.vault;
+  if(!vault.process)return;
+  const totals=new Map();
+  creditedWork(state,(path,source)=>app.metadataCache?.getFirstLinkpathDest?.(path,source)?.path,id=>this.bindings[id]?.path,totals);
+  const paths=forcePath?[forcePath]:new Set([...totals.keys(),...this.ledgerVersions.keys()]);
+  for(const path of paths){
+   const areas=totals.get(path)||new Map(),version=JSON.stringify([...areas]);
+   if(!forcePath&&version===this.ledgerVersions.get(path))continue;
+   const file=vault.getAbstractFileByPath(path);
+   if(file?.extension!=='md'||file.path!==path){this.ledgerVersions.delete(path);continue;}
+   try{
+    const markdown=await this.readMarkdown(file);
+    if(updateLedger(markdown,areas)!==markdown){
+     await vault.process(file,current=>{
+      if(current!==markdown)throw Error('Modifica in corso: attendo il salvataggio della nota.');
+      return updateLedger(current,areas);
+     });
+    }
+    this.ledgerVersions.set(path,version);
+   }catch(error){this.errors.set(path,error.message);this.ledgerVersions.delete(path);this.refresh(path);}
+  }
+ }
  async initialize(){
   const files=this.plugin.app.vault.getMarkdownFiles();
   const estimates=this.plugin.estimates;
@@ -120,17 +145,20 @@ export class DailyBlocks {
   }
   return this.plugin.app.vault.read(file);
  }
- async context(path){
+ async context(path,renderSource){
   const file=this.plugin.app.vault.getAbstractFileByPath(path);
   if(!file||file.extension!=='md')throw Error('La nota Markdown non è più disponibile.');
   const markdown=await this.readMarkdown(file),blocks=findDailyBlocks(markdown);
-  if(!blocks.length){
+  const ledger=blocks.find(b=>isLedger(b.source));
+  if(ledger&&(blocks.length===1||isLedger(renderSource)))return {file,block:ledger,markdown,kind:'ledger'};
+  const plans=blocks.filter(b=>!isLedger(b.source));
+  if(!plans.length){
    const value=this.plugin.app.metadataCache?.getFileCache(file)?.frontmatter?.tempvs;
    if(typeof value==='string'&&/^@?\d+(?:[.,]\d+)?[hm]$/i.test(value.trim()))return {file,kind:'estimate',block:{source:'@'+value.trim().replace(/^@/,'')}};
    return null;
   }
-  if(blocks.length!==1)throw Error('Usa un solo blocco TEMPVS per nota giornaliera.');
-  const block=blocks[0];
+  if(plans.length!==1)throw Error('Usa un solo blocco TEMPVS per nota giornaliera.');
+  const block=plans[0];
   if(!block.source.trim()&&this.plugin.estimates?.find(file.path))return {file,block,markdown,kind:"estimate-empty"};
   if(isEstimateSource(block.source))return {file,block,markdown,kind:"estimate"};
   const date=resolveDailyDate(block.source,file,{
@@ -140,7 +168,7 @@ export class DailyBlocks {
   return {file,block,date,markdown};
  }
  async locate(child){
-  const context=await this.context(child.ctx.sourcePath);
+  const context=await this.context(child.ctx.sourcePath,child.source);
   if(!context)throw Error('Blocco TEMPVS non trovato.');
   return context;
  }
@@ -162,7 +190,11 @@ export class DailyBlocks {
      delete this.bindings[id];
     });}finally{this.applying=false;}
    }
-   await this.syncEstimate(null,path);return;
+   await this.syncEstimate(null,path);if(id)await this.syncLedgers();return;
+  }
+  if(context.kind==='ledger'){
+   await this.syncEstimate(null,path);
+   this.errors.delete(path);await this.syncLedgers(path);this.refresh(path);return;
   }
   if(context.kind==="estimate-empty"){await this.syncEstimate(null,path);this.errors.delete(path);this.refresh(path);return;}
   if(context.kind==="estimate"){await this.syncEstimate(context,path);this.errors.delete(path);this.refresh(path);return;}
@@ -237,6 +269,7 @@ export class DailyBlocks {
     throw error;
    }
   }finally{this.applying=false;this.refresh(prepared.file.path);}
+  await this.syncLedgers();
   return canonical;
  }
  apply(prepared){return this.queue(()=>this.commit(prepared));}
@@ -302,6 +335,7 @@ export class DailyBlocks {
      this.errors.delete(binding.path);
     }catch(error){this.errors.set(binding.path,error.message);}
    }
+   await this.syncLedgers();
    this.refresh();
   });
  }
@@ -339,6 +373,7 @@ class DailyBlock extends MarkdownRenderChild {
    }
    const error=this.controller.errors.get(this.ctx.sourcePath);
    const binding=this.controller.bindings[this.controller.bindingId(this.ctx.sourcePath)];
+   if(context.kind==="ledger"){if(error)el.createEl("small",{text:error});return;}
    if(isRegister(this.source)){
     const rows=this.controller.plugin.state.history.filter(h=>h.registerBlock===this.controller.bindingId(this.ctx.sourcePath));
     el.createEl('small',{text:error||new Intl.NumberFormat('it-IT',{maximumFractionDigits:2}).format(rows.reduce((sum,h)=>sum+h.minutes,0))+' min registrati, pause comprese',attr:{role:error?'alert':'status'}});

@@ -1,3 +1,5 @@
+import * as ledger from '../obsidian/note-ledger.js';
+import {creditedWork} from '../obsidian/daily-register.js';
 import {isEstimateSource} from '../core/tempo-estimates.js';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
@@ -33,7 +35,7 @@ test('removing completed rows preserves the archive and accepts the new plan',()
 });
 // Exercise the controller source independently of whether a bundle was built first.
 const code=fs.readFileSync(new URL('../obsidian/daily-blocks.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'').replace(/export /g,'');
-const context={...movedLinks,...dailyPlan,normalizeArchive,isEstimateSource,MarkdownRenderChild:class{},Notice:class{},moment:()=>({isValid:()=>false}),module:{exports:{}},console,setTimeout,clearTimeout,crypto:globalThis.crypto};
+const context={...ledger,creditedWork,...movedLinks,...dailyPlan,normalizeArchive,isEstimateSource,MarkdownRenderChild:class{},Notice:class{},moment:()=>({isValid:()=>false}),module:{exports:{}},console,setTimeout,clearTimeout,crypto:globalThis.crypto};
 vm.createContext(context);vm.runInContext(code+'\nmodule.exports.DailyBlocks=DailyBlocks;',context);
 function fixture(date=day){
  let text='# Daily\n\n```TEMPVS\n'+initial+'\n```\n\nOther text';
@@ -148,5 +150,28 @@ test('panel note editing writes one session back to daily text without losing it
  assert(!f.text.includes('[[Studio/Nota'));
  f.text=f.text.replace('Studio +14:00','Studio +14:');
  await assert.rejects(f.daily.updateSessionNotes(id,new Map([[session.id,[]]])),/sta cambiando/);
+ f.daily.destroy();
+});
+
+test('compact daily updates the linked Markdown file and preserves its target after deletion',async()=>{
+ const f=fixture(),note={path:'archive/Nota.md',extension:'md',basename:'Nota'};
+ let body='# Nota\n';
+ f.plugin.app.metadataCache={getFirstLinkpathDest:()=>note,getFileCache:()=>null};
+ f.plugin.app.vault={
+  getAbstractFileByPath:path=>path===f.file.path?f.file:path===note.path?note:null,
+  read:async file=>file===note?body:f.text,
+  process:async(file,change)=>{if(file===note)body=change(body);else f.text=change(f.text);}
+ };
+ f.text='```TEMPVS\n- [[Nota#Lettura|Leggi]] 2h = 4 @Studio\n```';
+ await f.daily.syncFile(f.file.path);
+ assert.equal(body,'# Nota\n\n```TEMPVS\nT: 2h @Studio\n```\n');
+ body=body.replace('2h','2/7h');
+ await f.daily.syncFile(note.path);
+ f.text=f.text.replace('2h = 4','1h = 2');
+ await f.daily.syncFile(f.file.path);
+ assert.match(body,/T: 1\/7h @Studio/);
+ f.text='# Giornata';
+ await f.daily.syncFile(f.file.path);
+ assert.match(body,/T: 0\/7h @Studio/);
  f.daily.destroy();
 });

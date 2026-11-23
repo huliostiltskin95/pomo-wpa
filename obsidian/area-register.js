@@ -4,6 +4,7 @@ const quantity='(\\d+(?:[.,]\\d+)?)([hms]?)';
 const time='((?:[01]\\d|2[0-3]):[0-5]\\d)';
 const areaLine=new RegExp('^(.+?)\\s+@'+quantity+'$','i');
 const taskLine=new RegExp('^-\\s*(\\[\\[[^\\]\\[]+\\]\\])\\s+@'+quantity+'\\s*=\\s*(\\d+)(?:\\s+\\+'+time+')?$','i');
+const compactTask=new RegExp('^-\\s*(\\[\\[[^\\]\\[]+\\]\\])\\s+'+quantity+'\\s*=\\s*(\\d+)\\s+@(.+?)$','i');
 const possibleTask=new RegExp('^-?\\s*(\\[\\[[^\\]\\[]+\\]\\])\\s*[@*]?\\s*'+quantity+'\\s*=?\\s+(\\d+)(?:\\s*\\+?\\s*'+time+')?$','i');
 const possibleArea=new RegExp('^(.+?)\\s+[@*]?'+quantity+'$','i');
 export const isAreaRegister=source=>source?.split(/\r?\n/).some(line=>{
@@ -42,18 +43,22 @@ export function parseAreaRegister(source,areas){
     budgets.push(budget);continue;
    }
    if((line.match(/\[\[/g)||[]).length>1)throw Error('Usa un solo wikilink per riga. Scrivi il secondo compito su una nuova riga con la sua durata.');
-   const task=line.match(taskLine);
+   const compact=line.match(compactTask);
+   const task=compact||line.match(taskLine);
    if(!task)throw Error('Sintassi da correggere. Prova: '+suggestion(line));
-   if(!budget)throw Error('Inserisci prima l’area, per esempio Studio @8h.');
-   const [,link,value,unit,countText,start]=task,linkedNotes=noteLinks(link);
+   const area=compact?areas.find(a=>a.name.toLowerCase()===compact[5].trim().toLowerCase()):budget;
+   if(compact&&!area)throw Error('Area sconosciuta: '+compact[5]);
+   if(!area)throw Error('Inserisci prima l’area, per esempio Studio @8h.');
+   const [,link,value,unit,countText]=task,linkedNotes=noteLinks(link);
    if(linkedNotes.length!==1)throw Error('Indica una nota tra parentesi quadre doppie.');
    const seconds=secondsOf(value,unit),count=Number(countText);
    if(count<1||count>seconds||count>86400)throw Error('Indica almeno un pomodoro, con almeno un secondo ciascuno (massimo 86400).');
-   budget.assigned+=seconds;
+   if(!compact)budget.assigned+=seconds;
+   const start=compact?null:task[5];
    let offset=0;
    for(let i=0;i<count;i++){
     const duration=Math.floor(seconds/count)+Number(i<seconds%count);
-    slots.push({area:budget.area,areaId:budget.areaId,minutes:duration/60,linkedNotes,start:start||null,offset});
+    slots.push({area:compact?area.name:area.area,areaId:compact?area.id:area.areaId,minutes:duration/60,linkedNotes,start:start||null,offset});
     offset+=duration;
    }
   }catch(error){throw Error('Riga '+(index+1)+': '+error.message);}

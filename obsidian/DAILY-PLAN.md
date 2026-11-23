@@ -1,3 +1,13 @@
+## 0.5.26 · Registro per nota e area
+
+Nella nota giornaliera scrivi una riga per attività:
+
+```TEMPVS
+- [[Nota su cui si lavora]] 2h = 4 @Studio
+```
+
+La riga registra due ore lorde in quattro pomodori da trenta minuti. Nella nota collegata TEMPVS crea o aggiorna una riga per area, sommando le giornate. Per fissare un obiettivo aggiungi il denominatore, ad esempio modifica `T: 2h @Studio` in `T: 2/7h @Studio`. Le correzioni alla nota giornaliera aggiornano il numeratore. Alias e sezioni accreditano il tempo al file di destinazione.
+
 ## 0.5.18 · stima lorda totale del file
 
 In una nota di lavoro non giornaliera inserisci un blocco semplice:

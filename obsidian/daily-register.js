@@ -89,13 +89,17 @@ export function applyRegister(state,plan){
 }
 
 // Build both views from one row per session. History also holds slots without a clock.
-export function creditedWork(state,resolve,bindingPath){
+export function creditedWork(state,resolve,bindingPath,byArea){
  const totals=new Map(),records=new Map(state.history.map(h=>[h.sessionId,h]));
  for(const s of state.sessions)if(!records.get(s.id)?.registerBlock)records.set(s.id,s);
  const estimates=state.defaults.simple.noteEstimates||{};
- const add=(path,seconds,source)=>{
+ const add=(path,seconds,source,area)=>{
   if(!path||!(seconds>0))return;
   const target=path.split('#')[0],key=resolve(target,source)||target.replace(/\.md$/i,'')+'.md';
+  if(byArea&&area){
+   if(!byArea.has(key))byArea.set(key,new Map());
+   const rows=byArea.get(key);rows.set(area,(rows.get(area)||0)+seconds);
+  }
   totals.set(key,(totals.get(key)||0)+seconds);
  };
  for(const r of records.values()){
@@ -103,11 +107,11 @@ export function creditedWork(state,resolve,bindingPath){
   const source=bindingPath(r.noteBlockId)||'';
   const linked=r.linkedNotes?.[0]?.path||estimates[r.noteEstimateId]?.path;
   if(r.registerBlock||r.noteBlockId&&r.start&&r.end){
-   add(linked,r.registerBlock?r.minutes*60:(sessionBounds(r).end-sessionBounds(r).start)/1000,source);
+   add(linked,r.registerBlock?r.minutes*60:(sessionBounds(r).end-sessionBounds(r).start)/1000,source,r.area);
   }else{
    let allocated=0;
-   for(const [id,seconds] of Object.entries(r.noteWork||{})){allocated+=seconds;add(estimates[id]?.path,seconds,source);}
-   add(linked,(r.actualSeconds??(r.measured?r.minutes*60:0))-allocated,source);
+   for(const [id,seconds] of Object.entries(r.noteWork||{})){allocated+=seconds;add(estimates[id]?.path,seconds,source,r.area);}
+   add(linked,(r.actualSeconds??(r.measured?r.minutes*60:0))-allocated,source,r.area);
   }
  }
  return totals;
