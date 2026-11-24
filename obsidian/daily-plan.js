@@ -1,3 +1,4 @@
+import {expandRange} from './plain-syntax.js';
 import {isRegister,registerPlan,applyRegister} from './daily-register.js';
 export {isRegister,applyRegister};
 import {noteLinks} from './notes-integration.js';
@@ -64,7 +65,7 @@ export function parseDailySource(source,areas){
    const planning=raw.replace(/\[\[[^\]\n]+\]\]/g,'').trim();
    if(/\[\[|\]\]/.test(planning))throw Error('Collegamento nota non valido: usa [[nota|titolo]].');
    const nextDay=/\s+\+1d\s*$/i.test(planning),input=planning.replace(/\s+\+1d\s*$/i,'');
-   const rows=parseQuick(input,areas);
+   const rows=parseQuick(expandRange(input),areas);
    const id=metadata?decodeURIComponent(metadata[1]):null;
    if(id&&(used.has(id)||rows.length!==1))throw Error('Ogni identificativo deve riferirsi a una sola sessione, senza duplicati.');
    if(id)used.add(id);
@@ -86,7 +87,8 @@ export function daySessions(state,date,blockId){
  return state.sessions.filter(s=>!s.manualSuperseded&&!s.dailyRetired&&(s.date===date||(blockId&&s.noteBlockId===blockId))).sort((a,b)=>sessionBounds(a).start-sessionBounds(b).start);
 }
 // Keep identifiers in plugin data, never in the user's planning field.
-export function serializeDailyPlan(sessions,date){
+export function serializeDailyPlan(sessions,date,source=""){
+ const short=source.split(/\r?\n/).some(line=>expandRange(line.trim())!==line.trim());
  const groups=[];
  for(const s of [...sessions].sort((a,b)=>sessionBounds(a).start-sessionBounds(b).start)){
   if(s.date!==date&&s.date!==dayAfter(date))throw Error('Una sessione collegata è stata spostata fuori dalla giornata della nota.');
@@ -96,7 +98,7 @@ export function serializeDailyPlan(sessions,date){
   if(last&&last.key===key&&+last.until===+bounds.start&&s.date===last.date&&+bounds.end-last.from<86400000){last.end=s.end;last.until=bounds.end;}
   else groups.push({key,linkedNotes:s.linkedNotes||[],date:s.date,area:s.area||s.title,start:s.start,end:s.end,gross,from:+bounds.start,until:bounds.end});
  }
- return groups.map(g=>(g.gross===1440?`${g.area} @1440m +${g.start}`:`${g.area} +${g.start}-${g.end} -${g.gross}m`)+g.linkedNotes.map(n=>' [['+n.path+(n.label&&n.label!==n.path?'|'+n.label:'')+']]').join('')+(g.date!==date?' +1d':'')).join('\n');
+ return groups.map(g=>(g.gross===1440?`${g.area} @1440m +${g.start}`:`${g.area} ${short?"":"+"}${g.start}-${g.end} ${short?"":"-"}${g.gross}m`)+g.linkedNotes.map(n=>' [['+n.path+(n.label&&n.label!==n.path?'|'+n.label:'')+']]').join('')+(g.date!==date?' +1d':'')).join('\n');
 }
 // Compare source rows before expanding ranges: correcting one range must update
 // its original sessions, while removing a historical row still preserves history.

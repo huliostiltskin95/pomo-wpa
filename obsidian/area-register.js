@@ -1,3 +1,4 @@
+import {expandDailyLine} from './plain-syntax.js';
 import {parseQuick} from '../core/tempo-simple.js';
 import {noteLinks} from './notes-integration.js';
 
@@ -9,7 +10,7 @@ const compactTask=/^-\s*((?:\[\[[^\[\]]+\]\]\s+)+)(\d+(?:[.,]\d+)?)([hms])(?:\s*
 const possibleTask=new RegExp('^-?\\s*(\\[\\[[^\\]\\[]+\\]\\])\\s*[@*]?\\s*'+quantity+'\\s*=?\\s+(\\d+)(?:\\s*\\+?\\s*'+time+')?$','i');
 const possibleArea=new RegExp('^(.+?)\\s+[@*]?'+quantity+'$','i');
 export const isAreaRegister=source=>source?.split(/\r?\n/).some(line=>{
- const text=line.trim();
+ const text=expandDailyLine(line.trim());
  return areaLine.test(text)||/^\s*-?\s*\[\[.*\]\]\s+[@*\d]/.test(text)||
   (!/[+=]/.test(text)&&!text.startsWith('@')&&possibleArea.test(text));
 });
@@ -33,7 +34,7 @@ function suggestion(line){
 export function parseAreaRegister(source,areas){
  const budgets=[],slots=[];let budget;
  for(const [index,raw] of source.split(/\r?\n/).entries()){
-  const line=raw.trim();
+  const line=expandDailyLine(raw.trim());
   if(!line||/^date:\s*\d{4}-\d\d-\d\d$/i.test(line)||/^<!-- tempvs-block:[\w-]+ -->$/.test(line))continue;
   try{
    const heading=line.match(areaLine);
@@ -51,14 +52,14 @@ export function parseAreaRegister(source,areas){
    }
    const compact=line.match(compactTask);
    if(!compact&&line.startsWith('-')&&line.includes(']]')&&!/\]\]\s+[@*]/.test(line)){
-    throw Error('Indica la durata con unità e l’area sulla stessa riga, per esempio - [[Nota]] 30m +11:45 @Studio.');
+    throw Error('Indica la durata con unità e l’area sulla stessa riga, per esempio Studio 30m 11:45 [[Nota]].');
    }
    if(!compact&&(line.match(/\[\[/g)||[]).length>1)throw Error('Nel vecchio formato usa un solo wikilink per riga.');
    const task=compact||line.match(taskLine);
    if(!task)throw Error('Sintassi da correggere. Prova: '+suggestion(line));
    const area=compact?areas.find(a=>a.name.toLowerCase()===compact[6].trim().toLowerCase()):budget;
    if(compact&&!area)throw Error('Area sconosciuta: '+compact[6]);
-   if(!area)throw Error('Indica l’area sulla riga, per esempio - [[Nota]] 30m @Studio.');
+   if(!area)throw Error('Indica l’area sulla riga, per esempio Studio 30m [[Nota]].');
    const [,link,value,unit,countText]=task,linkedNotes=noteLinks(link);
    if(!linkedNotes.length)throw Error('Indica una nota tra parentesi quadre doppie.');
    const seconds=secondsOf(value,unit),count=Number(countText??1);

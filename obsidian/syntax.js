@@ -1,5 +1,5 @@
 // Offsets refer to the original line so rendering never rewrites Markdown.
-const tokens = /^\s*T:|(?<=\s)@[^\d\s][^\n]*$|<!--.*?(?:-->|$)|\[\[[^\]]*(?:\]\]|$)|^\s*date:(?=\s|$)|\b\d{4}-\d{2}-\d{2}\b|\+?\d{2}:\d{2}(?:-\d{2}:\d{2})?|=\s*\d+|\b\d+(?:[.,]\d+)?[hms]\b|[@~-]\d+(?:[.,]\d+)?[hms]?|^\s*-(?=\s|$)/gi;
+const tokens = /^\s*T:|(?<=\s)@[^\d\s][^\n]*$|<!--.*?(?:-->|$)|\[\[[^\]]*(?:\]\]|$)|^\s*date:(?=\s|$)|\b\d{4}-\d{2}-\d{2}\b|\+?\d{2}:\d{2}(?:-\d{2}:\d{2})?|\bx\d+\b|=\s*\d+|\b\d+(?:[.,]\d+)?[hms]\b|[@~-]\d+(?:[.,]\d+)?[hms]?|^\s*-(?=\s|$)/gi;
 export function syntaxTokens(line){
   const parts=[];
   const add=(from,to,kind)=>{if(to>from)parts.push({from,to,kind});};
@@ -27,7 +27,7 @@ export function syntaxTokens(line){
       else if(value.startsWith('<!--'))kind='comment';
       else if(value.includes(':'))kind=/date:/i.test(value)?'keyword':'time';
       else if(/^\d{4}-/.test(value))kind='date';
-      else if(value.startsWith('='))kind='count';
+      else if(/^(?:=|x\d)/i.test(value))kind='count';
       else if(value.trim()==='-')kind='punctuation';
       add(from,end,kind);
     }

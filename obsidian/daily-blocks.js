@@ -242,7 +242,7 @@ export class DailyBlocks {
   this.validateBinding(prepared.blockId,prepared.file.path,prepared.date);
   const newIds=prepared.sessions.filter(s=>!this.plugin.state.sessions.some(current=>current.id===s.id)).map(s=>s.id);
   const fresh=prepareDailyPlan({source:prepared.source,date:prepared.date,blockId:prepared.blockId,previousSource:prepared.previousSource,protectedBlockIds:prepared.protectedBlockIds,state:this.plugin.state,id:()=>newIds.shift()||uid()});
-  const body=prepared.keepSource||fresh.records?plain(prepared.source):serializeDailyPlan(fresh.sessions,prepared.date);
+  const body=prepared.keepSource||fresh.records?plain(prepared.source):serializeDailyPlan(fresh.sessions,prepared.date,prepared.source);
   const canonical=explicitDay(prepared.originalSource)&&!explicitDay(body)?'date: '+prepared.date+'\n'+body:body;
   const previousBinding=this.bindings[prepared.blockId];
   this.applying=true;
@@ -279,7 +279,7 @@ export class DailyBlocks {
   if(!context||context.block.source!==binding.source)throw Error('La nota giornaliera sta cambiando: attendi la sincronizzazione e riprova.');
   if(isRegister(binding.source))throw Error("Modifica il wikilink nella riga della nota quotidiana.");
   const sessions=daySessions(this.plugin.state,binding.date,blockId).filter(s=>!binding.hiddenSessionIds?.includes(s.id)).map(s=>updates.has(s.id)?{...s,linkedNotes:updates.get(s.id)}:s);
-  const body=serializeDailyPlan(sessions,binding.date);
+  const body=serializeDailyPlan(sessions,binding.date,binding.source);
   const source=explicitDay(binding.source)?'date: '+binding.date+'\n'+body:body;
   const plan=prepareDailyPlan({source,date:binding.date,blockId,state:this.plugin.state,previousSource:binding.source,protectedBlockIds:this.protectedBlocks(blockId)});
   for(const session of plan.sessions)if(updates.has(session.id))delete session.noteEstimateId;
@@ -288,7 +288,7 @@ export class DailyBlocks {
  async includeDay(child){
   const context=await this.locate(child),blockId=this.bindingId(context.file.path)||blockIdentity(context.block.source)||uid();
   this.validateBinding(blockId,context.file.path,context.date);
-  const source=serializeDailyPlan(daySessions(this.plugin.state,context.date,blockId),context.date,blockId);
+  const source=serializeDailyPlan(daySessions(this.plugin.state,context.date,blockId),context.date,context.block.source);
   return {...context,...prepareDailyPlan({source,date:context.date,blockId,protectedBlockIds:this.protectedBlocks(blockId),state:this.plugin.state}),originalSource:context.block.source};
  }
  detach(path){return this.queue(async()=>{
@@ -313,7 +313,7 @@ export class DailyBlocks {
      if(context.kind==="estimate"||binding.agendaVersion!==2||binding.ratioVersion!==1||context.block.source!==binding.source){this.schedule(binding.path);continue;}
      const sessions=daySessions(this.plugin.state,binding.date,blockId).filter(s=>!binding.hiddenSessionIds?.includes(s.id));
      if(isRegister(binding.source)||sessions.some(s=>s.registerMinutes))continue;
-     const body=serializeDailyPlan(sessions,binding.date);
+     const body=serializeDailyPlan(sessions,binding.date,binding.source);
      const source=explicitDay(binding.source)?'date: '+binding.date+'\n'+body:body;
      if(source===binding.source)continue;
      const key=archivePlanningKey(this.plugin.state),previousSource=binding.source;

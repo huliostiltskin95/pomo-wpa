@@ -1,4 +1,5 @@
 import {syntaxExtension} from './syntax-editor.js';
+import {expandRange} from './plain-syntax.js';
 import {readableDuration} from './area-register.js';
 import {SessionNotePicker} from './note-picker.js';
 import {groupSessions,sessionNotes,updatedSessionNotes} from './session-notes.js';
@@ -202,8 +203,8 @@ class TempvsView extends ItemView {
     });
     const batch=plan.createEl("details",{cls:"tempvs-batch"});
     batch.createEl("summary",{text:"Inserisci più sessioni con il testo"});
-    batch.createEl("p",{cls:"tempvs-help",text:"Nuovo formato: Studio +14:00-16:00 -30m → quattro sessioni da 25 minuti di concentrazione + 5 di pausa. Il rapporto è sempre 5:1: -60m dà 50 + 10. Si può oltrepassare mezzanotte. È ancora supportato Studio @2h +14:00 -60m: una sessione di due ore con cicli da 60 minuti lordi. Se compili questo campo, verranno usate queste righe."});
-    const lines=field(batch,"Sessioni in formato rapido").createEl("textarea",{attr:{"aria-label":"Sessioni",placeholder:"Studio +14:00-16:00 -30m\nLavoro +18:00-19:30 -45m",rows:"3"}});
+    batch.createEl("p",{cls:"tempvs-help",text:"Studio 14:00-16:00 30m crea quattro sessioni da 25 minuti di concentrazione e 5 di pausa. La fascia può superare la mezzanotte."});
+    const lines=field(batch,"Sessioni in formato rapido").createEl("textarea",{attr:{"aria-label":"Sessioni",placeholder:"Studio 14:00-16:00 30m\nLavoro 18:00-19:30 45m",rows:"3"}});
     const updatePlanMode=()=>{
       const textMode=Boolean(lines.value.trim());
       for(const input of [plannedArea,startTime,duration,cycleInput])input.disabled=textMode;
@@ -862,7 +863,7 @@ export default class TempvsPlugin extends Plugin {
   }
   async schedule(text, date) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw Error("Data non valida.");
-    const requests = parseQuick(text, this.config.areas);
+    const requests = parseQuick(text.split('\n').map(line => expandRange(line.trim())).join('\n'), this.config.areas);
     if (!requests.length) throw Error("Inserisci almeno una sessione.");
     if (requests.some(r => !r.start)) throw Error("Per ora specifica +HH:MM per ogni sessione. Le fasce automatiche saranno aggiunte successivamente.");
     const result = planSessions(requests, [], this.state.sessions.filter(s => !s.finished),

@@ -67,3 +67,20 @@ test('riga autonoma con alias, durata e inizio facoltativo',()=>{
  assert.equal(plan.records[0].linkedNotes[0].label,'Lo sviluppo sociale e le relazioni di gruppo');
  assert.equal(parseAreaRegister(source.replace(' +11:45',''),state.defaults.simple.areas).slots[0].start,null);
 });
+
+test('short activities and ranges use the original planners',()=>{
+ const state=normalizeArchive({sessions:[]});
+ const plan=source=>{
+  let id=0;
+  return prepareDailyPlan({state,source,date:'2026-11-24',blockId:'daily',id:()=>String(++id)});
+ };
+ const short='Studio 1h x2 11:45 [[Platone#Repubblica|Repubblica]] [[Bibliografia]]';
+ const old='- [[Platone#Repubblica|Repubblica]] [[Bibliografia]] 1h = 2 +11:45 @Studio';
+ const range='Personale 23:30-01:00 30m [[A]]';
+ const oldRange='Personale +23:30-01:00 -30m [[A]]';
+ assert.deepEqual(plan(short+'\n'+range).records,plan(old+'\n'+oldRange).records);
+ assert.deepEqual(plan(range).sessions,plan(oldRange).sessions);
+ assert.deepEqual(plan('Studio 30m [[A]]').records,plan('- [[A]] 30m @Studio').records);
+ assert.throws(()=>plan('Studio 1h x0 [[A]]'));
+ assert.throws(()=>plan('Studio 1h 25:00 [[A]]'));
+});

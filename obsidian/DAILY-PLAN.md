@@ -1,3 +1,19 @@
+## Scrivere un blocco TEMPVS · 0.5.29
+
+Nella nota quotidiana scrivi una riga per attività o fascia. L’area è sempre il primo campo e può contenere spazi.
+
+```TEMPVS
+Studio 30m [[Tucidide]]
+Studio 1h x2 11:45 [[Platone#Repubblica|Repubblica]] [[Bibliografia]]
+Personale 14:00-16:00 30m
+```
+
+- **Attività** · Area, durata lorda totale, eventuale numero di pomodori (`x2`), eventuale ora iniziale e wikilink. Un pomodoro è implicito. Senza orario la riga registra il tempo. Con un orario crea anche le sessioni in agenda. Il primo link riceve il credito, gli altri sono risorse.
+- **Fascia** · Area, intervallo e durata lorda di ciascun pomodoro. La fascia dell’esempio crea quattro sessioni da 25 minuti di lavoro e 5 di pausa. Puoi aggiungere i wikilink in fondo o attraversare la mezzanotte.
+- **Nota di lettura** · Per stimare il lavoro totale del file scrivi `@7h` da solo in un blocco TEMPVS. Per un obiettivo per area puoi invece aggiungere il denominatore al totale aggiornato dal plugin, per esempio `T: 30m/7h @Studio`.
+
+I blocchi precedenti continuano a funzionare.
+
 ## 0.5.28 · Elenco quotidiano
 
 ```TEMPVS
