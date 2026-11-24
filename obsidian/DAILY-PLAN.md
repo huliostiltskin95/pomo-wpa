@@ -1,3 +1,7 @@
+## Pianifica la giornata · 0.5.31
+
+Dalla palette dei comandi scegli **Pianifica la giornata**. Controlla il nome della nota, compila orari, durata lorda, area e nota di riferimento e premi **Aggiungi alla giornata**. Per una fascia il riferimento è facoltativo. Per registrare un’attività senza orario lascia vuoti entrambi gli orari e indica la nota. Il comando usa la nota quotidiana aperta oppure quella di oggi se già presente. Aggiunge una riga al blocco TEMPVS e crea il blocco quando manca.
+
 ## Scrivere un blocco TEMPVS · 0.5.30
 
 Nella nota quotidiana scrivi una riga per attività o fascia. Inizia con l’orario o la fascia, poi indica durata, area ed eventuali wikilink. Senza orario inizia direttamente con la durata.

@@ -1,3 +1,4 @@
+import {DailyPlannerModal} from './daily-planner-modal.js';
 import {creditedWork} from './daily-register.js';
 import {isLedger,updateLedger} from './note-ledger.js';
 import {renderSyntaxLine} from './syntax.js';
@@ -40,8 +41,56 @@ export class DailyBlocks {
   }
   if(vault?.on)this.plugin.registerEvent(vault.on('create',file=>{if(file.extension==='md'){this.schedule(file.path);this.queue(()=>this.syncLedgers()).catch(error=>new Notice(error.message));}}));
   this.plugin.addCommand({id:'unlink-daily-plan',name:'Scollega TEMPVS dalla nota attiva (conserva sessioni)',callback:()=>{const file=this.plugin.app.workspace.getActiveFile();if(file)this.detach(file.path).catch(error=>new Notice('TEMPVS: '+error.message));}});
+  this.plugin.addCommand({id:'plan-daily-note',name:'Pianifica la giornata',callback:async()=>{
+   try{new DailyPlannerModal(this,await this.plannerTarget()).open();}
+   catch(error){new Notice(error.message);}
+  }});
   this.plugin.addCommand({id:'insert-daily-plan',name:'Inserisci blocco TEMPVS nella nota',editorCallback:editor=>editor.replaceSelection('```TEMPVS\n\n```\n')});
   this.plugin.app.workspace.onLayoutReady?.(()=>this.initialize().catch(error=>new Notice('TEMPVS: '+error.message)));
+ }
+ async plannerTarget(){
+  const {workspace,vault,internalPlugins}=this.plugin.app;
+  const settings=internalPlugins?.getPluginById('daily-notes')?.instance?.options||{};
+  const format=settings.format||'YYYY-MM-DD';
+  const active=workspace.getActiveFile?.();
+  if(active?.extension==='md'){
+   if(this.bindingId(active.path)||moment(active.basename,format,true).isValid()||/^\d{4}-\d\d-\d\d$/.test(active.basename))return active;
+   const context=await this.context(active.path).catch(()=>null);
+   if(context?.date)return active;
+  }
+  const today=moment();
+  const binding=Object.values(this.bindings).find(b=>b.date===today.format('YYYY-MM-DD'));
+  const path=binding?.path||[settings.folder,today.format(format)+'.md'].filter(Boolean).join('/').replace(/^\/+|\/+(?=\/)/g,'');
+  const file=vault.getAbstractFileByPath(path);
+  if(file?.extension==='md')return file;
+  throw Error('Apri la nota quotidiana da pianificare e richiama il comando.');
+ }
+ async appendPlannerRow(file,row){
+  if(!row.trim()||/[\r\n]/.test(row))throw Error('Inserisci una sola attività.');
+  await this.queue(async()=>{
+   const {vault,workspace,metadataCache,internalPlugins}=this.plugin.app;
+   const context=await this.context(file.path);
+   if(context?.kind)throw Error('Questa nota contiene una stima o un totale. Apri la nota quotidiana.');
+   const markdown=context?.markdown??await this.readMarkdown(file);
+   if(findDailyBlocks(markdown,true).length!==findDailyBlocks(markdown).length)throw Error('Chiudi il blocco TEMPVS prima di aggiungere una riga.');
+   const original=context?.block.source||'';
+   const source=original+(original&&!original.endsWith('\n')?'\n':'')+row;
+   const date=context?.date||resolveDailyDate('',file,{moment,format:internalPlugins?.getPluginById('daily-notes')?.instance?.options?.format||'YYYY-MM-DD',frontmatter:metadataCache?.getFileCache(file)?.frontmatter});
+   const id=this.bindingId(file.path)||blockIdentity(original)||uid();
+   this.validateBinding(id,file.path,date);
+   prepareDailyPlan({source,date,blockId:id,state:this.plugin.state,previousSource:this.bindings[id]?.source,protectedBlockIds:this.protectedBlocks(id)});
+   const nl=markdown.includes('\r\n')?'\r\n':'\n';
+   const next=context?replaceDailyBlock(markdown,context.block,source):markdown+(markdown&&!markdown.endsWith(nl)?nl:'')+nl+'```TEMPVS'+nl+row+nl+'```'+nl;
+   if(!findDailyBlocks(next).some(b=>b.source.replace(/\r\n/g,'\n')===source.replace(/\r\n/g,'\n')))throw Error('Chiudi il blocco di codice aperto nella nota.');
+   await vault.process(file,current=>{
+    if(current!==markdown||(workspace.getLeavesOfType?.('markdown')||[]).some(({view})=>view?.file?.path===file.path&&view.getMode?.()!=='preview'&&view.editor&&view.editor.getValue()!==current))throw Error('La nota sta cambiando. Attendi il salvataggio e riprova.');
+    return next;
+   });
+   this.detached.delete(file.path);
+  });
+  // The row is already durable. A sync failure must not invite a duplicate submission.
+  try{await this.syncFile(file.path);}
+  catch(error){this.schedule(file.path);new Notice('Riga salvata. Sincronizzazione TEMPVS: '+error.message);}
  }
  async moveReferences(oldPath,newPath){
   const plugin=this.plugin,cache=plugin.app.metadataCache;

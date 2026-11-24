@@ -175,3 +175,20 @@ test('compact daily updates the linked Markdown file and preserves its target af
  assert.match(body,/T: 0\/7h @Studio/);
  f.daily.destroy();
 });
+
+test('planner creates one block, appends to it and rejects overlap before writing',async()=>{
+ const f=fixture();
+ f.text='# Giorno\r\n\r\nAppunti.';
+ await f.daily.appendPlannerRow(f.file,'14:00-15:00 30m Studio [[Platone]]');
+ assert.ok(f.text.startsWith('# Giorno\r\n\r\nAppunti.'));
+ assert.equal(f.plugin.state.sessions.length,2);
+ await f.daily.appendPlannerRow(f.file,'15:00 30m Studio [[Tucidide]]');
+ const [block]=findDailyBlocks(f.text);
+ assert.equal(findDailyBlocks(f.text).length,1);
+ assert.equal(block.source,'14:00-15:00 30m Studio [[Platone]]\r\n15:00 30m Studio [[Tucidide]]');
+ assert.equal(f.plugin.state.sessions.length,3);
+ const before=f.text;
+ await assert.rejects(f.daily.appendPlannerRow(f.file,'14:30-15:30 30m Studio'));
+ assert.equal(f.text,before);
+ f.daily.destroy();
+});

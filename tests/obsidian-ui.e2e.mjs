@@ -35,7 +35,7 @@ try {
       async loadData(){return null} async saveData(data){this.saved=structuredClone(data)}
       registerMarkdownCodeBlockProcessor(language,processor){(this.processors??={})[language]=processor} registerEvent(){}
       registerView(type,factory){this.factory=factory}
-      addSettingTab(){} addCommand(){} addRibbonIcon(){} registerInterval(){} registerDomEvent(){}
+      addSettingTab(){} addCommand(command){(this.commands??={})[command.id]=command;} addRibbonIcon(){} registerInterval(){} registerDomEvent(){}
     }
     class ItemView{constructor(){this.containerEl=document.querySelector('#view');this.containerEl.createDiv();this.containerEl.createDiv()}}
     const setIcon=(el,name)=>{el.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4" y="4" width="16" height="16" rx="4"/><path d="M8 12h8M12 8v8"/></svg>';el.dataset.icon=name};
@@ -266,6 +266,15 @@ try {
   await page.waitForFunction(()=>document.querySelector('.tempvs-sessions')?.textContent.includes('3 h disponibili'));
   assert.equal(await page.locator('.tempvs-sessions tbody tr').count(),14);
   assert.match(await page.locator('.tempvs-sessions tbody tr').last().textContent(),/03:20.*Budapest.*30 min/);
+  await page.evaluate(()=>plugin.commands['plan-daily-note'].callback());
+  const planner=page.locator('form').filter({has:page.getByRole('button',{name:'Aggiungi alla giornata'})});
+  await planner.getByLabel('Inizio',{exact:true}).fill('16:00');
+  await planner.getByLabel('Fine',{exact:true}).fill('17:00');
+  await planner.getByLabel('Area',{exact:true}).selectOption('Studio');
+  await planner.getByLabel('Nota',{exact:true}).fill('Platone');
+  assert.equal(await planner.locator('code').textContent(),'16:00-17:00 30m Studio [[Platone]]');
+  await planner.getByRole('button',{name:'Aggiungi alla giornata'}).click();
+  await page.waitForFunction(()=>screenshotNote.includes('16:00-17:00 30m Studio [[Platone]]'));
   assert.deepEqual(errors,[]);
   assert.deepEqual(await page.evaluate(()=>notices.filter(n=>/errore|invalid|sovrappost/i.test(n))),[]);
   console.log('Obsidian UI: creation, planning, pause/resume, finish, volume, Escape, drafts and responsive layouts passed.');
