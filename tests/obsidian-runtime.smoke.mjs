@@ -184,3 +184,55 @@ test('unified note links preserve historical credit while new focus stays in the
  await p.persist();assert.equal(getSaved().archive.sessions[0].noteWork.n,10);assert.equal(getSaved().archive.sessions[0].area,'Studio');
  await p.onunload();
 });
+
+test('ordinary activity imports a checkbox and freezes deduplicated recorded focus on completion',async()=>{
+ const {PluginClass,getSaved}=mockPlugin(false),p=new PluginClass(),vault=dailyVault(p,'- [ ] @Studio 2h');
+ vault.file.path='Appunti.md';vault.file.basename='Appunti';
+ await p.onload();
+ const path=vault.file.path;
+ await p.daily.syncFile(path);
+ const note=()=>p.estimates.find(path);
+ const progress=()=>p.estimates.progress(note(),p.estimates.progressTotals());
+ const id=note().id,area=p.config.areas.find(a=>a.name==='Studio');
+ const linkedNotes=[{path,label:'Appunti'},{path:'Risorsa.md',label:'Risorsa'}];
+ const fields={title:area.name,area:area.name,areaId:area.id,date:'2099-11-06',linkedNotes};
+ await p.change(()=>{
+  p.state.sessions.push({...fields,id:'future',start:'14:00',end:'16:00',workMinutes:25,noteBlockId:'day',actualSeconds:0});
+  p.state.sessions.push({...fields,id:'measured',start:'10:00',end:'11:00',workMinutes:25,actualSeconds:1800,noteWork:{[id]:600}});
+  p.state.history.push({...fields,sessionId:'measured',minutes:30,measured:true});
+ });
+ assert.equal(progress().done,1800);
+ assert.equal(progress().estimated,7200);
+ assert.equal((vault.text().match(/\x60\x60\x60TEMPVS/g)||[]).length,1);
+ const renderChildren=[];
+ const element=items=>({
+  createDiv:()=>element(items),
+  createEl:(tag,options={})=>{const el=element(items);items.push({tag,text:options.text,el});return el;},
+ });
+ p.estimates.render(element(renderChildren),note());
+ assert(renderChildren.some(row=>row.text==='Studio · 30m/2h'));
+ const complete=renderChildren.find(row=>row.tag==='button'&&row.text==='Segna completata').el;
+ const save=p.saveData.bind(p);
+ p.saveData=()=>Promise.reject(Error('disk full'));
+ await assert.rejects(p.daily.toggleActivity(path,true),/disk full/);
+ assert.match(vault.text(),/- \[ \] @Studio 2h/);
+ p.saveData=save;
+ await complete.onclick();
+ assert.match(vault.text(),/- \[x\] @Studio 2h/);
+ assert.equal(getSaved().archive.defaults.simple.noteEstimates[id].completion.done,1800);
+ await p.change(()=>{p.state.sessions.find(s=>s.id==='measured').actualSeconds=9000;});
+ vault.edit(vault.text().replace('2h','3h'));
+ await p.daily.syncFile(path);
+ assert.equal(note().id,id);
+ assert.equal(progress().estimated,7200);
+ assert.equal(progress().done,1800);
+ assert.equal(progress().difference,-5400);
+ vault.edit(vault.text().replace('[x]','[ ]'));
+ await p.daily.syncFile(path);
+ assert.equal(note().completed,false);
+ assert.equal(progress().done,9000);
+ assert.equal(progress().estimated,10800);
+ assert.equal(p.state.sessions.length,2);
+ assert.equal(p.state.history.length,1);
+ await p.onunload();
+});

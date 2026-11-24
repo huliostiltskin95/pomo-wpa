@@ -198,3 +198,19 @@ test('historical links use the old estimate identity and unique archive names on
  assert.equal(move('svetonio'),'archivio/svetonio');
  for(const path of ['Alfa','old/Alfa','drafts/Attiva.md','Ignoto','archivio/livio'])assert.equal(move(path),path);
 });
+
+test('compact activity has one explicit area, a focus estimate and a Markdown completion marker',()=>{
+ const {parseNoteEstimate,isEstimateSource,markActivity,compactEstimateTime}=estimates;
+ const areas=state().defaults.simple.areas;
+ const open='  - [ ] @Studio 2h\r\n';
+ assert.deepEqual(parseNoteEstimate(open,areas),{entries:parseEstimate('@Studio 2h',areas),completed:false});
+ const closed=markActivity(open,true);
+ assert.equal(closed,'  - [x] @Studio 2h\r\n');
+ assert.equal(parseNoteEstimate(closed,areas).completed,true);
+ assert.equal(markActivity(closed,false),open);
+ assert.equal(isEstimateSource('14:00 30m Studio [[Nota]]'),false);
+ assert.equal(isEstimateSource(open),true);
+ assert.equal(compactEstimateTime(1800)+'/'+compactEstimateTime(7200),'30m/2h');
+ for(const invalid of ['- [ ] @2h','- [ ] @Studio 2 -30m','- [ ] @Sconosciuta 2h','- [ ] @Studio 2h\n@Studio 1h'])
+  assert.throws(()=>parseNoteEstimate(invalid,areas));
+});

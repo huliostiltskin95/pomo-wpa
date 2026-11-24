@@ -89,7 +89,7 @@ export function applyRegister(state,plan){
 }
 
 // Build both views from one row per session. History also holds slots without a clock.
-export function creditedWork(state,resolve,bindingPath,byArea){
+export function creditedWork(state,resolve,bindingPath,byArea,{includePlannedIntervals=true}={}){
  const totals=new Map(),records=new Map(state.history.map(h=>[h.sessionId,h]));
  for(const s of state.sessions)if(!records.get(s.id)?.registerBlock)records.set(s.id,s);
  const estimates=state.defaults.simple.noteEstimates||{};
@@ -106,7 +106,7 @@ export function creditedWork(state,resolve,bindingPath,byArea){
   if(r.dailyRetired||r.manualSuperseded)continue;
   const source=bindingPath(r.noteBlockId)||'';
   const linked=r.linkedNotes?.[0]?.path||estimates[r.noteEstimateId]?.path;
-  if(r.registerBlock||r.noteBlockId&&r.start&&r.end){
+  if(r.registerBlock||includePlannedIntervals&&r.noteBlockId&&r.start&&r.end){
    add(linked,r.registerBlock?r.minutes*60:(sessionBounds(r).end-sessionBounds(r).start)/1000,source,r.area);
   }else{
    let allocated=0;

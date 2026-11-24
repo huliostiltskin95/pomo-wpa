@@ -1,3 +1,15 @@
+## Attività nelle note Obsidian
+
+Inserisci una riga nel blocco TEMPVS della nota di lavoro:
+
+```TEMPVS
+- [ ] @Studio 2h
+```
+
+`Studio` è il nome dell’area e `2h` è la stima di concentrazione. In lettura il plugin mostra, per esempio, **Studio · 30m/2h**. Il primo valore proviene dalle sessioni collegate alla nota come riferimento principale, comprese le registrazioni esplicite nel diario. Le prenotazioni prive di tempo misurato e i link a risorse secondarie non danno credito.
+
+Usa **Segna completata** oppure cambia `[ ]` in `[x]`. Il plugin conserva tempo registrato, stima e scostamento alla chiusura. **Riapri attività** ripristina il calcolo aggiornato. Le sintassi precedenti, i totali `T:` già presenti e i blocchi giornalieri continuano a funzionare.
+
 ## Obsidian 0.5.18 · stima lorda totale per nota
 
 Nei file di lavoro, `TEMPVS` ora accetta una singola riga `@14h` per definire **14 ore lorde complessive** (pause comprese), senza scegliere a priori area e durata delle sessioni. Quando il file è il primo wikilink di una sessione giornaliera, la concentrazione realmente registrata contribuisce al tempo lordo svolto e riduce il residuo; più link non duplicano il credito. Le precedenti sintassi `@Studio 20 -30m` restano valide. [Grammatica, esempi e precauzioni](obsidian/DAILY-PLAN.md).

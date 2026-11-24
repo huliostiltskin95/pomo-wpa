@@ -72,7 +72,7 @@ test('short activities and ranges use the original planners',()=>{
  const state=normalizeArchive({sessions:[]});
  const plan=source=>{
   let id=0;
-  return prepareDailyPlan({state,source,date:'2026-11-24',blockId:'daily',id:()=>String(++id)});
+  return prepareDailyPlan({state,source,date:'2026-11-24',blockId:'daily',now:new Date('2026-11-24T08:00:00'),id:()=>String(++id)});
  };
  const short='Studio 1h x2 11:45 [[Platone#Repubblica|Repubblica]] [[Bibliografia]]';
  const old='- [[Platone#Repubblica|Repubblica]] [[Bibliografia]] 1h = 2 +11:45 @Studio';
@@ -92,7 +92,7 @@ test('time-first daily syntax preserves scheduling, credits, highlighting and ra
  state.defaults.simple.areas[0].name='Studio greco';
  const plan=source=>{
   let id=0;
-  return prepareDailyPlan({state,source,date,blockId:'daily',id:()=>String(++id)});
+  return prepareDailyPlan({state,source,date,blockId:'daily',now:new Date(date+'T08:00:00'),id:()=>String(++id)});
  };
  const link='[[Platone#Repubblica|Repubblica]] [[Bibliografia]]';
  const range='23:30-01:00 30m Studio greco '+link;

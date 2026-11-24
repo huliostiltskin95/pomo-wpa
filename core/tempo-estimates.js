@@ -1,4 +1,20 @@
-export const isEstimateSource=source=>/^\s*@/m.test(source);
+const activityStart=/^[ \t]*-[ \t]+\[([ x])\](?=[ \t]+@)/im;
+export const isActivitySource=source=>activityStart.test(source);
+export const isEstimateSource=source=>/^\s*@/m.test(source)||isActivitySource(source);
+
+export function parseNoteEstimate(source,areas){
+ const mark=activityStart.exec(source);
+ if(!mark)return {entries:parseEstimate(source,areas)};
+ const lines=source.trim().split(/\r?\n/);
+ const activity=lines[0].replace(activityStart,'').trim();
+ if(lines.length!==1||!activity.startsWith('@'))
+  throw Error('Usa una sola riga per l’attività: - [ ] @Studio 2h.');
+ const entries=parseEstimate(activity,areas);
+ if(entries[0].kind!=='budget')throw Error('Indica area e stima di concentrazione: - [ ] @Studio 2h.');
+ return {entries,completed:mark[1].toLowerCase()==='x'};
+}
+
+export const markActivity=(source,completed)=>source.replace(activityStart,mark=>mark.slice(0,-2)+(completed?'x':' ')+']');
 export function parseEstimate(source,areas){
  const rows=[];
  for(const [i,line] of source.split(/\r?\n/).entries()){
@@ -70,8 +86,8 @@ export function recordNoteWork(session,seconds){
  if(!session.noteEstimateId||!(seconds>0))return;
  session.noteWork={...session.noteWork,[session.noteEstimateId]:(session.noteWork?.[session.noteEstimateId]||0)+seconds};
 }
+export const estimatedSeconds=note=>note.entries.reduce((sum,e)=>sum+(e.targetMinutes??e.grossMinutes??e.count*e.minutes)*60,0);
 function measuredTotals(note,state){
- const estimated=note.entries.reduce((sum,e)=>sum+(e.targetMinutes??e.grossMinutes??e.count*e.minutes)*60,0);
  const records=new Map();
  for(const history of state.history||[])if(history.measured)records.set(history.sessionId,history);
  for(const session of state.sessions||[])records.set(session.id,session);
@@ -79,17 +95,17 @@ function measuredTotals(note,state){
  for(const record of records.values()){
   if(note.entries.some(entry=>matchesArea(entry,record)))done+=attributedFocus(record,note,state);
  }
- return {estimated,done};
+ return {estimated:estimatedSeconds(note),done};
 }
 
-export function estimateProgress(note,state){
- const {estimated,done}=note.completed&&note.completion?note.completion:measuredTotals(note,state);
+export function estimateProgress(note,state,{live}={}){
+ const {estimated,done}=note.completed&&note.completion?note.completion:live??measuredTotals(note,state);
  return {estimated,done,remaining:Math.max(0,estimated-done),difference:done-estimated,percent:estimated?100*done/estimated:0};
 }
 
-export function setEstimateCompleted(note,state,completed){
+export function setEstimateCompleted(note,state,completed,live){
  if(note.completed===completed)return;
- if(completed)note.completion=measuredTotals(note,state);
+ if(completed)note.completion=live??measuredTotals(note,state);
  else delete note.completion;
  note.completed=completed;
 }
@@ -102,4 +118,8 @@ export function estimateResult(note,progress){
 export function estimateTime(seconds){
  const value=Math.max(0,Math.ceil(seconds)),h=Math.floor(value/3600),m=Math.floor(value%3600/60),s=value%60;
  return [h?`${h} h`:'',m?`${m} min`:'',s?`${s} s`:''].filter(Boolean).join(' ')||'0 min';
+}
+
+export function compactEstimateTime(seconds){
+ return estimateTime(seconds).replaceAll(' min','m').replaceAll(' h','h').replaceAll(' s','s').replaceAll(' ','');
 }

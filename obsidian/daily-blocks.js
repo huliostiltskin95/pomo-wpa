@@ -3,7 +3,7 @@ import {creditedWork} from './daily-register.js';
 import {isLedger,updateLedger} from './note-ledger.js';
 import {renderSyntaxLine} from './syntax.js';
 import {movedTarget,moveBlockLinks,archivedLinkResolver} from './moved-links.js';
-import {isEstimateSource} from '../core/tempo-estimates.js';
+import {isEstimateSource,isActivitySource,markActivity} from '../core/tempo-estimates.js';
 import {MarkdownRenderChild,Notice,moment} from 'obsidian';
 import {normalizeArchive} from '../core/tempo-simple.js';
 import {sessionBounds} from '../core/tempo-core.js';
@@ -221,6 +221,21 @@ export class DailyBlocks {
   if(!context)throw Error('Blocco TEMPVS non trovato.');
   return context;
  }
+ toggleActivity(path,completed){
+  return this.queue(async()=>{
+   const context=await this.context(path);
+   if(context?.kind!=='estimate'||!isActivitySource(context.block.source))throw Error('Il blocco attività TEMPVS è cambiato.');
+   const {file,block}=context,source=markActivity(block.source,completed);
+   const changed=source!==block.source;
+   if(changed)await this.writeSource(file,undefined,block.source,source,block.lineStart);
+   try{await this.syncEstimate({...context,block:{...block,source}},path);}
+   catch(error){
+    if(changed)await this.writeSource(file,undefined,source,block.source,block.lineStart);
+    throw error;
+   }
+   this.errors.delete(path);this.refresh(path);
+  });
+ }
  async syncEstimate(context,path){
   this.applying=true;
   try{if(context?.kind==='estimate')await this.plugin.estimates?.sync(context);else await this.plugin.estimates?.archive(path);}
@@ -280,7 +295,7 @@ export class DailyBlocks {
     if(leaf.view?.file?.path===file.path&&leaf.view.editor&&leaf.view.editor.getValue()!==current)throw Error('Modifica in corso: attendo il salvataggio della nota.');
    }
    const blocks=findDailyBlocks(current);
-   let matches=blocks.filter(b=>blockIdentity(b.source)===id);
+   let matches=id?blocks.filter(b=>blockIdentity(b.source)===id):[];
    if(!matches.length)matches=blocks.filter(b=>b.source===original&&(lineStart===undefined||b.lineStart===lineStart));
    if(matches.length!==1||matches[0].source!==original)throw Error('La nota è cambiata durante la preview. Prepara nuovamente le modifiche.');
    return replaceDailyBlock(current,matches[0],replacement);

@@ -1,3 +1,4 @@
+import {isActivitySource} from '../core/tempo-estimates.js';
 import {findDailyBlocks,replaceDailyBlock} from './daily-plan.js';
 
 export const isLedger=source=>/^\s*T:/im.test(source);
@@ -16,6 +17,7 @@ export function updateLedger(markdown,totals){
  if(ledgers.length>1)throw Error('Riunisci i totali T: in un solo blocco TEMPVS.');
  if(blocks.length!==findDailyBlocks(markdown).length)throw Error('Chiudi il blocco TEMPVS prima di aggiornare il totale.');
  const block=ledgers[0];
+ if(!block&&blocks.some(b=>isActivitySource(b.source)))return markdown;
  const remaining=new Map([...totals].map(([area,seconds])=>[area.toLowerCase(),{area,seconds}]));
  const seen=new Set(),lines=[];
  function format(area,seconds,target,unit,explicitUnit){

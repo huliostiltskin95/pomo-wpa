@@ -239,7 +239,21 @@ function getAmbientFocusMode(sessions, now = /* @__PURE__ */ new Date()) {
 }
 
 // core/tempo-estimates.js
-var isEstimateSource = (source) => /^\s*@/m.test(source);
+var activityStart = /^[ \t]*-[ \t]+\[([ x])\](?=[ \t]+@)/im;
+var isActivitySource = (source) => activityStart.test(source);
+var isEstimateSource = (source) => /^\s*@/m.test(source) || isActivitySource(source);
+function parseNoteEstimate(source, areas) {
+  const mark = activityStart.exec(source);
+  if (!mark) return { entries: parseEstimate(source, areas) };
+  const lines = source.trim().split(/\r?\n/);
+  const activity2 = lines[0].replace(activityStart, "").trim();
+  if (lines.length !== 1 || !activity2.startsWith("@"))
+    throw Error("Usa una sola riga per l\u2019attivit\xE0: - [ ] @Studio 2h.");
+  const entries = parseEstimate(activity2, areas);
+  if (entries[0].kind !== "budget") throw Error("Indica area e stima di concentrazione: - [ ] @Studio 2h.");
+  return { entries, completed: mark[1].toLowerCase() === "x" };
+}
+var markActivity = (source, completed) => source.replace(activityStart, (mark) => mark.slice(0, -2) + (completed ? "x" : " ") + "]");
 function parseEstimate(source, areas) {
   const rows = [];
   for (const [i, line] of source.split(/\r?\n/).entries()) {
@@ -303,8 +317,8 @@ function attributedFocus(record, note, state) {
   const selected = isPrimaryLink(record, note, state) || !record.linkedNotes?.length && record.noteEstimateId === note.id;
   return credited + (selected ? Math.max(0, (record.actualSeconds ?? (record.measured ? (Number(record.minutes) || 0) * 60 : 0)) - allocated) : 0);
 }
+var estimatedSeconds = (note) => note.entries.reduce((sum, e) => sum + (e.targetMinutes ?? e.grossMinutes ?? e.count * e.minutes) * 60, 0);
 function measuredTotals(note, state) {
-  const estimated = note.entries.reduce((sum, e) => sum + (e.targetMinutes ?? e.grossMinutes ?? e.count * e.minutes) * 60, 0);
   const records = /* @__PURE__ */ new Map();
   for (const history2 of state.history || []) if (history2.measured) records.set(history2.sessionId, history2);
   for (const session of state.sessions || []) records.set(session.id, session);
@@ -312,15 +326,15 @@ function measuredTotals(note, state) {
   for (const record of records.values()) {
     if (note.entries.some((entry) => matchesArea(entry, record))) done += attributedFocus(record, note, state);
   }
-  return { estimated, done };
+  return { estimated: estimatedSeconds(note), done };
 }
-function estimateProgress(note, state) {
-  const { estimated, done } = note.completed && note.completion ? note.completion : measuredTotals(note, state);
+function estimateProgress(note, state, { live } = {}) {
+  const { estimated, done } = note.completed && note.completion ? note.completion : live ?? measuredTotals(note, state);
   return { estimated, done, remaining: Math.max(0, estimated - done), difference: done - estimated, percent: estimated ? 100 * done / estimated : 0 };
 }
-function setEstimateCompleted(note, state, completed) {
+function setEstimateCompleted(note, state, completed, live) {
   if (note.completed === completed) return;
-  if (completed) note.completion = measuredTotals(note, state);
+  if (completed) note.completion = live ?? measuredTotals(note, state);
   else delete note.completion;
   note.completed = completed;
 }
@@ -332,6 +346,9 @@ function estimateResult(note, progress) {
 function estimateTime(seconds) {
   const value = Math.max(0, Math.ceil(seconds)), h = Math.floor(value / 3600), m = Math.floor(value % 3600 / 60), s = value % 60;
   return [h ? `${h} h` : "", m ? `${m} min` : "", s ? `${s} s` : ""].filter(Boolean).join(" ") || "0 min";
+}
+function compactEstimateTime(seconds) {
+  return estimateTime(seconds).replaceAll(" min", "m").replaceAll(" h", "h").replaceAll(" s", "s").replaceAll(" ", "");
 }
 
 // core/tempo-areas.js
@@ -763,7 +780,7 @@ function applyRegister(state, plan) {
     state.syncDeleted[key2] = [.../* @__PURE__ */ new Set([...state.syncDeleted[key2] || [], ...removed])].filter((id) => !live.includes(id));
   }
 }
-function creditedWork(state, resolve, bindingPath, byArea) {
+function creditedWork(state, resolve, bindingPath, byArea, { includePlannedIntervals = true } = {}) {
   const totals = /* @__PURE__ */ new Map(), records = new Map(state.history.map((h) => [h.sessionId, h]));
   for (const s of state.sessions) if (!records.get(s.id)?.registerBlock) records.set(s.id, s);
   const estimates = state.defaults.simple.noteEstimates || {};
@@ -781,7 +798,7 @@ function creditedWork(state, resolve, bindingPath, byArea) {
     if (r.dailyRetired || r.manualSuperseded) continue;
     const source = bindingPath(r.noteBlockId) || "";
     const linked = r.linkedNotes?.[0]?.path || estimates[r.noteEstimateId]?.path;
-    if (r.registerBlock || r.noteBlockId && r.start && r.end) {
+    if (r.registerBlock || includePlannedIntervals && r.noteBlockId && r.start && r.end) {
       add(linked, r.registerBlock ? r.minutes * 60 : (sessionBounds(r).end - sessionBounds(r).start) / 1e3, source, r.area);
     } else {
       let allocated = 0;
@@ -1324,14 +1341,22 @@ var NoteEstimates = class {
     return this.notes.find((n) => n.path === path && n.vault === this.vault);
   }
   async sync(context) {
-    const { file, block } = context, entries = parseEstimate(block.source, this.plugin.config.areas), old = this.find(file.path);
-    if (old && !old.archived && JSON.stringify(old.entries) === JSON.stringify(entries)) return;
+    const { file, block } = context, { entries, completed } = parseNoteEstimate(block.source, this.plugin.config.areas), old = this.find(file.path);
+    const activity2 = completed !== void 0;
+    if (old && !old.archived && Boolean(old.activity) === activity2 && (!activity2 || old.completed === completed) && JSON.stringify(old.entries) === JSON.stringify(entries)) return;
     await this.plugin.change(() => {
       var _a;
       const notes = (_a = this.plugin.config).noteEstimates ?? (_a.noteEstimates = {});
       const preferred = "note:" + encodeURIComponent(this.vault) + "/" + encodeURIComponent(file.path);
       const id = old?.id || (notes[preferred] ? preferred + "/" + uid() : preferred);
-      notes[id] = { ...old, id, vault: this.vault, path: file.path, title: file.basename, entries, archived: false, completed: old?.completed || false };
+      const note = notes[id] = { ...old, id, vault: this.vault, path: file.path, title: file.basename, entries, archived: false, completed: old?.completed || false };
+      if (activity2) {
+        note.activity = true;
+        if (note.completed !== completed) {
+          const live = completed ? this.liveProgress(note, this.totals(false)) : void 0;
+          setEstimateCompleted(note, this.plugin.state, completed, live);
+        }
+      } else delete note.activity;
     });
   }
   async archive(path) {
@@ -1360,19 +1385,25 @@ var NoteEstimates = class {
     if (plugin.state.sessions.some((s) => !s.finished && sessionBounds(s).start < end && sessionBounds(s).end > now)) throw Error("Questo intervallo \xE8 gi\xE0 occupato. Assegna la nota alla sessione in agenda.");
     await plugin.change(() => plugin.state.sessions.push(session));
   }
-  totals() {
+  totals(includePlannedIntervals = true) {
     const cache = this.plugin.app.metadataCache;
-    return creditedWork(this.plugin.state, (p, source) => cache?.getFirstLinkpathDest?.(p, source)?.path, (id) => this.plugin.dailyNotes?.[id]?.path);
+    return creditedWork(this.plugin.state, (p, source) => cache?.getFirstLinkpathDest?.(p, source)?.path, (id) => this.plugin.dailyNotes?.[id]?.path, void 0, { includePlannedIntervals });
+  }
+  liveProgress(note, totals) {
+    return { estimated: estimatedSeconds(note), done: totals.get(note.path) || 0 };
   }
   progress(note, totals) {
-    const { estimated } = estimateProgress(note, this.plugin.state), done = totals.get(note.path) || 0;
-    return { estimated, done, remaining: Math.max(0, estimated - done), difference: done - estimated, percent: 100 * done / estimated };
+    return estimateProgress(note, this.plugin.state, { live: this.liveProgress(note, note.activity ? totals.focus : totals.legacy) });
   }
-  render(parent, note, day = localDateString(), panel = false, totals = this.totals()) {
+  progressTotals() {
+    return { legacy: this.totals(), focus: this.totals(false) };
+  }
+  render(parent, note, day = localDateString(), panel = false, totals = this.progressTotals()) {
     const p = this.progress(note, totals), box = parent.createDiv({ cls: "tempvs-estimate" });
     if (panel) action(box, note.title, () => this.plugin.app.workspace.openLinkText(note.path, "", false));
     const names = [...new Set(note.entries.map((entry) => entry.area).filter(Boolean))];
-    box.createEl("p", { text: (names.join(" / ") || "Tutte le aree") + " \xB7 Tempo registrato " + estimateTime(p.done) + " su " + estimateTime(p.estimated) });
+    const time2 = note.activity ? compactEstimateTime(p.done) + "/" + compactEstimateTime(p.estimated) : "Tempo registrato " + estimateTime(p.done) + " su " + estimateTime(p.estimated);
+    box.createEl("p", { text: (names.join(" / ") || "Tutte le aree") + " \xB7 " + time2 });
     box.createEl("strong", { text: estimateResult(note, p) });
     const actions = box.createDiv({ cls: "tempvs-estimate-actions" });
     const choices = this.preferences.get(note.id) || {};
@@ -1411,9 +1442,13 @@ var NoteEstimates = class {
       };
       action(menu, "Collega alle sessioni libere del giorno", () => this.assignDay(note, day));
     }
-    action(menu, note.completed ? "Riapri attivit\xE0" : "Segna completata", () => this.plugin.change(() => {
-      setEstimateCompleted(this.plugin.config.noteEstimates[note.id], this.plugin.state, !note.completed);
-    }));
+    action(menu, note.completed ? "Riapri attivit\xE0" : "Segna completata", () => {
+      if (note.activity) return this.plugin.daily.toggleActivity(note.path, !note.completed);
+      return this.plugin.change(() => {
+        const current = this.plugin.config.noteEstimates[note.id];
+        setEstimateCompleted(current, this.plugin.state, !current.completed, this.liveProgress(current, this.totals()));
+      });
+    });
     return box;
   }
   renderPanel(parent, day) {
@@ -1421,10 +1456,10 @@ var NoteEstimates = class {
     const menus = new Set([...parent.querySelectorAll(".tempvs-estimate-menu[open]")].map((el) => el.closest(".tempvs-estimate-details").dataset.noteId));
     parent.empty();
     const notes = this.notes.filter((n) => !n.archived);
-    const totals = this.totals(), estimatedPaths = new Set(notes.map((n) => n.path));
-    if (!notes.length && !totals.size) return;
+    const totals = this.progressTotals(), estimatedPaths = new Set(notes.map((n) => n.path));
+    if (!notes.length && !totals.legacy.size) return;
     parent.createEl("h4", { text: "Note e stime" });
-    for (const [path, seconds] of totals) if (!estimatedPaths.has(path)) {
+    for (const [path, seconds] of totals.legacy) if (!estimatedPaths.has(path)) {
       const row2 = parent.createDiv();
       action(row2, path.split("/").pop().replace(/\.md$/i, ""), () => this.plugin.app.workspace.openLinkText(path, "", false));
       row2.createSpan({ text: " \xB7 " + estimateTime(seconds) });
@@ -1524,6 +1559,7 @@ function updateLedger(markdown2, totals) {
   if (ledgers.length > 1) throw Error("Riunisci i totali T: in un solo blocco TEMPVS.");
   if (blocks.length !== findDailyBlocks(markdown2).length) throw Error("Chiudi il blocco TEMPVS prima di aggiornare il totale.");
   const block = ledgers[0];
+  if (!block && blocks.some((b) => isActivitySource(b.source))) return markdown2;
   const remaining = new Map([...totals].map(([area, seconds]) => [area.toLowerCase(), { area, seconds }]));
   const seen = /* @__PURE__ */ new Set(), lines = [];
   function format(area, seconds, target, unit, explicitUnit) {
@@ -1925,6 +1961,23 @@ var DailyBlocks = class {
     if (!context) throw Error("Blocco TEMPVS non trovato.");
     return context;
   }
+  toggleActivity(path, completed) {
+    return this.queue(async () => {
+      const context = await this.context(path);
+      if (context?.kind !== "estimate" || !isActivitySource(context.block.source)) throw Error("Il blocco attivit\xE0 TEMPVS \xE8 cambiato.");
+      const { file, block } = context, source = markActivity(block.source, completed);
+      const changed = source !== block.source;
+      if (changed) await this.writeSource(file, void 0, block.source, source, block.lineStart);
+      try {
+        await this.syncEstimate({ ...context, block: { ...block, source } }, path);
+      } catch (error) {
+        if (changed) await this.writeSource(file, void 0, source, block.source, block.lineStart);
+        throw error;
+      }
+      this.errors.delete(path);
+      this.refresh(path);
+    });
+  }
   async syncEstimate(context, path) {
     this.applying = true;
     try {
@@ -2015,7 +2068,7 @@ var DailyBlocks = class {
         if (leaf.view?.file?.path === file.path && leaf.view.editor && leaf.view.editor.getValue() !== current) throw Error("Modifica in corso: attendo il salvataggio della nota.");
       }
       const blocks = findDailyBlocks(current);
-      let matches = blocks.filter((b) => blockIdentity(b.source) === id);
+      let matches = id ? blocks.filter((b) => blockIdentity(b.source) === id) : [];
       if (!matches.length) matches = blocks.filter((b) => b.source === original && (lineStart === void 0 || b.lineStart === lineStart));
       if (matches.length !== 1 || matches[0].source !== original) throw Error("La nota \xE8 cambiata durante la preview. Prepara nuovamente le modifiche.");
       return replaceDailyBlock(current, matches[0], replacement);
