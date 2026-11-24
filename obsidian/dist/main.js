@@ -27,12 +27,32 @@ module.exports = __toCommonJS(main_exports);
 // obsidian/plain-syntax.js
 var activity = /^([^\[\]]+?)\s+(\d+(?:[.,]\d+)?[hms])(?:\s+x(\d+))?(?:\s+(\d\d:\d\d))?\s+((?:\[\[[^\[\]]+\]\](?:\s+|$))+)$/i;
 var range = /^([^\[\]]+?)\s+(\d\d:\d\d\s*-\s*\d\d:\d\d)\s+(\d+(?:[.,]\d+)?[hm])(?=\s|$)/i;
+var timeRange = /^(\d\d:\d\d\s*-\s*\d\d:\d\d)\s+(\d+(?:[.,]\d+)?[hm])\s+([^\[\]]+?)(\s+\[\[.*)?$/i;
+var timedActivity = /^(?:(\d\d:\d\d)\s+)?(\d+(?:[.,]\d+)?[hms])(?:\s+x(\d+))?\s+([^\[\]]+?)\s+((?:\[\[[^\[\]]+\]\](?:\s+|$))+)$/i;
+function usesTimeRange(line) {
+  return timeRange.test(line.trim());
+}
+function timeFirstArea(line) {
+  const text = line.trim();
+  const match = timeRange.exec(text) || timedActivity.exec(text);
+  if (!match) return null;
+  const name = match.length === 5 ? match[3] : match[4];
+  const prefix = text.slice(0, text.indexOf("[[") < 0 ? text.length : text.indexOf("[[")).trimEnd();
+  const end = line.indexOf(text) + prefix.length;
+  return { from: end - name.length, to: end };
+}
 function expandRange(line) {
+  if (usesTimeRange(line)) return line.replace(timeRange, "$3 +$1 -$2$4");
   return line.replace(range, "$1 +$2 -$3");
 }
 function expandDailyLine(line) {
   const expanded = expandRange(line);
   if (expanded !== line) return expanded;
+  const timed = timedActivity.exec(line);
+  if (timed) {
+    const [, start2, duration3, count2, area2, links2] = timed;
+    line = area2 + " " + duration3 + (count2 ? " x" + count2 : "") + (start2 ? " " + start2 : "") + " " + links2;
+  }
   const match = activity.exec(line);
   if (!match) return line;
   const [, area, duration2, count, start, links] = match;
@@ -605,14 +625,14 @@ function parseAreaRegister(source, areas) {
       }
       const compact = line.match(compactTask);
       if (!compact && line.startsWith("-") && line.includes("]]") && !/\]\]\s+[@*]/.test(line)) {
-        throw Error("Indica la durata con unit\xE0 e l\u2019area sulla stessa riga, per esempio Studio 30m 11:45 [[Nota]].");
+        throw Error("Indica la durata con unit\xE0 e l\u2019area sulla stessa riga, per esempio 11:45 30m Studio [[Nota]].");
       }
       if (!compact && (line.match(/\[\[/g) || []).length > 1) throw Error("Nel vecchio formato usa un solo wikilink per riga.");
       const task = compact || line.match(taskLine);
       if (!task) throw Error("Sintassi da correggere. Prova: " + suggestion(line));
       const area = compact ? areas.find((a) => a.name.toLowerCase() === compact[6].trim().toLowerCase()) : budget;
       if (compact && !area) throw Error("Area sconosciuta: " + compact[6]);
-      if (!area) throw Error("Indica l\u2019area sulla riga, per esempio Studio 30m [[Nota]].");
+      if (!area) throw Error("Indica l\u2019area sulla riga, per esempio 30m Studio [[Nota]].");
       const [, link, value, unit, countText] = task, linkedNotes = noteLinks(link);
       if (!linkedNotes.length) throw Error("Indica una nota tra parentesi quadre doppie.");
       const seconds = secondsOf(value, unit), count = Number(countText ?? 1);
@@ -874,6 +894,7 @@ function daySessions(state, date, blockId) {
   return state.sessions.filter((s) => !s.manualSuperseded && !s.dailyRetired && (s.date === date || blockId && s.noteBlockId === blockId)).sort((a, b) => sessionBounds(a).start - sessionBounds(b).start);
 }
 function serializeDailyPlan(sessions, date, source = "") {
+  const timeFirst = source.split(/\r?\n/).some(usesTimeRange);
   const short = source.split(/\r?\n/).some((line) => expandRange(line.trim()) !== line.trim());
   const groups = [];
   for (const s of [...sessions].sort((a, b) => sessionBounds(a).start - sessionBounds(b).start)) {
@@ -886,7 +907,7 @@ function serializeDailyPlan(sessions, date, source = "") {
       last.until = bounds.end;
     } else groups.push({ key: key2, linkedNotes: s.linkedNotes || [], date: s.date, area: s.area || s.title, start: s.start, end: s.end, gross, from: +bounds.start, until: bounds.end });
   }
-  return groups.map((g) => (g.gross === 1440 ? `${g.area} @1440m +${g.start}` : `${g.area} ${short ? "" : "+"}${g.start}-${g.end} ${short ? "" : "-"}${g.gross}m`) + g.linkedNotes.map((n) => " [[" + n.path + (n.label && n.label !== n.path ? "|" + n.label : "") + "]]").join("") + (g.date !== date ? " +1d" : "")).join("\n");
+  return groups.map((g) => (g.gross === 1440 ? `${g.area} @1440m +${g.start}` : timeFirst ? `${g.start}-${g.end} ${g.gross}m ${g.area}` : `${g.area} ${short ? "" : "+"}${g.start}-${g.end} ${short ? "" : "-"}${g.gross}m`) + g.linkedNotes.map((n) => " [[" + n.path + (n.label && n.label !== n.path ? "|" + n.label : "") + "]]").join("") + (g.date !== date ? " +1d" : "")).join("\n");
 }
 function rowChanges(source, previousSource, areas, owned, date) {
   if (previousSource === void 0) return { byRequest: /* @__PURE__ */ new Map(), changedRows: /* @__PURE__ */ new Set(), previousByRow: /* @__PURE__ */ new Map(), addedRows: /* @__PURE__ */ new Set() };
@@ -1064,6 +1085,7 @@ function syntaxTokens(line) {
   const add = (from, to, kind) => {
     if (to > from) parts.push({ from, to, kind });
   };
+  const area = timeFirstArea(line);
   const heading = line.match(/^(\s*)(@?[^@+\-=\s\d][^@+\[\]=]*?)(?=\s+(?:[@+]|\d))/);
   let offset = 0;
   if (heading && !/^\s*(?:date|T):/i.test(line)) {
@@ -1072,6 +1094,7 @@ function syntaxTokens(line) {
   }
   for (const match of line.slice(offset).matchAll(tokens)) {
     const value = match[0], from = offset + match.index, end = from + value.length;
+    if (area && from >= area.from && from < area.to) continue;
     if (value.startsWith("[[")) {
       const closed = value.endsWith("]]"), targetEnd = closed ? end - 2 : end;
       const alias = value.indexOf("|"), anchor = value.indexOf("#");
@@ -1096,6 +1119,10 @@ function syntaxTokens(line) {
       else if (value.trim() === "-") kind = "punctuation";
       add(from, end, kind);
     }
+  }
+  if (area) {
+    parts.push({ ...area, kind: "area" });
+    parts.sort((a, b) => a.from - b.from);
   }
   return parts;
 }
@@ -3461,8 +3488,8 @@ var TempvsView = class extends import_obsidian5.ItemView {
     });
     const batch = plan.createEl("details", { cls: "tempvs-batch" });
     batch.createEl("summary", { text: "Inserisci pi\xF9 sessioni con il testo" });
-    batch.createEl("p", { cls: "tempvs-help", text: "Studio 14:00-16:00 30m crea quattro sessioni da 25 minuti di concentrazione e 5 di pausa. La fascia pu\xF2 superare la mezzanotte." });
-    const lines = field(batch, "Sessioni in formato rapido").createEl("textarea", { attr: { "aria-label": "Sessioni", placeholder: "Studio 14:00-16:00 30m\nLavoro 18:00-19:30 45m", rows: "3" } });
+    batch.createEl("p", { cls: "tempvs-help", text: "14:00-16:00 30m Studio crea quattro sessioni da 25 minuti di concentrazione e 5 di pausa. La fascia pu\xF2 superare la mezzanotte." });
+    const lines = field(batch, "Sessioni in formato rapido").createEl("textarea", { attr: { "aria-label": "Sessioni", placeholder: "14:00-16:00 30m Studio\n18:00-19:30 45m Lavoro", rows: "3" } });
     const updatePlanMode = () => {
       const textMode = Boolean(lines.value.trim());
       for (const input of [plannedArea, startTime, duration2, cycleInput]) input.disabled = textMode;
