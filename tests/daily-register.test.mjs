@@ -84,3 +84,31 @@ test('short activities and ranges use the original planners',()=>{
  assert.throws(()=>plan('Studio 1h x0 [[A]]'));
  assert.throws(()=>plan('Studio 1h 25:00 [[A]]'));
 });
+
+test('time-first daily syntax preserves scheduling, credits, highlighting and range write-back',async()=>{
+ const {serializeDailyPlan,parseDailySource}=await import('../obsidian/daily-plan.js');
+ const {syntaxTokens}=await import('../obsidian/syntax.js');
+ const state=normalizeArchive({sessions:[]}),date='2026-11-24';
+ state.defaults.simple.areas[0].name='Studio greco';
+ const plan=source=>{
+  let id=0;
+  return prepareDailyPlan({state,source,date,blockId:'daily',id:()=>String(++id)});
+ };
+ const link='[[Platone#Repubblica|Repubblica]] [[Bibliografia]]';
+ const range='23:30-01:00 30m Studio greco '+link;
+ const legacy='Studio greco 23:30-01:00 30m '+link;
+ const rows=['11:45 1h x2 Studio greco '+link,'30m Studio greco [[Latino]]',range];
+ assert.deepEqual(plan(rows.join('\n')).records,
+   plan(['Studio greco 1h x2 11:45 '+link,'Studio greco 30m [[Latino]]',legacy].join('\n')).records);
+ assert.deepEqual(plan(range).sessions,plan(legacy).sessions);
+ const written=serializeDailyPlan(plan(range).sessions,date,range);
+ assert.match(written,/^23:30-00:00 30m Studio greco/);
+ assert.deepEqual(parseDailySource(written,state.defaults.simple.areas).map(x=>[x.start,x.dayOffset||0]),
+   [['23:30',0],['00:00',1],['00:30',1]]);
+ for(const row of rows){
+  const area=syntaxTokens(row).find(token=>token.kind==='area');
+  assert.equal(row.slice(area.from,area.to),'Studio greco');
+ }
+ assert.equal(plan('14:00-16:00 30m Studio greco').sessions.length,4);
+ assert.throws(()=>plan('25:00 30m Studio greco [[A]]'));
+});

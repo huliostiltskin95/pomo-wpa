@@ -52,14 +52,14 @@ export function parseAreaRegister(source,areas){
    }
    const compact=line.match(compactTask);
    if(!compact&&line.startsWith('-')&&line.includes(']]')&&!/\]\]\s+[@*]/.test(line)){
-    throw Error('Indica la durata con unità e l’area sulla stessa riga, per esempio Studio 30m 11:45 [[Nota]].');
+    throw Error('Indica la durata con unità e l’area sulla stessa riga, per esempio 11:45 30m Studio [[Nota]].');
    }
    if(!compact&&(line.match(/\[\[/g)||[]).length>1)throw Error('Nel vecchio formato usa un solo wikilink per riga.');
    const task=compact||line.match(taskLine);
    if(!task)throw Error('Sintassi da correggere. Prova: '+suggestion(line));
    const area=compact?areas.find(a=>a.name.toLowerCase()===compact[6].trim().toLowerCase()):budget;
    if(compact&&!area)throw Error('Area sconosciuta: '+compact[6]);
-   if(!area)throw Error('Indica l’area sulla riga, per esempio Studio 30m [[Nota]].');
+   if(!area)throw Error('Indica l’area sulla riga, per esempio 30m Studio [[Nota]].');
    const [,link,value,unit,countText]=task,linkedNotes=noteLinks(link);
    if(!linkedNotes.length)throw Error('Indica una nota tra parentesi quadre doppie.');
    const seconds=secondsOf(value,unit),count=Number(countText??1);

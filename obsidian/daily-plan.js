@@ -1,4 +1,4 @@
-import {expandRange} from './plain-syntax.js';
+import {expandRange,usesTimeRange} from './plain-syntax.js';
 import {isRegister,registerPlan,applyRegister} from './daily-register.js';
 export {isRegister,applyRegister};
 import {noteLinks} from './notes-integration.js';
@@ -88,6 +88,7 @@ export function daySessions(state,date,blockId){
 }
 // Keep identifiers in plugin data, never in the user's planning field.
 export function serializeDailyPlan(sessions,date,source=""){
+ const timeFirst=source.split(/\r?\n/).some(usesTimeRange);
  const short=source.split(/\r?\n/).some(line=>expandRange(line.trim())!==line.trim());
  const groups=[];
  for(const s of [...sessions].sort((a,b)=>sessionBounds(a).start-sessionBounds(b).start)){
@@ -98,7 +99,7 @@ export function serializeDailyPlan(sessions,date,source=""){
   if(last&&last.key===key&&+last.until===+bounds.start&&s.date===last.date&&+bounds.end-last.from<86400000){last.end=s.end;last.until=bounds.end;}
   else groups.push({key,linkedNotes:s.linkedNotes||[],date:s.date,area:s.area||s.title,start:s.start,end:s.end,gross,from:+bounds.start,until:bounds.end});
  }
- return groups.map(g=>(g.gross===1440?`${g.area} @1440m +${g.start}`:`${g.area} ${short?"":"+"}${g.start}-${g.end} ${short?"":"-"}${g.gross}m`)+g.linkedNotes.map(n=>' [['+n.path+(n.label&&n.label!==n.path?'|'+n.label:'')+']]').join('')+(g.date!==date?' +1d':'')).join('\n');
+ return groups.map(g=>(g.gross===1440?`${g.area} @1440m +${g.start}`:timeFirst?`${g.start}-${g.end} ${g.gross}m ${g.area}`:`${g.area} ${short?"":"+"}${g.start}-${g.end} ${short?"":"-"}${g.gross}m`)+g.linkedNotes.map(n=>' [['+n.path+(n.label&&n.label!==n.path?'|'+n.label:'')+']]').join('')+(g.date!==date?' +1d':'')).join('\n');
 }
 // Compare source rows before expanding ranges: correcting one range must update
 // its original sessions, while removing a historical row still preserves history.

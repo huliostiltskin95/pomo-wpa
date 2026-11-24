@@ -203,8 +203,8 @@ class TempvsView extends ItemView {
     });
     const batch=plan.createEl("details",{cls:"tempvs-batch"});
     batch.createEl("summary",{text:"Inserisci più sessioni con il testo"});
-    batch.createEl("p",{cls:"tempvs-help",text:"Studio 14:00-16:00 30m crea quattro sessioni da 25 minuti di concentrazione e 5 di pausa. La fascia può superare la mezzanotte."});
-    const lines=field(batch,"Sessioni in formato rapido").createEl("textarea",{attr:{"aria-label":"Sessioni",placeholder:"Studio 14:00-16:00 30m\nLavoro 18:00-19:30 45m",rows:"3"}});
+    batch.createEl("p",{cls:"tempvs-help",text:"14:00-16:00 30m Studio crea quattro sessioni da 25 minuti di concentrazione e 5 di pausa. La fascia può superare la mezzanotte."});
+    const lines=field(batch,"Sessioni in formato rapido").createEl("textarea",{attr:{"aria-label":"Sessioni",placeholder:"14:00-16:00 30m Studio\n18:00-19:30 45m Lavoro",rows:"3"}});
     const updatePlanMode=()=>{
       const textMode=Boolean(lines.value.trim());
       for(const input of [plannedArea,startTime,duration,cycleInput])input.disabled=textMode;

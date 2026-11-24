@@ -1,8 +1,10 @@
+import {timeFirstArea} from './plain-syntax.js';
 // Offsets refer to the original line so rendering never rewrites Markdown.
 const tokens = /^\s*T:|(?<=\s)@[^\d\s][^\n]*$|<!--.*?(?:-->|$)|\[\[[^\]]*(?:\]\]|$)|^\s*date:(?=\s|$)|\b\d{4}-\d{2}-\d{2}\b|\+?\d{2}:\d{2}(?:-\d{2}:\d{2})?|\bx\d+\b|=\s*\d+|\b\d+(?:[.,]\d+)?[hms]\b|[@~-]\d+(?:[.,]\d+)?[hms]?|^\s*-(?=\s|$)/gi;
 export function syntaxTokens(line){
   const parts=[];
   const add=(from,to,kind)=>{if(to>from)parts.push({from,to,kind});};
+  const area=timeFirstArea(line);
   const heading=line.match(/^(\s*)(@?[^@+\-=\s\d][^@+\[\]=]*?)(?=\s+(?:[@+]|\d))/);
   let offset=0;
   if(heading&&!/^\s*(?:date|T):/i.test(line)){
@@ -11,6 +13,7 @@ export function syntaxTokens(line){
   }
   for(const match of line.slice(offset).matchAll(tokens)){
     const value=match[0],from=offset+match.index,end=from+value.length;
+    if(area && from >= area.from && from < area.to)continue;
     if(value.startsWith('[[')){
       const closed=value.endsWith(']]'),targetEnd=closed?end-2:end;
       const alias=value.indexOf('|'),anchor=value.indexOf('#');
@@ -32,6 +35,7 @@ export function syntaxTokens(line){
       add(from,end,kind);
     }
   }
+  if(area){parts.push({...area,kind:'area'});parts.sort((a,b)=>a.from-b.from);}
   return parts;
 }
 export function renderSyntaxLine(parent,line,areas){
