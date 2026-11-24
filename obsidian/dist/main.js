@@ -1469,7 +1469,7 @@ var DailyPlannerModal = class extends import_obsidian3.Modal {
     };
     const start = input("Inizio", "time"), end = input("Fine", "time");
     const minutes = input("Durata lorda (minuti)", "number", { required: "", min: "1", step: "1", value: "30" });
-    const area = form.createEl("label", { text: "Area" }).createEl("select", { attr: { required: "" } });
+    const area = form.createEl("label", { text: "Area" }).createEl("select", { attr: { required: "", "aria-label": "Area" } });
     for (const item of controller.plugin.state.defaults.simple.areas) area.createEl("option", { value: item.name, text: item.name });
     const note = input("Nota", "text", { placeholder: "Titolo oppure [[nota#sezione|alias]]" });
     const preview = form.createEl("code", { attr: { "aria-live": "polite" } });
