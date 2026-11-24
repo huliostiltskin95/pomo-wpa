@@ -24,6 +24,21 @@ __export(main_exports, {
 });
 module.exports = __toCommonJS(main_exports);
 
+// obsidian/plain-syntax.js
+var activity = /^([^\[\]]+?)\s+(\d+(?:[.,]\d+)?[hms])(?:\s+x(\d+))?(?:\s+(\d\d:\d\d))?\s+((?:\[\[[^\[\]]+\]\](?:\s+|$))+)$/i;
+var range = /^([^\[\]]+?)\s+(\d\d:\d\d\s*-\s*\d\d:\d\d)\s+(\d+(?:[.,]\d+)?[hm])(?=\s|$)/i;
+function expandRange(line) {
+  return line.replace(range, "$1 +$2 -$3");
+}
+function expandDailyLine(line) {
+  const expanded = expandRange(line);
+  if (expanded !== line) return expanded;
+  const match = activity.exec(line);
+  if (!match) return line;
+  const [, area, duration2, count, start, links] = match;
+  return "- " + links.trim() + " " + duration2 + (count ? " = " + count : "") + (start ? " +" + start : "") + " @" + area;
+}
+
 // obsidian/notes-integration.js
 var wiki = /!?\[\[([^\]\n]+)\]\]/g;
 var markdown = /\[([^\]\n]+)\]\(([^)\n]+)\)/g;
@@ -474,17 +489,17 @@ function parseQuick(text, areas) {
     if (!line.trim()) return [];
     try {
       const input = line.trim();
-      const range = input.match(/^(.+?)\s+\+\s*((?:[01]\d|2[0-3]):[0-5]\d)\s*-\s*((?:[01]\d|2[0-3]):[0-5]\d)\s+-\s*(\d+(?:[.,]\d+)?)\s*(m|h)$/i);
-      if (range) {
-        const area2 = areas.find((a) => a.name.trim().replace(/\s+/g, " ").toLocaleLowerCase() === range[1].trim().replace(/\s+/g, " ").toLocaleLowerCase());
-        if (!area2) throw Error("Area sconosciuta: " + range[1].trim() + ".");
+      const range2 = input.match(/^(.+?)\s+\+\s*((?:[01]\d|2[0-3]):[0-5]\d)\s*-\s*((?:[01]\d|2[0-3]):[0-5]\d)\s+-\s*(\d+(?:[.,]\d+)?)\s*(m|h)$/i);
+      if (range2) {
+        const area2 = areas.find((a) => a.name.trim().replace(/\s+/g, " ").toLocaleLowerCase() === range2[1].trim().replace(/\s+/g, " ").toLocaleLowerCase());
+        if (!area2) throw Error("Area sconosciuta: " + range2[1].trim() + ".");
         const minutesOf2 = (time2) => {
           const [hours, minutes2] = time2.split(":").map(Number);
           return hours * 60 + minutes2;
         };
         const timeOf = (minutes2) => String(Math.floor(minutes2 % 1440 / 60)).padStart(2, "0") + ":" + String(minutes2 % 60).padStart(2, "0");
-        const from = minutesOf2(range[2]), until = minutesOf2(range[3]);
-        const total = (until - from + 1440) % 1440, value = Number(range[4].replace(",", ".")) * (range[5].toLowerCase() === "h" ? 60 : 1);
+        const from = minutesOf2(range2[2]), until = minutesOf2(range2[3]);
+        const total = (until - from + 1440) % 1440, value = Number(range2[4].replace(",", ".")) * (range2[5].toLowerCase() === "h" ? 60 : 1);
         const each = Math.round(value);
         if (Math.abs(value - each) > 1e-9) throw Error("La durata lorda deve corrispondere a minuti interi.");
         if (!total) throw Error("La fascia deve avere inizio e fine diversi.");
@@ -547,7 +562,7 @@ var compactTask = /^-\s*((?:\[\[[^\[\]]+\]\]\s+)+)(\d+(?:[.,]\d+)?)([hms])(?:\s*
 var possibleTask = new RegExp("^-?\\s*(\\[\\[[^\\]\\[]+\\]\\])\\s*[@*]?\\s*" + quantity + "\\s*=?\\s+(\\d+)(?:\\s*\\+?\\s*" + time + ")?$", "i");
 var possibleArea = new RegExp("^(.+?)\\s+[@*]?" + quantity + "$", "i");
 var isAreaRegister = (source) => source?.split(/\r?\n/).some((line) => {
-  const text = line.trim();
+  const text = expandDailyLine(line.trim());
   return areaLine.test(text) || /^\s*-?\s*\[\[.*\]\]\s+[@*\d]/.test(text) || !/[+=]/.test(text) && !text.startsWith("@") && possibleArea.test(text);
 });
 function readableDuration(seconds) {
@@ -571,7 +586,7 @@ function parseAreaRegister(source, areas) {
   const budgets = [], slots = [];
   let budget;
   for (const [index, raw] of source.split(/\r?\n/).entries()) {
-    const line = raw.trim();
+    const line = expandDailyLine(raw.trim());
     if (!line || /^date:\s*\d{4}-\d\d-\d\d$/i.test(line) || /^<!-- tempvs-block:[\w-]+ -->$/.test(line)) continue;
     try {
       const heading = line.match(areaLine);
@@ -584,20 +599,20 @@ function parseAreaRegister(source, areas) {
       }
       if (/^[^-].*?\s+\+\s*\d\d:\d\d\s*-/.test(line)) {
         const links = line.match(/\[\[[^\[\]]+\]\]/g) || [];
-        const range = line.replace(/\[\[[^\[\]]+\]\]/g, "").trim();
-        for (const slot of parseQuick(range, areas)) slots.push({ ...slot, linkedNotes: noteLinks(links.join(" ")) });
+        const range2 = line.replace(/\[\[[^\[\]]+\]\]/g, "").trim();
+        for (const slot of parseQuick(range2, areas)) slots.push({ ...slot, linkedNotes: noteLinks(links.join(" ")) });
         continue;
       }
       const compact = line.match(compactTask);
       if (!compact && line.startsWith("-") && line.includes("]]") && !/\]\]\s+[@*]/.test(line)) {
-        throw Error("Indica la durata con unit\xE0 e l\u2019area sulla stessa riga, per esempio - [[Nota]] 30m +11:45 @Studio.");
+        throw Error("Indica la durata con unit\xE0 e l\u2019area sulla stessa riga, per esempio Studio 30m 11:45 [[Nota]].");
       }
       if (!compact && (line.match(/\[\[/g) || []).length > 1) throw Error("Nel vecchio formato usa un solo wikilink per riga.");
       const task = compact || line.match(taskLine);
       if (!task) throw Error("Sintassi da correggere. Prova: " + suggestion(line));
       const area = compact ? areas.find((a) => a.name.toLowerCase() === compact[6].trim().toLowerCase()) : budget;
       if (compact && !area) throw Error("Area sconosciuta: " + compact[6]);
-      if (!area) throw Error("Indica l\u2019area sulla riga, per esempio - [[Nota]] 30m @Studio.");
+      if (!area) throw Error("Indica l\u2019area sulla riga, per esempio Studio 30m [[Nota]].");
       const [, link, value, unit, countText] = task, linkedNotes = noteLinks(link);
       if (!linkedNotes.length) throw Error("Indica una nota tra parentesi quadre doppie.");
       const seconds = secondsOf(value, unit), count = Number(countText ?? 1);
@@ -831,7 +846,7 @@ function parseDailySource(source, areas) {
       const planning = raw.replace(/\[\[[^\]\n]+\]\]/g, "").trim();
       if (/\[\[|\]\]/.test(planning)) throw Error("Collegamento nota non valido: usa [[nota|titolo]].");
       const nextDay = /\s+\+1d\s*$/i.test(planning), input = planning.replace(/\s+\+1d\s*$/i, "");
-      const rows = parseQuick(input, areas);
+      const rows = parseQuick(expandRange(input), areas);
       const id = metadata ? decodeURIComponent(metadata[1]) : null;
       if (id && (used.has(id) || rows.length !== 1)) throw Error("Ogni identificativo deve riferirsi a una sola sessione, senza duplicati.");
       if (id) used.add(id);
@@ -858,7 +873,8 @@ var isLocked = (session, now = /* @__PURE__ */ new Date()) => session.finished |
 function daySessions(state, date, blockId) {
   return state.sessions.filter((s) => !s.manualSuperseded && !s.dailyRetired && (s.date === date || blockId && s.noteBlockId === blockId)).sort((a, b) => sessionBounds(a).start - sessionBounds(b).start);
 }
-function serializeDailyPlan(sessions, date) {
+function serializeDailyPlan(sessions, date, source = "") {
+  const short = source.split(/\r?\n/).some((line) => expandRange(line.trim()) !== line.trim());
   const groups = [];
   for (const s of [...sessions].sort((a, b) => sessionBounds(a).start - sessionBounds(b).start)) {
     if (s.date !== date && s.date !== dayAfter(date)) throw Error("Una sessione collegata \xE8 stata spostata fuori dalla giornata della nota.");
@@ -870,7 +886,7 @@ function serializeDailyPlan(sessions, date) {
       last.until = bounds.end;
     } else groups.push({ key: key2, linkedNotes: s.linkedNotes || [], date: s.date, area: s.area || s.title, start: s.start, end: s.end, gross, from: +bounds.start, until: bounds.end });
   }
-  return groups.map((g) => (g.gross === 1440 ? `${g.area} @1440m +${g.start}` : `${g.area} +${g.start}-${g.end} -${g.gross}m`) + g.linkedNotes.map((n) => " [[" + n.path + (n.label && n.label !== n.path ? "|" + n.label : "") + "]]").join("") + (g.date !== date ? " +1d" : "")).join("\n");
+  return groups.map((g) => (g.gross === 1440 ? `${g.area} @1440m +${g.start}` : `${g.area} ${short ? "" : "+"}${g.start}-${g.end} ${short ? "" : "-"}${g.gross}m`) + g.linkedNotes.map((n) => " [[" + n.path + (n.label && n.label !== n.path ? "|" + n.label : "") + "]]").join("") + (g.date !== date ? " +1d" : "")).join("\n");
 }
 function rowChanges(source, previousSource, areas, owned, date) {
   if (previousSource === void 0) return { byRequest: /* @__PURE__ */ new Map(), changedRows: /* @__PURE__ */ new Set(), previousByRow: /* @__PURE__ */ new Map(), addedRows: /* @__PURE__ */ new Set() };
@@ -1042,7 +1058,7 @@ function applyDailyPlan(state, proposal) {
 }
 
 // obsidian/syntax.js
-var tokens = /^\s*T:|(?<=\s)@[^\d\s][^\n]*$|<!--.*?(?:-->|$)|\[\[[^\]]*(?:\]\]|$)|^\s*date:(?=\s|$)|\b\d{4}-\d{2}-\d{2}\b|\+?\d{2}:\d{2}(?:-\d{2}:\d{2})?|=\s*\d+|\b\d+(?:[.,]\d+)?[hms]\b|[@~-]\d+(?:[.,]\d+)?[hms]?|^\s*-(?=\s|$)/gi;
+var tokens = /^\s*T:|(?<=\s)@[^\d\s][^\n]*$|<!--.*?(?:-->|$)|\[\[[^\]]*(?:\]\]|$)|^\s*date:(?=\s|$)|\b\d{4}-\d{2}-\d{2}\b|\+?\d{2}:\d{2}(?:-\d{2}:\d{2})?|\bx\d+\b|=\s*\d+|\b\d+(?:[.,]\d+)?[hms]\b|[@~-]\d+(?:[.,]\d+)?[hms]?|^\s*-(?=\s|$)/gi;
 function syntaxTokens(line) {
   const parts = [];
   const add = (from, to, kind) => {
@@ -1076,7 +1092,7 @@ function syntaxTokens(line) {
       else if (value.startsWith("<!--")) kind = "comment";
       else if (value.includes(":")) kind = /date:/i.test(value) ? "keyword" : "time";
       else if (/^\d{4}-/.test(value)) kind = "date";
-      else if (value.startsWith("=")) kind = "count";
+      else if (/^(?:=|x\d)/i.test(value)) kind = "count";
       else if (value.trim() === "-") kind = "punctuation";
       add(from, end, kind);
     }
@@ -1870,7 +1886,7 @@ var DailyBlocks = class {
     this.validateBinding(prepared.blockId, prepared.file.path, prepared.date);
     const newIds = prepared.sessions.filter((s) => !this.plugin.state.sessions.some((current) => current.id === s.id)).map((s) => s.id);
     const fresh = prepareDailyPlan({ source: prepared.source, date: prepared.date, blockId: prepared.blockId, previousSource: prepared.previousSource, protectedBlockIds: prepared.protectedBlockIds, state: this.plugin.state, id: () => newIds.shift() || uid2() });
-    const body = prepared.keepSource || fresh.records ? plain(prepared.source) : serializeDailyPlan(fresh.sessions, prepared.date);
+    const body = prepared.keepSource || fresh.records ? plain(prepared.source) : serializeDailyPlan(fresh.sessions, prepared.date, prepared.source);
     const canonical = explicitDay(prepared.originalSource) && !explicitDay(body) ? "date: " + prepared.date + "\n" + body : body;
     const previousBinding = this.bindings[prepared.blockId];
     this.applying = true;
@@ -1918,7 +1934,7 @@ var DailyBlocks = class {
       if (!context || context.block.source !== binding.source) throw Error("La nota giornaliera sta cambiando: attendi la sincronizzazione e riprova.");
       if (isRegister(binding.source)) throw Error("Modifica il wikilink nella riga della nota quotidiana.");
       const sessions = daySessions(this.plugin.state, binding.date, blockId).filter((s) => !binding.hiddenSessionIds?.includes(s.id)).map((s) => updates.has(s.id) ? { ...s, linkedNotes: updates.get(s.id) } : s);
-      const body = serializeDailyPlan(sessions, binding.date);
+      const body = serializeDailyPlan(sessions, binding.date, binding.source);
       const source = explicitDay(binding.source) ? "date: " + binding.date + "\n" + body : body;
       const plan = prepareDailyPlan({ source, date: binding.date, blockId, state: this.plugin.state, previousSource: binding.source, protectedBlockIds: this.protectedBlocks(blockId) });
       for (const session of plan.sessions) if (updates.has(session.id)) delete session.noteEstimateId;
@@ -1928,7 +1944,7 @@ var DailyBlocks = class {
   async includeDay(child) {
     const context = await this.locate(child), blockId = this.bindingId(context.file.path) || blockIdentity(context.block.source) || uid2();
     this.validateBinding(blockId, context.file.path, context.date);
-    const source = serializeDailyPlan(daySessions(this.plugin.state, context.date, blockId), context.date, blockId);
+    const source = serializeDailyPlan(daySessions(this.plugin.state, context.date, blockId), context.date, context.block.source);
     return { ...context, ...prepareDailyPlan({ source, date: context.date, blockId, protectedBlockIds: this.protectedBlocks(blockId), state: this.plugin.state }), originalSource: context.block.source };
   }
   detach(path) {
@@ -1966,7 +1982,7 @@ var DailyBlocks = class {
           }
           const sessions = daySessions(this.plugin.state, binding.date, blockId).filter((s) => !binding.hiddenSessionIds?.includes(s.id));
           if (isRegister(binding.source) || sessions.some((s) => s.registerMinutes)) continue;
-          const body = serializeDailyPlan(sessions, binding.date);
+          const body = serializeDailyPlan(sessions, binding.date, binding.source);
           const source = explicitDay(binding.source) ? "date: " + binding.date + "\n" + body : body;
           if (source === binding.source) continue;
           const key2 = archivePlanningKey(this.plugin.state), previousSource = binding.source;
@@ -3445,8 +3461,8 @@ var TempvsView = class extends import_obsidian5.ItemView {
     });
     const batch = plan.createEl("details", { cls: "tempvs-batch" });
     batch.createEl("summary", { text: "Inserisci pi\xF9 sessioni con il testo" });
-    batch.createEl("p", { cls: "tempvs-help", text: "Nuovo formato: Studio +14:00-16:00 -30m \u2192 quattro sessioni da 25 minuti di concentrazione + 5 di pausa. Il rapporto \xE8 sempre 5:1: -60m d\xE0 50 + 10. Si pu\xF2 oltrepassare mezzanotte. \xC8 ancora supportato Studio @2h +14:00 -60m: una sessione di due ore con cicli da 60 minuti lordi. Se compili questo campo, verranno usate queste righe." });
-    const lines = field(batch, "Sessioni in formato rapido").createEl("textarea", { attr: { "aria-label": "Sessioni", placeholder: "Studio +14:00-16:00 -30m\nLavoro +18:00-19:30 -45m", rows: "3" } });
+    batch.createEl("p", { cls: "tempvs-help", text: "Studio 14:00-16:00 30m crea quattro sessioni da 25 minuti di concentrazione e 5 di pausa. La fascia pu\xF2 superare la mezzanotte." });
+    const lines = field(batch, "Sessioni in formato rapido").createEl("textarea", { attr: { "aria-label": "Sessioni", placeholder: "Studio 14:00-16:00 30m\nLavoro 18:00-19:30 45m", rows: "3" } });
     const updatePlanMode = () => {
       const textMode = Boolean(lines.value.trim());
       for (const input of [plannedArea, startTime, duration2, cycleInput]) input.disabled = textMode;
@@ -4229,7 +4245,7 @@ var TempvsPlugin = class extends import_obsidian5.Plugin {
   }
   async schedule(text, date) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw Error("Data non valida.");
-    const requests = parseQuick(text, this.config.areas);
+    const requests = parseQuick(text.split("\n").map((line) => expandRange(line.trim())).join("\n"), this.config.areas);
     if (!requests.length) throw Error("Inserisci almeno una sessione.");
     if (requests.some((r) => !r.start)) throw Error("Per ora specifica +HH:MM per ogni sessione. Le fasce automatiche saranno aggiunte successivamente.");
     const result = planSessions(
