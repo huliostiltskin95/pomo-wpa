@@ -418,7 +418,7 @@ class TempvsView extends ItemView {
     const focusedTime=list.ownerDocument?.activeElement?.dataset?.allocation;
     list.empty();
     const now=new Date();
-    const registered=plugin.state.history.filter(h=>h.registerBlock&&h.registerDay===this.day);
+    const registered=plugin.state.history.filter(h=>h.registerBlock&&h.registerDay===this.day&&(!h.planned||h.start));
     const budgets=Object.values(plugin.dailyNotes||{}).find(b=>b.date===this.day)?.budgets||[];
     for(const b of budgets){
       const difference=b.seconds-b.assigned;
@@ -433,7 +433,7 @@ class TempvsView extends ItemView {
         row.createEl('td',{text:record.area});row.createEl('td',{text:record.start||'—'});
         const cell=row.createEl('td'),note=record.linkedNotes[0];
         if(note)button(cell,note.label,()=>plugin.app.workspace.openLinkText(note.path,plugin.dailyNotes[record.registerBlock]?.path||'',false));
-        else cell.setText('—');
+        else cell.textContent='—';
         row.createEl('td',{text:readableDuration(Math.round(record.minutes*60))});
       }
       const totals=new Map();
@@ -462,7 +462,7 @@ class TempvsView extends ItemView {
       iconButton(item,"trash-2","Elimina tempo assegnato",()=>plugin.removeAllocation(allocation));
     }
     const sessions=plugin.state.sessions.filter(s=>{
-      if(s.registerMinutes)return false;
+      if(s.registerMinutes||s.registerPlanned)return false;
       if(s.dailyRetired||s.manualSuperseded)return false;
       return s.date===this.day || (this.day===today()&&sessionBounds(s).start<=now&&sessionBounds(s).end>now);
     }).sort((a,b)=>sessionBounds(a).start-sessionBounds(b).start);
@@ -495,7 +495,7 @@ class TempvsView extends ItemView {
         iconButton(item,"trash-2","Elimina sessione "+(first.area||first.title),()=>plugin.removeSession(first.id));
       }
     }
-    if(!sessions.length&&!registered.length&&!budgets.length){
+    if(!sessions.length&&!registered.length&&!budgets.length&&!plugin.allocatedOn(this.day).length){
       const empty=list.createDiv({cls:"tempvs-empty"});
       setIcon(empty.createDiv({cls:"tempvs-empty-icon"}),"calendar-check");
       empty.createEl("strong",{text:"Spazio per i tuoi progetti"});
@@ -946,9 +946,17 @@ export default class TempvsPlugin extends Plugin {
   }
   allocatedOn(date) {
     const entries=this.daily.allocationsByDay.get(date)||[];
-    return [...entries,...this.allocations.filter(item=>item.date===date&&!entries.some(entry=>entry.id===item.id))];
+    const unified=this.state.history.flatMap(record=>{
+      if(!record.planned||record.start||record.registerDay!==date)return [];
+      const binding=this.dailyNotes[record.registerBlock];
+      const file=binding&&this.app.vault?.getAbstractFileByPath(binding.path);
+      const raw=binding?.source.split(/\r?\n/)[record.sourceRow];
+      return file&&raw?[{...record,id:record.sessionId,file,raw,index:record.sourceRow,note:record.linkedNotes[0],unified:true}]:[];
+    });
+    return [...unified,...entries,...this.allocations.filter(item=>item.date===date&&!entries.some(entry=>entry.id===item.id))];
   }
   removeAllocation(entry) {
+    if(entry.unified)return this.daily.updateUnifiedAllocation(entry);
     return entry.file?this.daily.consumeAllocation(entry):this.change(()=>{
       this.allocations=this.allocations.filter(item=>item.id!==entry.id);
     });
@@ -968,6 +976,11 @@ export default class TempvsPlugin extends Plugin {
     return result.sessions;
   }
   async scheduleAllocation(allocation,start) {
+    if(allocation.unified){
+      if(!/^([01]\d|2[0-3]):[0-5]\d$/.test(start)||new Date(allocation.date+'T'+start)<=new Date())
+        throw Error('Scegli un orario futuro per avviare il timer.');
+      return this.daily.updateUnifiedAllocation(allocation,start);
+    }
     const {date,note,area,areaId,minutes,cycleMinutes,focusMinutes,customBreakMinutes}=allocation;
     const commit=()=>this.change(()=>{
       if(!allocation.file&&!this.allocations.some(entry=>entry.id===allocation.id))

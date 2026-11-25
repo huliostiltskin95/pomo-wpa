@@ -116,4 +116,4 @@ jobs:
             obsidian/dist/styles.css#styles.css \
             --target "${{ github.sha }}" \
             --title "TEMPVS $VERSION" \
-            --notes "Le assegnazioni senza orario vengono salvate nella nota giornaliera e si possono modificare direttamente in Markdown."
+            --notes "Budget e assegnazioni condividono il blocco TEMPVS. Aggiungi +HH:MM a una riga di attività per programmare il timer."

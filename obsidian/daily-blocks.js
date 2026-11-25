@@ -1,4 +1,4 @@
-import {allocationBlock,allocationRow,appendAllocation,readAllocations} from './daily-allocations.js';
+import {allocationBlock,appendUnifiedAllocation,mergeAllocationBlocks,readAllocations} from './daily-allocations.js';
 import {DailyPlannerModal} from './daily-planner-modal.js';
 import {creditedWork} from './daily-register.js';
 import {isLedger,updateLedger} from './note-ledger.js';
@@ -96,7 +96,7 @@ export class DailyBlocks {
    this.plugin.refresh?.(true);
  }
  async writeAllocation(allocation){
-  await this.queue(async()=>{
+  const file=await this.queue(async()=>{
    const {vault}=this.plugin.app;
    let markdown;
    let {file,path,settings}=this.dailyLocation(allocation.date);
@@ -116,17 +116,43 @@ export class DailyBlocks {
     const body=initial.replace(/{{title}}/gi,()=>title)
      .replace(/{{date(?::([^}]+))?}}/gi,(_all,format)=>day?.format?.(format||'YYYY-MM-DD')||allocation.date)
      .replace(/{{time(?::([^}]+))?}}/gi,(all,format)=>moment?.()?.format?.(format||'HH:mm')||all);
-    markdown=appendAllocation(body,allocationRow(allocation));
+    markdown=appendUnifiedAllocation(body,allocation);
+    this.validateAllocationSource(markdown,allocation.date,path);
     file=await vault.create(path,markdown);
    }else{
-    const before=markdown=await this.readMarkdown(file);
-    const entries=readAllocations(allocationBlock(before),file,allocation.date,this.plugin.state.defaults.simple.areas);
-    if(!allocation.id||!entries.some(entry=>entry.id===allocation.id)){
-     markdown=appendAllocation(before,allocationRow(allocation));
+    const before=await this.readMarkdown(file);
+    if(!allocation.id||!findDailyBlocks(before)[0]?.source.includes('<!-- tempvs-allocation:'+allocation.id+' -->')){
+     markdown=appendUnifiedAllocation(before,allocation);
+     this.validateAllocationSource(markdown,allocation.date,file.path);
      await this.replaceAllocationText(file,before,markdown);
     }
    }
-   this.cacheAllocations(allocation.date,file,markdown);
+   return file;
+  });
+  try{await this.syncFile(file.path);}
+  catch(error){this.schedule(file.path);new Notice('Assegnazione salvata. Sincronizzazione TEMPVS: '+error.message);}
+ }
+ validateAllocationSource(markdown,date,path){
+  const block=findDailyBlocks(markdown)[0];
+  const blockId=this.bindingId(path)||blockIdentity(block.source)||uid();
+  this.validateBinding(blockId,path,date);
+  prepareDailyPlan({source:block.source,date,blockId,state:this.plugin.state,previousSource:this.bindings[blockId]?.source,
+   protectedBlockIds:this.protectedBlocks(blockId)});
+ }
+ updateUnifiedAllocation(entry,start){
+  return this.queue(async()=>{
+   const context=await this.context(entry.file.path);
+   const blockId=this.bindingId(entry.file.path);
+   const lines=context?.block.source.split(/\r?\n/);
+   if(context?.date!==entry.date||!blockId||lines?.[entry.index]!==entry.raw)
+    throw Error('L’assegnazione è cambiata. Riapri la giornata e riprova.');
+   if(start)lines[entry.index]=entry.raw.replace(/^(\s*-\s*(?:\[\[[^\]\[]+\]\]\s+)?@\d+(?:[.,]\d+)?[hms]?)(?=\s|$)/i,'$1 +'+start);
+   else lines.splice(entry.index,1);
+   const source=lines.join('\n');
+   const plan=prepareDailyPlan({source,date:entry.date,blockId,state:this.plugin.state,previousSource:context.block.source,
+    protectedBlockIds:this.protectedBlocks(blockId)});
+   await this.commit({...context,...plan,originalSource:context.block.source,preserveSource:true});
+   this.plugin.refresh?.(true);
   });
  }
  async replaceAllocationText(file,before,after){
@@ -156,6 +182,17 @@ export class DailyBlocks {
    this.cacheAllocations(date,file,after);
   });
   if(commit)await this.archiveChanged();
+ }
+ async migrateAllocationBlock(file){
+  const before=await this.readMarkdown(file);
+  if(!/tempvs-assegnazioni/i.test(before)||!allocationBlock(before))return;
+  const context=await this.context(file.path);
+  const date=context?.date||this.panelDay(file);
+  if(!date||context?.kind)return;
+  const after=mergeAllocationBlocks(before,file,date,this.plugin.state.defaults.simple.areas);
+  if(before===after)return;
+  if(findDailyBlocks(after).length)this.validateAllocationSource(after,date,file.path);
+  await this.replaceAllocationText(file,before,after);
  }
  async migrateAllocations(){
   for(const entry of this.plugin.allocations||[]){
@@ -293,6 +330,8 @@ export class DailyBlocks {
   await this.queue(()=>this.rewriteReferences(move));
   for(const file of files){
    if(this.destroyed)return;
+   try{await this.migrateAllocationBlock(file);}
+   catch(error){new Notice('TEMPVS: blocco precedente conservato in '+file.path+'. '+error.message);}
    try{await this.syncFile(file.path,{force:true});}catch(error){this.errors.set(file.path,error.message);}
   }
   await this.migrateAllocations();
@@ -454,7 +493,7 @@ export class DailyBlocks {
   this.validateBinding(prepared.blockId,prepared.file.path,prepared.date);
   const newIds=prepared.sessions.filter(s=>!this.plugin.state.sessions.some(current=>current.id===s.id)).map(s=>s.id);
   const fresh=prepareDailyPlan({source:prepared.source,date:prepared.date,blockId:prepared.blockId,previousSource:prepared.previousSource,protectedBlockIds:prepared.protectedBlockIds,state:this.plugin.state,id:()=>newIds.shift()||uid()});
-  const body=prepared.keepSource||fresh.records?plain(prepared.source):serializeDailyPlan(fresh.sessions,prepared.date,prepared.source);
+  const body=prepared.keepSource||prepared.preserveSource||fresh.records?plain(prepared.source):serializeDailyPlan(fresh.sessions,prepared.date,prepared.source);
   const canonical=explicitDay(prepared.originalSource)&&!explicitDay(body)?'date: '+prepared.date+'\n'+body:body;
   const previousBinding=this.bindings[prepared.blockId];
   this.applying=true;

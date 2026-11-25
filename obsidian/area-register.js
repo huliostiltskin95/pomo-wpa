@@ -6,12 +6,13 @@ const quantity='(\\d+(?:[.,]\\d+)?)([hms]?)';
 const time='((?:[01]\\d|2[0-3]):[0-5]\\d)';
 const areaLine=new RegExp('^(.+?)\\s+@'+quantity+'$','i');
 const taskLine=new RegExp('^-\\s*(\\[\\[[^\\]\\[]+\\]\\])\\s+@'+quantity+'\\s*=\\s*(\\d+)(?:\\s+\\+'+time+')?$','i');
+const plannedTask=new RegExp('^-\\s*(?:(\\[\\[[^\\]\\[]+\\]\\])\\s+)?@'+quantity+'(?:\\s+\\+'+time+')?(?:\\s+-(\\d+)m)?(?:\\s+@(.+?))?$','i');
 const compactTask=/^-\s*((?:\[\[[^\[\]]+\]\]\s+)+)(\d+(?:[.,]\d+)?)([hms])(?:\s*=\s*(\d+))?(?:\s+\+((?:[01]\d|2[0-3]):[0-5]\d))?\s+@(.+?)$/i;
 const possibleTask=new RegExp('^-?\\s*(\\[\\[[^\\]\\[]+\\]\\])\\s*[@*]?\\s*'+quantity+'\\s*=?\\s+(\\d+)(?:\\s*\\+?\\s*'+time+')?$','i');
 const possibleArea=new RegExp('^(.+?)\\s+[@*]?'+quantity+'$','i');
 export const isAreaRegister=source=>source?.split(/\r?\n/).some(line=>{
- const text=expandDailyLine(line.trim());
- return areaLine.test(text)||/^\s*-?\s*\[\[.*\]\]\s+[@*\d]/.test(text)||
+ const text=expandDailyLine(line.replace(/\s+<!-- tempvs-allocation:[\w-]+ -->\s*$/,'').trim());
+ return areaLine.test(text)||plannedTask.test(text)||/^\s*-?\s*\[\[.*\]\]\s+[@*\d]/.test(text)||
   (!/[+=]/.test(text)&&!text.startsWith('@')&&possibleArea.test(text));
 });
 export function readableDuration(seconds){
@@ -34,7 +35,7 @@ function suggestion(line){
 export function parseAreaRegister(source,areas){
  const budgets=[],slots=[];let budget;
  for(const [index,raw] of source.split(/\r?\n/).entries()){
-  const line=expandDailyLine(raw.trim());
+  const line=expandDailyLine(raw.replace(/\s+<!-- tempvs-allocation:[\w-]+ -->\s*$/,'').trim());
   if(!line||/^date:\s*\d{4}-\d\d-\d\d$/i.test(line)||/^<!-- tempvs-block:[\w-]+ -->$/.test(line))continue;
   try{
    const heading=line.match(areaLine);
@@ -44,10 +45,30 @@ export function parseAreaRegister(source,areas){
     budget={area:area.name,areaId:area.id,seconds:secondsOf(heading[2],heading[3]),assigned:0};
     budgets.push(budget);continue;
    }
+   const planned=line.match(plannedTask);
+   if(planned){
+    const [,link,value,unit,start,cycle,explicitArea]=planned;
+    const area=explicitArea?areas.find(item=>item.name.toLowerCase()===explicitArea.trim().toLowerCase()):budget;
+    if(!area)throw Error('Indica un’area valida sopra l’assegnazione o sulla stessa riga.');
+    const seconds=secondsOf(value,unit),minutes=seconds/60;
+    if(!Number.isInteger(minutes)||minutes>1439)throw Error('Usa una durata da 1 a 1439 minuti interi.');
+    if(!explicitArea)budget.assigned+=seconds;
+    const linkedNotes=noteLinks(link);
+    if(link&&!linkedNotes.length)throw Error('Wikilink non valido.');
+    slots.push({area:area.name||area.area,areaId:area.id||area.areaId,minutes,linkedNotes,start:start||null,
+     planned:true,sourceRow:index,...(cycle?{cycleMinutes:Number(cycle)}:{})});
+    continue;
+   }
    if(/^[^-].*?\s+\+\s*\d\d:\d\d\s*-/.test(line)){
     const links=line.match(/\[\[[^\[\]]+\]\]/g)||[];
     const range=line.replace(/\[\[[^\[\]]+\]\]/g,'').trim();
     for(const slot of parseQuick(range,areas))slots.push({...slot,linkedNotes:noteLinks(links.join(' '))});
+    continue;
+   }
+   if(/^[^-].*?\s+@.*?\s+\+\d\d:\d\d/.test(line)){
+    const links=line.match(/\[\[[^\[\]]+\]\]/g)||[];
+    for(const slot of parseQuick(line.replace(/\[\[[^\[\]]+\]\]/g,'').trim(),areas))
+     slots.push({...slot,linkedNotes:noteLinks(links.join(' ')),planned:true,sourceRow:index});
     continue;
    }
    const compact=line.match(compactTask);

@@ -59,185 +59,6 @@ function expandDailyLine(line) {
   return "- " + links.trim() + " " + duration2 + (count ? " = " + count : "") + (start ? " +" + start : "") + " @" + area;
 }
 
-// obsidian/notes-integration.js
-var wiki = /!?\[\[([^\]\n]+)\]\]/g;
-var markdown = /\[([^\]\n]+)\]\(([^)\n]+)\)/g;
-function noteLinks(description = "") {
-  const found = [], seen = /* @__PURE__ */ new Set();
-  const add = (target, label) => {
-    target = String(target || "").trim();
-    if (!target || /^(?:https?:|javascript:|data:|file:)/i.test(target)) return;
-    if (target.startsWith("obsidian://open?")) {
-      try {
-        const url = new URL(target);
-        target = url.searchParams.get("file") || "";
-      } catch {
-        return;
-      }
-    } else if (target.includes("://")) return;
-    if (!target) return;
-    const key2 = target.toLowerCase();
-    if (seen.has(key2)) return;
-    seen.add(key2);
-    found.push({ path: target, label: String(label || target).trim() || target });
-  };
-  for (const m of String(description).matchAll(wiki)) {
-    const [path, alias] = m[1].split("|");
-    add(path, alias || path);
-  }
-  for (const m of String(description).matchAll(markdown)) add(m[2], m[1]);
-  return found;
-}
-function appendNoteLink(description = "", path) {
-  path = String(path || "").trim();
-  if (!path || path.includes("]]") || path.includes("\n")) throw Error("Percorso nota non valido.");
-  if (noteLinks(description).some((link) => link.path.toLowerCase() === path.toLowerCase())) return String(description);
-  return String(description).trimEnd() + (String(description).trim() ? "\n" : "") + "- [[" + path + "]]";
-}
-
-// core/tempo-core.js
-var DEFAULTS = Object.freeze({ workMinutes: 25, breakEnabled: true });
-function localDateString(date = /* @__PURE__ */ new Date()) {
-  const y = date.getFullYear(), m = String(date.getMonth() + 1).padStart(2, "0"), d = String(date.getDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
-}
-function timeToMinutes(value) {
-  if (typeof value !== "string" || !/^([01]\d|2[0-3]):[0-5]\d$/.test(value)) return NaN;
-  const [h, m] = value.split(":").map(Number);
-  return h * 60 + m;
-}
-function dateTime(date, time2) {
-  const [y, mo, d] = date.split("-").map(Number), [h, mi] = time2.split(":").map(Number);
-  return new Date(y, mo - 1, d, h, mi, 0, 0);
-}
-function formatTime(date) {
-  return new Intl.DateTimeFormat("it-IT", { hour: "2-digit", minute: "2-digit" }).format(date);
-}
-function pauseMinutes(work) {
-  return work / 5;
-}
-function normalizeSession(session) {
-  if (!session || typeof session !== "object" || Array.isArray(session)) return session;
-  return { ...session, breakEnabled: session.breakEnabled !== void 0 ? Boolean(session.breakEnabled) : true };
-}
-function validSession(session) {
-  if (!session || typeof session.id !== "string" || !session.id.trim() || typeof session.title !== "string" || !session.title.trim() || typeof session.date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(session.date) || !(session.cycleMinutes !== void 0 && session.workMinutes === session.cycleMinutes * 5 / 6) && (!Number.isInteger(session.workMinutes) || session.workMinutes < 1 || session.workMinutes > 240)) return false;
-  if (session.cycleMinutes !== void 0 && (!Number.isInteger(session.cycleMinutes) || session.cycleMinutes < 1 || session.cycleMinutes > 1439 || session.cycleMinutes <= session.workMinutes || session.customBreakMinutes !== void 0)) return false;
-  const [year, month, day] = session.date.split("-").map(Number);
-  const date = new Date(year, month - 1, day);
-  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return false;
-  const start = timeToMinutes(session.start), end = timeToMinutes(session.end);
-  if (!Number.isFinite(start) || !Number.isFinite(end)) return false;
-  if (session.customBreakMinutes !== void 0 && (!Number.isInteger(session.customBreakMinutes) || session.customBreakMinutes < 0 || session.customBreakMinutes > (sessionBounds(session).end - sessionBounds(session).start) / 6e4)) return false;
-  return true;
-}
-function sessionBounds(session) {
-  if (session.timerStartedAt && session.timerEndsAt) {
-    const start2 = new Date(session.timerStartedAt), end2 = new Date(session.timerEndsAt);
-    if (Number.isFinite(+start2) && Number.isFinite(+end2) && end2 > start2) return { start: start2, end: end2 };
-  }
-  const start = dateTime(session.date, session.start);
-  const end = dateTime(session.date, session.end);
-  if (timeToMinutes(session.end) <= timeToMinutes(session.start)) end.setDate(end.getDate() + 1);
-  return { start, end };
-}
-function getSessionStatus(session, now = /* @__PURE__ */ new Date()) {
-  const { start, end } = sessionBounds(session);
-  if (now < start) return "upcoming";
-  if (now >= end) return "finished";
-  return "active";
-}
-function sortSessions(sessions) {
-  return [...sessions].sort((a, b) => sessionBounds(a).start - sessionBounds(b).start);
-}
-function getActiveSession(sessions, now = /* @__PURE__ */ new Date()) {
-  return sortSessions(sessions.filter((session) => getSessionStatus(session, now) === "active"))[0] || null;
-}
-function getNextSession(sessions, now = /* @__PURE__ */ new Date()) {
-  return sortSessions(sessions.filter((session) => getSessionStatus(session, now) === "upcoming"))[0] || null;
-}
-function getPhase(session, now = /* @__PURE__ */ new Date()) {
-  const { start, end } = sessionBounds(session);
-  if (session.customBreakMinutes !== void 0) {
-    const boundary = new Date(+end - session.customBreakMinutes * 6e4);
-    const isBreak = session.customBreakMinutes > 0 && now >= boundary;
-    const phaseStart2 = isBreak ? boundary : start, phaseEnd2 = isBreak ? end : boundary;
-    return {
-      kind: isBreak ? "break" : "work",
-      label: isBreak ? "Pausa" : "Concentrazione",
-      start: phaseStart2,
-      end: phaseEnd2,
-      remaining: Math.max(0, Math.ceil((phaseEnd2 - now) / 1e3)),
-      progress: Math.min(100, Math.max(0, (now - phaseStart2) / Math.max(1, phaseEnd2 - phaseStart2) * 100)),
-      sessionEnd: end,
-      totalRemaining: Math.max(0, Math.ceil((end - now) / 1e3))
-    };
-  }
-  const workMs = Math.round(session.registerMinutes ? (end - start) * 5 / 6 : session.workMinutes * 6e4);
-  const elapsed = Math.max(0, now - start);
-  const remainingSession = Math.max(0, end - now);
-  if (!session.breakEnabled) {
-    return {
-      kind: "work",
-      label: "Concentrazione",
-      start,
-      end,
-      remaining: Math.max(0, Math.ceil(remainingSession / 1e3)),
-      progress: Math.min(100, elapsed / Math.max(1, end - start) * 100),
-      sessionEnd: end,
-      totalRemaining: Math.ceil(remainingSession / 1e3)
-    };
-  }
-  const breakMs = session.registerMinutes ? end - start - workMs : Math.round((session.cycleMinutes !== void 0 ? session.cycleMinutes - session.workMinutes : pauseMinutes(session.workMinutes)) * 6e4);
-  const cycleMs = workMs + breakMs;
-  const cycleIndex = Math.floor(elapsed / cycleMs);
-  const within = elapsed % cycleMs;
-  const isWork = within < workMs;
-  const phaseDuration = isWork ? workMs : breakMs;
-  const phaseElapsed = isWork ? within : within - workMs;
-  const phaseStart = new Date(start.getTime() + cycleIndex * cycleMs + (isWork ? 0 : workMs));
-  const theoreticalEnd = new Date(phaseStart.getTime() + phaseDuration);
-  const phaseEnd = theoreticalEnd < end ? theoreticalEnd : end;
-  return {
-    kind: isWork ? "work" : "break",
-    label: isWork ? "Concentrazione" : "Pausa",
-    start: phaseStart,
-    end: phaseEnd,
-    remaining: Math.max(0, Math.ceil((phaseEnd - now) / 1e3)),
-    progress: Math.min(100, Math.max(0, phaseElapsed / phaseDuration * 100)),
-    sessionEnd: end,
-    totalRemaining: Math.ceil(remainingSession / 1e3)
-  };
-}
-function mmss(seconds) {
-  const total = Math.max(0, Math.floor(Number(seconds) || 0));
-  const minutes = Math.floor(total / 60), remainder = total % 60;
-  return `${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`;
-}
-function sessionsOverlap(a, b) {
-  const aa = sessionBounds(a), bb = sessionBounds(b);
-  return aa.start < bb.end && aa.end > bb.start;
-}
-function hasSessionOverlaps(sessions) {
-  const sorted = sortSessions(sessions);
-  let furthestEnd = -Infinity;
-  for (const session of sorted) {
-    const { start, end } = sessionBounds(session);
-    if (start.getTime() < furthestEnd) return true;
-    furthestEnd = Math.max(furthestEnd, end.getTime());
-  }
-  return false;
-}
-function getAmbientFocusMode(sessions, now = /* @__PURE__ */ new Date()) {
-  const active = getActiveSession(sessions, now);
-  if (active) {
-    const phase = getPhase(active, now);
-    if (phase.kind === "work") return "focus";
-    if (phase.end.getTime() < sessionBounds(active).end.getTime()) return "waiting";
-  }
-  return getNextSession(sessions, now) ? "waiting" : "finished";
-}
-
 // core/tempo-estimates.js
 var activityStart = /^[ \t]*-[ \t]+\[([ x])\](?=[ \t]+@)/im;
 var isActivitySource = (source) => activityStart.test(source);
@@ -389,6 +210,149 @@ function normalizeAreaLinks(data, areas) {
     });
   }
   return { areas: normalized, ...linked };
+}
+
+// core/tempo-core.js
+var DEFAULTS = Object.freeze({ workMinutes: 25, breakEnabled: true });
+function localDateString(date = /* @__PURE__ */ new Date()) {
+  const y = date.getFullYear(), m = String(date.getMonth() + 1).padStart(2, "0"), d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+function timeToMinutes(value) {
+  if (typeof value !== "string" || !/^([01]\d|2[0-3]):[0-5]\d$/.test(value)) return NaN;
+  const [h, m] = value.split(":").map(Number);
+  return h * 60 + m;
+}
+function dateTime(date, time2) {
+  const [y, mo, d] = date.split("-").map(Number), [h, mi] = time2.split(":").map(Number);
+  return new Date(y, mo - 1, d, h, mi, 0, 0);
+}
+function formatTime(date) {
+  return new Intl.DateTimeFormat("it-IT", { hour: "2-digit", minute: "2-digit" }).format(date);
+}
+function pauseMinutes(work) {
+  return work / 5;
+}
+function normalizeSession(session) {
+  if (!session || typeof session !== "object" || Array.isArray(session)) return session;
+  return { ...session, breakEnabled: session.breakEnabled !== void 0 ? Boolean(session.breakEnabled) : true };
+}
+function validSession(session) {
+  if (!session || typeof session.id !== "string" || !session.id.trim() || typeof session.title !== "string" || !session.title.trim() || typeof session.date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(session.date) || !(session.cycleMinutes !== void 0 && session.workMinutes === session.cycleMinutes * 5 / 6) && (!Number.isInteger(session.workMinutes) || session.workMinutes < 1 || session.workMinutes > 240)) return false;
+  if (session.cycleMinutes !== void 0 && (!Number.isInteger(session.cycleMinutes) || session.cycleMinutes < 1 || session.cycleMinutes > 1439 || session.cycleMinutes <= session.workMinutes || session.customBreakMinutes !== void 0)) return false;
+  const [year, month, day] = session.date.split("-").map(Number);
+  const date = new Date(year, month - 1, day);
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return false;
+  const start = timeToMinutes(session.start), end = timeToMinutes(session.end);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return false;
+  if (session.customBreakMinutes !== void 0 && (!Number.isInteger(session.customBreakMinutes) || session.customBreakMinutes < 0 || session.customBreakMinutes > (sessionBounds(session).end - sessionBounds(session).start) / 6e4)) return false;
+  return true;
+}
+function sessionBounds(session) {
+  if (session.timerStartedAt && session.timerEndsAt) {
+    const start2 = new Date(session.timerStartedAt), end2 = new Date(session.timerEndsAt);
+    if (Number.isFinite(+start2) && Number.isFinite(+end2) && end2 > start2) return { start: start2, end: end2 };
+  }
+  const start = dateTime(session.date, session.start);
+  const end = dateTime(session.date, session.end);
+  if (timeToMinutes(session.end) <= timeToMinutes(session.start)) end.setDate(end.getDate() + 1);
+  return { start, end };
+}
+function getSessionStatus(session, now = /* @__PURE__ */ new Date()) {
+  const { start, end } = sessionBounds(session);
+  if (now < start) return "upcoming";
+  if (now >= end) return "finished";
+  return "active";
+}
+function sortSessions(sessions) {
+  return [...sessions].sort((a, b) => sessionBounds(a).start - sessionBounds(b).start);
+}
+function getActiveSession(sessions, now = /* @__PURE__ */ new Date()) {
+  return sortSessions(sessions.filter((session) => getSessionStatus(session, now) === "active"))[0] || null;
+}
+function getNextSession(sessions, now = /* @__PURE__ */ new Date()) {
+  return sortSessions(sessions.filter((session) => getSessionStatus(session, now) === "upcoming"))[0] || null;
+}
+function getPhase(session, now = /* @__PURE__ */ new Date()) {
+  const { start, end } = sessionBounds(session);
+  if (session.customBreakMinutes !== void 0) {
+    const boundary = new Date(+end - session.customBreakMinutes * 6e4);
+    const isBreak = session.customBreakMinutes > 0 && now >= boundary;
+    const phaseStart2 = isBreak ? boundary : start, phaseEnd2 = isBreak ? end : boundary;
+    return {
+      kind: isBreak ? "break" : "work",
+      label: isBreak ? "Pausa" : "Concentrazione",
+      start: phaseStart2,
+      end: phaseEnd2,
+      remaining: Math.max(0, Math.ceil((phaseEnd2 - now) / 1e3)),
+      progress: Math.min(100, Math.max(0, (now - phaseStart2) / Math.max(1, phaseEnd2 - phaseStart2) * 100)),
+      sessionEnd: end,
+      totalRemaining: Math.max(0, Math.ceil((end - now) / 1e3))
+    };
+  }
+  const workMs = Math.round(session.registerMinutes ? (end - start) * 5 / 6 : session.workMinutes * 6e4);
+  const elapsed = Math.max(0, now - start);
+  const remainingSession = Math.max(0, end - now);
+  if (!session.breakEnabled) {
+    return {
+      kind: "work",
+      label: "Concentrazione",
+      start,
+      end,
+      remaining: Math.max(0, Math.ceil(remainingSession / 1e3)),
+      progress: Math.min(100, elapsed / Math.max(1, end - start) * 100),
+      sessionEnd: end,
+      totalRemaining: Math.ceil(remainingSession / 1e3)
+    };
+  }
+  const breakMs = session.registerMinutes ? end - start - workMs : Math.round((session.cycleMinutes !== void 0 ? session.cycleMinutes - session.workMinutes : pauseMinutes(session.workMinutes)) * 6e4);
+  const cycleMs = workMs + breakMs;
+  const cycleIndex = Math.floor(elapsed / cycleMs);
+  const within = elapsed % cycleMs;
+  const isWork = within < workMs;
+  const phaseDuration = isWork ? workMs : breakMs;
+  const phaseElapsed = isWork ? within : within - workMs;
+  const phaseStart = new Date(start.getTime() + cycleIndex * cycleMs + (isWork ? 0 : workMs));
+  const theoreticalEnd = new Date(phaseStart.getTime() + phaseDuration);
+  const phaseEnd = theoreticalEnd < end ? theoreticalEnd : end;
+  return {
+    kind: isWork ? "work" : "break",
+    label: isWork ? "Concentrazione" : "Pausa",
+    start: phaseStart,
+    end: phaseEnd,
+    remaining: Math.max(0, Math.ceil((phaseEnd - now) / 1e3)),
+    progress: Math.min(100, Math.max(0, phaseElapsed / phaseDuration * 100)),
+    sessionEnd: end,
+    totalRemaining: Math.ceil(remainingSession / 1e3)
+  };
+}
+function mmss(seconds) {
+  const total = Math.max(0, Math.floor(Number(seconds) || 0));
+  const minutes = Math.floor(total / 60), remainder = total % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`;
+}
+function sessionsOverlap(a, b) {
+  const aa = sessionBounds(a), bb = sessionBounds(b);
+  return aa.start < bb.end && aa.end > bb.start;
+}
+function hasSessionOverlaps(sessions) {
+  const sorted = sortSessions(sessions);
+  let furthestEnd = -Infinity;
+  for (const session of sorted) {
+    const { start, end } = sessionBounds(session);
+    if (start.getTime() < furthestEnd) return true;
+    furthestEnd = Math.max(furthestEnd, end.getTime());
+  }
+  return false;
+}
+function getAmbientFocusMode(sessions, now = /* @__PURE__ */ new Date()) {
+  const active = getActiveSession(sessions, now);
+  if (active) {
+    const phase = getPhase(active, now);
+    if (phase.kind === "work") return "focus";
+    if (phase.end.getTime() < sessionBounds(active).end.getTime()) return "waiting";
+  }
+  return getNextSession(sessions, now) ? "waiting" : "finished";
 }
 
 // core/tempo-simple.js
@@ -590,17 +554,54 @@ function measuredFocus(session, from, to) {
   return total / 1e3;
 }
 
+// obsidian/notes-integration.js
+var wiki = /!?\[\[([^\]\n]+)\]\]/g;
+var markdown = /\[([^\]\n]+)\]\(([^)\n]+)\)/g;
+function noteLinks(description = "") {
+  const found = [], seen = /* @__PURE__ */ new Set();
+  const add = (target, label) => {
+    target = String(target || "").trim();
+    if (!target || /^(?:https?:|javascript:|data:|file:)/i.test(target)) return;
+    if (target.startsWith("obsidian://open?")) {
+      try {
+        const url = new URL(target);
+        target = url.searchParams.get("file") || "";
+      } catch {
+        return;
+      }
+    } else if (target.includes("://")) return;
+    if (!target) return;
+    const key2 = target.toLowerCase();
+    if (seen.has(key2)) return;
+    seen.add(key2);
+    found.push({ path: target, label: String(label || target).trim() || target });
+  };
+  for (const m of String(description).matchAll(wiki)) {
+    const [path, alias] = m[1].split("|");
+    add(path, alias || path);
+  }
+  for (const m of String(description).matchAll(markdown)) add(m[2], m[1]);
+  return found;
+}
+function appendNoteLink(description = "", path) {
+  path = String(path || "").trim();
+  if (!path || path.includes("]]") || path.includes("\n")) throw Error("Percorso nota non valido.");
+  if (noteLinks(description).some((link) => link.path.toLowerCase() === path.toLowerCase())) return String(description);
+  return String(description).trimEnd() + (String(description).trim() ? "\n" : "") + "- [[" + path + "]]";
+}
+
 // obsidian/area-register.js
 var quantity = "(\\d+(?:[.,]\\d+)?)([hms]?)";
 var time = "((?:[01]\\d|2[0-3]):[0-5]\\d)";
 var areaLine = new RegExp("^(.+?)\\s+@" + quantity + "$", "i");
 var taskLine = new RegExp("^-\\s*(\\[\\[[^\\]\\[]+\\]\\])\\s+@" + quantity + "\\s*=\\s*(\\d+)(?:\\s+\\+" + time + ")?$", "i");
+var plannedTask = new RegExp("^-\\s*(?:(\\[\\[[^\\]\\[]+\\]\\])\\s+)?@" + quantity + "(?:\\s+\\+" + time + ")?(?:\\s+-(\\d+)m)?(?:\\s+@(.+?))?$", "i");
 var compactTask = /^-\s*((?:\[\[[^\[\]]+\]\]\s+)+)(\d+(?:[.,]\d+)?)([hms])(?:\s*=\s*(\d+))?(?:\s+\+((?:[01]\d|2[0-3]):[0-5]\d))?\s+@(.+?)$/i;
 var possibleTask = new RegExp("^-?\\s*(\\[\\[[^\\]\\[]+\\]\\])\\s*[@*]?\\s*" + quantity + "\\s*=?\\s+(\\d+)(?:\\s*\\+?\\s*" + time + ")?$", "i");
 var possibleArea = new RegExp("^(.+?)\\s+[@*]?" + quantity + "$", "i");
 var isAreaRegister = (source) => source?.split(/\r?\n/).some((line) => {
-  const text = expandDailyLine(line.trim());
-  return areaLine.test(text) || /^\s*-?\s*\[\[.*\]\]\s+[@*\d]/.test(text) || !/[+=]/.test(text) && !text.startsWith("@") && possibleArea.test(text);
+  const text = expandDailyLine(line.replace(/\s+<!-- tempvs-allocation:[\w-]+ -->\s*$/, "").trim());
+  return areaLine.test(text) || plannedTask.test(text) || /^\s*-?\s*\[\[.*\]\]\s+[@*\d]/.test(text) || !/[+=]/.test(text) && !text.startsWith("@") && possibleArea.test(text);
 });
 function readableDuration(seconds) {
   const h = Math.floor(seconds / 3600), m = Math.floor(seconds % 3600 / 60), s = Math.round(seconds % 60);
@@ -623,7 +624,7 @@ function parseAreaRegister(source, areas) {
   const budgets = [], slots = [];
   let budget;
   for (const [index, raw] of source.split(/\r?\n/).entries()) {
-    const line = expandDailyLine(raw.trim());
+    const line = expandDailyLine(raw.replace(/\s+<!-- tempvs-allocation:[\w-]+ -->\s*$/, "").trim());
     if (!line || /^date:\s*\d{4}-\d\d-\d\d$/i.test(line) || /^<!-- tempvs-block:[\w-]+ -->$/.test(line)) continue;
     try {
       const heading = line.match(areaLine);
@@ -634,10 +635,38 @@ function parseAreaRegister(source, areas) {
         budgets.push(budget);
         continue;
       }
+      const planned = line.match(plannedTask);
+      if (planned) {
+        const [, link2, value2, unit2, start2, cycle, explicitArea] = planned;
+        const area2 = explicitArea ? areas.find((item) => item.name.toLowerCase() === explicitArea.trim().toLowerCase()) : budget;
+        if (!area2) throw Error("Indica un\u2019area valida sopra l\u2019assegnazione o sulla stessa riga.");
+        const seconds2 = secondsOf(value2, unit2), minutes = seconds2 / 60;
+        if (!Number.isInteger(minutes) || minutes > 1439) throw Error("Usa una durata da 1 a 1439 minuti interi.");
+        if (!explicitArea) budget.assigned += seconds2;
+        const linkedNotes2 = noteLinks(link2);
+        if (link2 && !linkedNotes2.length) throw Error("Wikilink non valido.");
+        slots.push({
+          area: area2.name || area2.area,
+          areaId: area2.id || area2.areaId,
+          minutes,
+          linkedNotes: linkedNotes2,
+          start: start2 || null,
+          planned: true,
+          sourceRow: index,
+          ...cycle ? { cycleMinutes: Number(cycle) } : {}
+        });
+        continue;
+      }
       if (/^[^-].*?\s+\+\s*\d\d:\d\d\s*-/.test(line)) {
         const links = line.match(/\[\[[^\[\]]+\]\]/g) || [];
         const range2 = line.replace(/\[\[[^\[\]]+\]\]/g, "").trim();
         for (const slot of parseQuick(range2, areas)) slots.push({ ...slot, linkedNotes: noteLinks(links.join(" ")) });
+        continue;
+      }
+      if (/^[^-].*?\s+@.*?\s+\+\d\d:\d\d/.test(line)) {
+        const links = line.match(/\[\[[^\[\]]+\]\]/g) || [];
+        for (const slot of parseQuick(line.replace(/\[\[[^\[\]]+\]\]/g, "").trim(), areas))
+          slots.push({ ...slot, linkedNotes: noteLinks(links.join(" ")), planned: true, sourceRow: index });
         continue;
       }
       const compact = line.match(compactTask);
@@ -725,7 +754,8 @@ function registerPlan({ source, date, blockId, state, id, planningKey: planningK
     const dayText = localDateString(start || day), startTime = start && clock2(start);
     const exact = (s) => s.date === dayText && +sessionBounds(s).start === +start && s.areaId === slot.areaId && sessionBounds(s).end - sessionBounds(s).start === Math.round(slot.minutes * 6e4);
     const match = slot.start && state.sessions.find((s) => !s.manualSuperseded && !s.dailyRetired && !claimed.has(s.id) && (!s.noteBlockId || s.noteBlockId === blockId) && exact(s));
-    const old = previous.find((h) => h.slotIndex === index);
+    const sameNote = (h) => h.area === slot.area && (h.linkedNotes?.[0]?.path || "") === (slot.linkedNotes?.[0]?.path || "");
+    const old = slot.planned ? previous.find((h) => h.planned && h.slotIndex === index && !claimed.has(h.sessionId) && sameNote(h)) || previous.find((h) => h.planned && !claimed.has(h.sessionId) && sameNote(h)) : previous.find((h) => h.slotIndex === index && !h.planned);
     const sessionId = match?.id || (old && !claimed.has(old.sessionId) ? old.sessionId : id());
     claimed.add(sessionId);
     const record = {
@@ -740,14 +770,21 @@ function registerPlan({ source, date, blockId, state, id, planningKey: planningK
       areaId: slot.areaId,
       start: startTime && start.getSeconds() ? startTime + ":" + String(start.getSeconds()).padStart(2, "0") : startTime,
       minutes: slot.minutes,
-      measured: true,
-      linkedNotes: slot.linkedNotes
+      measured: !slot.planned,
+      linkedNotes: slot.linkedNotes,
+      ...slot.planned ? { planned: true, sourceRow: slot.sourceRow } : {}
     };
     records.push(record);
+    const chosenCycle = slot.cycleMinutes !== void 0 ? grossCycle(slot.cycleMinutes) : null;
     if (slot.start) {
       const end = new Date(+start + Math.round(slot.minutes * 6e4));
       const precise = { timerStartedAt: start.toISOString(), timerEndsAt: end.toISOString() };
       const cycle = Number.isInteger(slot.minutes) && slot.minutes < 1440 ? { cycleMinutes: slot.minutes, workMinutes: slot.minutes * 5 / 6 } : { workMinutes: 25 };
+      const plannedCycle = slot.planned ? chosenCycle ? { cycleMinutes: slot.cycleMinutes, workMinutes: chosenCycle.focusMinutes, breakEnabled: true } : {
+        workMinutes: slot.focusMinutes ?? state.defaults.workMinutes,
+        breakEnabled: state.defaults.breakEnabled,
+        ...slot.customBreakMinutes !== void 0 ? { customBreakMinutes: slot.customBreakMinutes } : {}
+      } : null;
       sessions.push({
         id: sessionId,
         title: slot.area,
@@ -757,11 +794,10 @@ function registerPlan({ source, date, blockId, state, id, planningKey: planningK
         start: startTime,
         end: clock2(end),
         ...precise,
-        ...cycle,
         breakEnabled: true,
         noteBlockId: blockId,
         linkedNotes: slot.linkedNotes,
-        registerMinutes: slot.minutes
+        ...plannedCycle ? { ...plannedCycle, registerPlanned: true } : { ...cycle, registerMinutes: slot.minutes }
       });
     }
   }
@@ -773,7 +809,15 @@ function registerPlan({ source, date, blockId, state, id, planningKey: planningK
 function applyRegister(state, plan) {
   const replaced = /* @__PURE__ */ new Set([...plan.removeIds, ...plan.records.map((r) => r.sessionId)]);
   const existing = new Map(state.sessions.map((s) => [s.id, s]));
-  state.sessions = state.sessions.filter((s) => !replaced.has(s.id)).concat(plan.sessions.map((s) => ({ ...s, actualSeconds: existing.get(s.id)?.actualSeconds || 0 })));
+  state.sessions = state.sessions.filter((s) => !replaced.has(s.id)).concat(plan.sessions.map((s) => {
+    const old = existing.get(s.id);
+    const sameTime = old?.timerStartedAt === s.timerStartedAt && old?.timerEndsAt === s.timerEndsAt;
+    return {
+      ...s,
+      actualSeconds: old?.actualSeconds || 0,
+      ...s.registerPlanned && sameTime ? { finished: old.finished, paused: old.paused, noteWork: old.noteWork } : {}
+    };
+  }));
   const obsolete = state.history.filter((h) => (h.registerBlock === plan.blockId || replaced.has(h.sessionId)) && !plan.records.some((r) => r.sessionId === h.sessionId)).map((h) => h.sessionId);
   state.history = state.history.filter((h) => h.registerBlock !== plan.blockId && !replaced.has(h.sessionId)).concat(plan.records);
   for (const [key2, removed, live] of [["history", obsolete, plan.records.map((r) => r.sessionId)], ["sessions", plan.removeIds, plan.sessions.map((s) => s.id)]]) {
@@ -782,7 +826,7 @@ function applyRegister(state, plan) {
 }
 function creditedWork(state, resolve, bindingPath, byArea, { includePlannedIntervals = true } = {}) {
   const totals = /* @__PURE__ */ new Map(), records = new Map(state.history.map((h) => [h.sessionId, h]));
-  for (const s of state.sessions) if (!records.get(s.id)?.registerBlock) records.set(s.id, s);
+  for (const s of state.sessions) if (!records.get(s.id)?.registerBlock || records.get(s.id)?.planned) records.set(s.id, s);
   const estimates = state.defaults.simple.noteEstimates || {};
   const add = (path, seconds, source, area) => {
     if (!path || !(seconds > 0)) return;
@@ -795,10 +839,10 @@ function creditedWork(state, resolve, bindingPath, byArea, { includePlannedInter
     totals.set(key2, (totals.get(key2) || 0) + seconds);
   };
   for (const r of records.values()) {
-    if (r.dailyRetired || r.manualSuperseded) continue;
+    if (r.planned || r.dailyRetired || r.manualSuperseded) continue;
     const source = bindingPath(r.noteBlockId) || "";
     const linked = r.linkedNotes?.[0]?.path || estimates[r.noteEstimateId]?.path;
-    if (r.registerBlock || includePlannedIntervals && r.noteBlockId && r.start && r.end) {
+    if (r.registerBlock || includePlannedIntervals && !r.registerPlanned && r.noteBlockId && r.start && r.end) {
       add(linked, r.registerBlock ? r.minutes * 60 : (sessionBounds(r).end - sessionBounds(r).start) / 1e3, source, r.area);
     } else {
       let allocated = 0;
@@ -1543,15 +1587,38 @@ function readAllocations(block, file, date, areas) {
   }
   return entries;
 }
-function allocationRow({ area, minutes, cycleMinutes, note, id }) {
-  return area + " @" + minutes + "m" + (cycleMinutes ? " -" + cycleMinutes + "m" : "") + (note ? " [[" + note.path + (note.label && note.label !== note.path ? "|" + note.label : "") + "]]" : "") + (id ? " <!-- tempvs-allocation:" + id + " -->" : "");
+function mergeAllocationBlocks(markdown2, file, date, areas) {
+  const legacy = allocationBlock(markdown2);
+  if (!legacy) return markdown2;
+  const entries = readAllocations(legacy, file, date, areas);
+  if (entries.some((entry) => entry.focusMinutes !== void 0 || entry.customBreakMinutes !== void 0))
+    throw Error("Il blocco precedente contiene impostazioni di focus o pausa personalizzate.");
+  const lines = markdown2.match(/[^\n]*\n|[^\n]+$/g) || [];
+  const afterClosing = markdown2.indexOf("\n", legacy.end);
+  const beforeOpening = lines.slice(0, legacy.lineStart).join("").length;
+  const clean = markdown2.slice(0, beforeOpening) + markdown2.slice(afterClosing < 0 ? markdown2.length : afterClosing + 1);
+  return entries.reduce((result, { id, ...entry }) => !id.includes(":") && findDailyBlocks(result)[0]?.source.includes("<!-- tempvs-allocation:" + id + " -->") ? result : appendUnifiedAllocation(result, { ...entry, id: id.includes(":") ? void 0 : id }), clean);
 }
-function appendAllocation(markdown2, row2) {
-  const block = allocationBlock(markdown2);
-  if (block) return replaceDailyBlock(markdown2, block, [block.source, row2].filter(Boolean).join("\n"));
+function unifiedAllocationRow({ area, minutes, cycleMinutes, note, id, start }, explicitArea = true) {
+  const wiki2 = note ? "[[" + note.path + (note.label && note.label !== note.path ? "|" + note.label : "") + "]] " : "";
+  return "- " + wiki2 + "@" + minutes + "m" + (start ? " +" + start : "") + (cycleMinutes ? " -" + cycleMinutes + "m" : "") + (explicitArea ? " @" + area : "") + (id ? " <!-- tempvs-allocation:" + id + " -->" : "");
+}
+function appendUnifiedAllocation(markdown2, allocation) {
+  const blocks = findDailyBlocks(markdown2, true);
+  if (blocks.length !== findDailyBlocks(markdown2).length || blocks.length > 1)
+    throw Error("Usa un solo blocco TEMPVS chiuso nella nota giornaliera.");
+  const block = blocks[0];
+  const lines = block?.source.split(/\r?\n/) || [];
+  const heading = (line) => line.trim().match(/^([^\[+@=-][^\[+@=]*?)\s+@\d+(?:[.,]\d+)?[hms]?$/i)?.[1];
+  const at = lines.findIndex((line) => heading(line)?.toLowerCase() === allocation.area.toLowerCase());
+  let end = at + 1;
+  while (at >= 0 && end < lines.length && !heading(lines[end])) end++;
+  lines.splice(at >= 0 ? end : lines.length, 0, unifiedAllocationRow(allocation, at < 0));
+  const source = lines.join("\n");
+  if (block) return replaceDailyBlock(markdown2, block, source);
   const nl = markdown2.includes("\r\n") ? "\r\n" : "\n";
-  const next = (markdown2 ? markdown2 + (markdown2.endsWith(nl) ? nl : nl + nl) : "") + "```tempvs-assegnazioni" + nl + row2 + nl + "```" + nl;
-  if (!allocationBlock(next)) throw Error("Chiudi il blocco di codice aperto nella nota.");
+  const next = (markdown2 ? markdown2 + (markdown2.endsWith(nl) ? nl : nl + nl) : "") + "```TEMPVS" + nl + source + nl + "```" + nl;
+  if (!findDailyBlocks(next).length) throw Error("Chiudi il blocco di codice aperto nella nota.");
   return next;
 }
 
@@ -1853,11 +1920,11 @@ var DailyBlocks = class {
       this.plugin.refresh?.(true);
   }
   async writeAllocation(allocation) {
-    await this.queue(async () => {
+    const file = await this.queue(async () => {
       const { vault } = this.plugin.app;
       let markdown2;
-      let { file, path, settings } = this.dailyLocation(allocation.date);
-      if (!file) {
+      let { file: file2, path, settings } = this.dailyLocation(allocation.date);
+      if (!file2) {
         const folders = path.split("/").slice(0, -1);
         for (let i = 1; i <= folders.length; i++) {
           const folder = folders.slice(0, i).join("/");
@@ -1868,17 +1935,59 @@ var DailyBlocks = class {
         const day = (0, import_obsidian4.moment)?.(allocation.date, "YYYY-MM-DD", true);
         const title = path.split("/").at(-1).slice(0, -3);
         const body = initial.replace(/{{title}}/gi, () => title).replace(/{{date(?::([^}]+))?}}/gi, (_all, format) => day?.format?.(format || "YYYY-MM-DD") || allocation.date).replace(/{{time(?::([^}]+))?}}/gi, (all, format) => (0, import_obsidian4.moment)?.()?.format?.(format || "HH:mm") || all);
-        markdown2 = appendAllocation(body, allocationRow(allocation));
-        file = await vault.create(path, markdown2);
+        markdown2 = appendUnifiedAllocation(body, allocation);
+        this.validateAllocationSource(markdown2, allocation.date, path);
+        file2 = await vault.create(path, markdown2);
       } else {
-        const before = markdown2 = await this.readMarkdown(file);
-        const entries = readAllocations(allocationBlock(before), file, allocation.date, this.plugin.state.defaults.simple.areas);
-        if (!allocation.id || !entries.some((entry) => entry.id === allocation.id)) {
-          markdown2 = appendAllocation(before, allocationRow(allocation));
-          await this.replaceAllocationText(file, before, markdown2);
+        const before = await this.readMarkdown(file2);
+        if (!allocation.id || !findDailyBlocks(before)[0]?.source.includes("<!-- tempvs-allocation:" + allocation.id + " -->")) {
+          markdown2 = appendUnifiedAllocation(before, allocation);
+          this.validateAllocationSource(markdown2, allocation.date, file2.path);
+          await this.replaceAllocationText(file2, before, markdown2);
         }
       }
-      this.cacheAllocations(allocation.date, file, markdown2);
+      return file2;
+    });
+    try {
+      await this.syncFile(file.path);
+    } catch (error) {
+      this.schedule(file.path);
+      new import_obsidian4.Notice("Assegnazione salvata. Sincronizzazione TEMPVS: " + error.message);
+    }
+  }
+  validateAllocationSource(markdown2, date, path) {
+    const block = findDailyBlocks(markdown2)[0];
+    const blockId = this.bindingId(path) || blockIdentity(block.source) || uid2();
+    this.validateBinding(blockId, path, date);
+    prepareDailyPlan({
+      source: block.source,
+      date,
+      blockId,
+      state: this.plugin.state,
+      previousSource: this.bindings[blockId]?.source,
+      protectedBlockIds: this.protectedBlocks(blockId)
+    });
+  }
+  updateUnifiedAllocation(entry, start) {
+    return this.queue(async () => {
+      const context = await this.context(entry.file.path);
+      const blockId = this.bindingId(entry.file.path);
+      const lines = context?.block.source.split(/\r?\n/);
+      if (context?.date !== entry.date || !blockId || lines?.[entry.index] !== entry.raw)
+        throw Error("L\u2019assegnazione \xE8 cambiata. Riapri la giornata e riprova.");
+      if (start) lines[entry.index] = entry.raw.replace(/^(\s*-\s*(?:\[\[[^\]\[]+\]\]\s+)?@\d+(?:[.,]\d+)?[hms]?)(?=\s|$)/i, "$1 +" + start);
+      else lines.splice(entry.index, 1);
+      const source = lines.join("\n");
+      const plan = prepareDailyPlan({
+        source,
+        date: entry.date,
+        blockId,
+        state: this.plugin.state,
+        previousSource: context.block.source,
+        protectedBlockIds: this.protectedBlocks(blockId)
+      });
+      await this.commit({ ...context, ...plan, originalSource: context.block.source, preserveSource: true });
+      this.plugin.refresh?.(true);
     });
   }
   async replaceAllocationText(file, before, after) {
@@ -1910,6 +2019,17 @@ var DailyBlocks = class {
       this.cacheAllocations(date, file, after);
     });
     if (commit) await this.archiveChanged();
+  }
+  async migrateAllocationBlock(file) {
+    const before = await this.readMarkdown(file);
+    if (!/tempvs-assegnazioni/i.test(before) || !allocationBlock(before)) return;
+    const context = await this.context(file.path);
+    const date = context?.date || this.panelDay(file);
+    if (!date || context?.kind) return;
+    const after = mergeAllocationBlocks(before, file, date, this.plugin.state.defaults.simple.areas);
+    if (before === after) return;
+    if (findDailyBlocks(after).length) this.validateAllocationSource(after, date, file.path);
+    await this.replaceAllocationText(file, before, after);
   }
   async migrateAllocations() {
     for (const entry of this.plugin.allocations || []) {
@@ -2082,6 +2202,11 @@ var DailyBlocks = class {
     await this.queue(() => this.rewriteReferences(move));
     for (const file of files) {
       if (this.destroyed) return;
+      try {
+        await this.migrateAllocationBlock(file);
+      } catch (error) {
+        new import_obsidian4.Notice("TEMPVS: blocco precedente conservato in " + file.path + ". " + error.message);
+      }
       try {
         await this.syncFile(file.path, { force: true });
       } catch (error) {
@@ -2295,7 +2420,7 @@ var DailyBlocks = class {
     this.validateBinding(prepared.blockId, prepared.file.path, prepared.date);
     const newIds = prepared.sessions.filter((s) => !this.plugin.state.sessions.some((current) => current.id === s.id)).map((s) => s.id);
     const fresh = prepareDailyPlan({ source: prepared.source, date: prepared.date, blockId: prepared.blockId, previousSource: prepared.previousSource, protectedBlockIds: prepared.protectedBlockIds, state: this.plugin.state, id: () => newIds.shift() || uid2() });
-    const body = prepared.keepSource || fresh.records ? plain(prepared.source) : serializeDailyPlan(fresh.sessions, prepared.date, prepared.source);
+    const body = prepared.keepSource || prepared.preserveSource || fresh.records ? plain(prepared.source) : serializeDailyPlan(fresh.sessions, prepared.date, prepared.source);
     const canonical = explicitDay(prepared.originalSource) && !explicitDay(body) ? "date: " + prepared.date + "\n" + body : body;
     const previousBinding = this.bindings[prepared.blockId];
     this.applying = true;
@@ -4104,7 +4229,7 @@ var TempvsView = class extends import_obsidian6.ItemView {
     const focusedTime = list.ownerDocument?.activeElement?.dataset?.allocation;
     list.empty();
     const now = /* @__PURE__ */ new Date();
-    const registered = plugin.state.history.filter((h) => h.registerBlock && h.registerDay === this.day);
+    const registered = plugin.state.history.filter((h) => h.registerBlock && h.registerDay === this.day && (!h.planned || h.start));
     const budgets = Object.values(plugin.dailyNotes || {}).find((b) => b.date === this.day)?.budgets || [];
     for (const b of budgets) {
       const difference = b.seconds - b.assigned;
@@ -4119,7 +4244,7 @@ var TempvsView = class extends import_obsidian6.ItemView {
         row2.createEl("td", { text: record.start || "\u2014" });
         const cell = row2.createEl("td"), note = record.linkedNotes[0];
         if (note) button(cell, note.label, () => plugin.app.workspace.openLinkText(note.path, plugin.dailyNotes[record.registerBlock]?.path || "", false));
-        else cell.setText("\u2014");
+        else cell.textContent = "\u2014";
         row2.createEl("td", { text: readableDuration(Math.round(record.minutes * 60)) });
       }
       const totals = /* @__PURE__ */ new Map();
@@ -4152,7 +4277,7 @@ var TempvsView = class extends import_obsidian6.ItemView {
       iconButton(item, "trash-2", "Elimina tempo assegnato", () => plugin.removeAllocation(allocation));
     }
     const sessions = plugin.state.sessions.filter((s) => {
-      if (s.registerMinutes) return false;
+      if (s.registerMinutes || s.registerPlanned) return false;
       if (s.dailyRetired || s.manualSuperseded) return false;
       return s.date === this.day || this.day === today() && sessionBounds(s).start <= now && sessionBounds(s).end > now;
     }).sort((a, b) => sessionBounds(a).start - sessionBounds(b).start);
@@ -4189,7 +4314,7 @@ var TempvsView = class extends import_obsidian6.ItemView {
         iconButton(item, "trash-2", "Elimina sessione " + (first.area || first.title), () => plugin.removeSession(first.id));
       }
     }
-    if (!sessions.length && !registered.length && !budgets.length) {
+    if (!sessions.length && !registered.length && !budgets.length && !plugin.allocatedOn(this.day).length) {
       const empty = list.createDiv({ cls: "tempvs-empty" });
       (0, import_obsidian6.setIcon)(empty.createDiv({ cls: "tempvs-empty-icon" }), "calendar-check");
       empty.createEl("strong", { text: "Spazio per i tuoi progetti" });
@@ -4736,9 +4861,17 @@ var TempvsPlugin = class extends import_obsidian6.Plugin {
   }
   allocatedOn(date) {
     const entries = this.daily.allocationsByDay.get(date) || [];
-    return [...entries, ...this.allocations.filter((item) => item.date === date && !entries.some((entry) => entry.id === item.id))];
+    const unified = this.state.history.flatMap((record) => {
+      if (!record.planned || record.start || record.registerDay !== date) return [];
+      const binding = this.dailyNotes[record.registerBlock];
+      const file = binding && this.app.vault?.getAbstractFileByPath(binding.path);
+      const raw = binding?.source.split(/\r?\n/)[record.sourceRow];
+      return file && raw ? [{ ...record, id: record.sessionId, file, raw, index: record.sourceRow, note: record.linkedNotes[0], unified: true }] : [];
+    });
+    return [...unified, ...entries, ...this.allocations.filter((item) => item.date === date && !entries.some((entry) => entry.id === item.id))];
   }
   removeAllocation(entry) {
+    if (entry.unified) return this.daily.updateUnifiedAllocation(entry);
     return entry.file ? this.daily.consumeAllocation(entry) : this.change(() => {
       this.allocations = this.allocations.filter((item) => item.id !== entry.id);
     });
@@ -4765,6 +4898,11 @@ var TempvsPlugin = class extends import_obsidian6.Plugin {
     return result.sessions;
   }
   async scheduleAllocation(allocation, start) {
+    if (allocation.unified) {
+      if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(start) || /* @__PURE__ */ new Date(allocation.date + "T" + start) <= /* @__PURE__ */ new Date())
+        throw Error("Scegli un orario futuro per avviare il timer.");
+      return this.daily.updateUnifiedAllocation(allocation, start);
+    }
     const { date, note, area, areaId, minutes, cycleMinutes, focusMinutes, customBreakMinutes } = allocation;
     const commit = () => this.change(() => {
       if (!allocation.file && !this.allocations.some((entry) => entry.id === allocation.id))

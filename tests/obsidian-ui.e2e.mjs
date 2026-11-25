@@ -135,6 +135,7 @@ try {
   await page.evaluate(async()=>{
     const file=allocationVault.getAbstractFileByPath('2099-11-08.md');
     file.text=file.text.replace('@120m','@90m');
+    if(!file.text.includes('```TEMPVS'))throw Error('Missing unified block');
     await plugin.daily.syncFile(file.path);
   });
   await page.getByText('90 min · Da programmare').waitFor();
@@ -143,6 +144,14 @@ try {
   assert.equal(await page.locator('.tempvs-sessions').getByLabel('Ora di inizio').inputValue(),'13:00');
   await page.getByRole('button',{name:'Imposta orario'}).click();
   await page.waitForFunction(()=>plugin.allocatedOn('2099-11-08').length===0&&plugin.state.sessions.some(s=>s.date==='2099-11-08'&&s.start==='13:00'&&s.end==='14:30'));
+  await page.evaluate(async()=>{
+    const file=allocationVault.getAbstractFileByPath('2099-11-08.md');
+    if(!file.text.includes('@90m +13:00'))throw Error('Missing start in Markdown');
+    file.text=file.text.replace('@90m +13:00','@90m +14:00');
+    await plugin.daily.syncFile(file.path);
+  });
+  await page.waitForFunction(()=>plugin.state.sessions.some(s=>s.date==='2099-11-08'&&s.start==='14:00'&&s.end==='15:30')
+    &&!plugin.state.sessions.some(s=>s.date==='2099-11-08'&&s.start==='13:00'));
   await page.evaluate(()=>plugin.app.workspace.getActiveFile=()=>null);
   // Exercise the actual TEMPVS Markdown code-block processor with a vault adapter.
   await page.evaluate(()=>{

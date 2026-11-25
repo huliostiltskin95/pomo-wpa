@@ -31,17 +31,42 @@ export function readAllocations(block,file,date,areas){
  return entries;
 }
 
-export function allocationRow({area,minutes,cycleMinutes,note,id}){
- return area+' @'+minutes+'m'+(cycleMinutes?' -'+cycleMinutes+'m':'')+
-  (note?' [['+note.path+(note.label&&note.label!==note.path?'|'+note.label:'')+']]':'')+
-  (id?' <!-- tempvs-allocation:'+id+' -->':'');
+export function mergeAllocationBlocks(markdown,file,date,areas){
+ const legacy=allocationBlock(markdown);
+ if(!legacy)return markdown;
+ const entries=readAllocations(legacy,file,date,areas);
+ if(entries.some(entry=>entry.focusMinutes!==undefined||entry.customBreakMinutes!==undefined))
+  throw Error('Il blocco precedente contiene impostazioni di focus o pausa personalizzate.');
+ const lines=markdown.match(/[^\n]*\n|[^\n]+$/g)||[];
+ const afterClosing=markdown.indexOf('\n',legacy.end);
+ const beforeOpening=lines.slice(0,legacy.lineStart).join('').length;
+ const clean=markdown.slice(0,beforeOpening)+markdown.slice(afterClosing<0?markdown.length:afterClosing+1);
+ return entries.reduce((result,{id,...entry})=>
+  !id.includes(':')&&findDailyBlocks(result)[0]?.source.includes('<!-- tempvs-allocation:'+id+' -->')?
+   result:appendUnifiedAllocation(result,{...entry,id:id.includes(':')?undefined:id}),clean);
 }
 
-export function appendAllocation(markdown,row){
- const block=allocationBlock(markdown);
- if(block)return replaceDailyBlock(markdown,block,[block.source,row].filter(Boolean).join('\n'));
+export function unifiedAllocationRow({area,minutes,cycleMinutes,note,id,start},explicitArea=true){
+ const wiki=note?'[['+note.path+(note.label&&note.label!==note.path?'|'+note.label:'')+']] ':'';
+ return '- '+wiki+'@'+minutes+'m'+(start?' +'+start:'')+(cycleMinutes?' -'+cycleMinutes+'m':'')+
+  (explicitArea?' @'+area:'')+(id?' <!-- tempvs-allocation:'+id+' -->':'');
+}
+
+export function appendUnifiedAllocation(markdown,allocation){
+ const blocks=findDailyBlocks(markdown,true);
+ if(blocks.length!==findDailyBlocks(markdown).length||blocks.length>1)
+  throw Error('Usa un solo blocco TEMPVS chiuso nella nota giornaliera.');
+ const block=blocks[0];
+ const lines=block?.source.split(/\r?\n/)||[];
+ const heading=line=>line.trim().match(/^([^\[+@=-][^\[+@=]*?)\s+@\d+(?:[.,]\d+)?[hms]?$/i)?.[1];
+ const at=lines.findIndex(line=>heading(line)?.toLowerCase()===allocation.area.toLowerCase());
+ let end=at+1;
+ while(at>=0&&end<lines.length&&!heading(lines[end]))end++;
+ lines.splice(at>=0?end:lines.length,0,unifiedAllocationRow(allocation,at<0));
+ const source=lines.join('\n');
+ if(block)return replaceDailyBlock(markdown,block,source);
  const nl=markdown.includes('\r\n')?'\r\n':'\n';
- const next=(markdown?markdown+(markdown.endsWith(nl)?nl:nl+nl):'')+'```tempvs-assegnazioni'+nl+row+nl+'```'+nl;
- if(!allocationBlock(next))throw Error('Chiudi il blocco di codice aperto nella nota.');
+ const next=(markdown?markdown+(markdown.endsWith(nl)?nl:nl+nl):'')+'```TEMPVS'+nl+source+nl+'```'+nl;
+ if(!findDailyBlocks(next).length)throw Error('Chiudi il blocco di codice aperto nella nota.');
  return next;
 }

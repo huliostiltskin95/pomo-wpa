@@ -1,12 +1,15 @@
-## Obsidian 0.5.35 · assegnazioni nella nota giornaliera
+## Obsidian 0.5.36 · assegnazioni e orari nello stesso blocco
 
-Lascia vuoto l’orario in **Pianifica** o usa **Assegna tempo** dalla nota di lettura. TEMPVS aggiunge una riga nella nota giornaliera della data scelta. In modalità Modifica puoi cambiare area, durata o nota collegata, oppure rimuovere la riga:
+Le attività senza orario stanno nel blocco `TEMPVS` insieme ai budget. La riga `Studio @8h` indica il budget dell’area. Le righe precedute da un trattino indicano le attività. Aggiungi `+15:30` alla fine della durata quando scegli l’ora di inizio.
 
-```tempvs-assegnazioni
-Studio @40m [[Letture/Libro]]
+```TEMPVS
+Studio @8h
+- [[Prova 1]] @90m +15:30
+- [[Prova 2]] @90m
+Personale @8h
 ```
 
-Per impostare l’orario, usa **Da programmare** nell’agenda. Le assegnazioni salvate con TEMPVS 0.5.34 vengono trasferite all’apertura di Obsidian.
+Le nuove assegnazioni create dall’agenda o dalle note di lettura vanno nello stesso blocco. Se l’area non ha un budget, TEMPVS scrive l’area sulla riga, per esempio `- [[Prova 1]] @90m @Studio`. Puoi anche usare **Imposta orario** nell’agenda per aggiornare la riga. All’apertura di Obsidian, TEMPVS integra i precedenti blocchi di assegnazione compatibili nel blocco giornaliero.
 
 ## Attività nelle note Obsidian
 

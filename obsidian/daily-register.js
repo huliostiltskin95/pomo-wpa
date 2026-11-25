@@ -1,3 +1,4 @@
+import {grossCycle} from '../core/tempo-simple.js';
 import {noteLinks} from './notes-integration.js';
 import {dateTime,localDateString,sessionBounds,hasSessionOverlaps,sessionsOverlap} from '../core/tempo-core.js';
 import {isAreaRegister,parseAreaRegister} from './area-register.js';
@@ -57,18 +58,27 @@ export function registerPlan({source,date,blockId,state,id,planningKey}){
    (sessionBounds(s).end-sessionBounds(s).start)===Math.round(slot.minutes*60000);
   const match=slot.start&&state.sessions.find(s=>!s.manualSuperseded&&!s.dailyRetired&&!claimed.has(s.id)&&
    (!s.noteBlockId||s.noteBlockId===blockId)&&exact(s));
-  const old=previous.find(h=>h.slotIndex===index);
+  const sameNote=h=>h.area===slot.area&&(h.linkedNotes?.[0]?.path||'')===(slot.linkedNotes?.[0]?.path||'');
+  const old=slot.planned?
+   previous.find(h=>h.planned&&h.slotIndex===index&&!claimed.has(h.sessionId)&&sameNote(h))||
+   previous.find(h=>h.planned&&!claimed.has(h.sessionId)&&sameNote(h)):
+   previous.find(h=>h.slotIndex===index&&!h.planned);
   const sessionId=match?.id||(old&&!claimed.has(old.sessionId)?old.sessionId:id());
   claimed.add(sessionId);
   const record={sessionId,registerBlock:blockId,noteBlockId:blockId,slotIndex:index,date:dayText,registerDay:date,
-   title:slot.area,area:slot.area,areaId:slot.areaId,start:startTime&&start.getSeconds()?startTime+':'+String(start.getSeconds()).padStart(2,'0'):startTime,minutes:slot.minutes,measured:true,linkedNotes:slot.linkedNotes};
+   title:slot.area,area:slot.area,areaId:slot.areaId,start:startTime&&start.getSeconds()?startTime+':'+String(start.getSeconds()).padStart(2,'0'):startTime,minutes:slot.minutes,measured:!slot.planned,linkedNotes:slot.linkedNotes,...(slot.planned?{planned:true,sourceRow:slot.sourceRow}:{})};
   records.push(record);
+  const chosenCycle=slot.cycleMinutes!==undefined?grossCycle(slot.cycleMinutes):null;
   if(slot.start){
    const end=new Date(+start+Math.round(slot.minutes*60000));
    const precise={timerStartedAt:start.toISOString(),timerEndsAt:end.toISOString()};
    const cycle=Number.isInteger(slot.minutes)&&slot.minutes<1440?{cycleMinutes:slot.minutes,workMinutes:slot.minutes*5/6}:{workMinutes:25};
+   const plannedCycle=slot.planned?(chosenCycle?
+    {cycleMinutes:slot.cycleMinutes,workMinutes:chosenCycle.focusMinutes,breakEnabled:true}:
+    {workMinutes:slot.focusMinutes??state.defaults.workMinutes,breakEnabled:state.defaults.breakEnabled,
+     ...(slot.customBreakMinutes!==undefined?{customBreakMinutes:slot.customBreakMinutes}:{})}):null;
    sessions.push({id:sessionId,title:slot.area,area:slot.area,areaId:slot.areaId,date:dayText,start:startTime,end:clock(end),
-    ...precise,...cycle,breakEnabled:true,noteBlockId:blockId,linkedNotes:slot.linkedNotes,registerMinutes:slot.minutes});
+    ...precise,breakEnabled:true,noteBlockId:blockId,linkedNotes:slot.linkedNotes,...(plannedCycle?{...plannedCycle,registerPlanned:true}:{...cycle,registerMinutes:slot.minutes})});
   }
  }
  const other=state.sessions.filter(s=>!claimed.has(s.id)&&s.noteBlockId!==blockId&&!s.dailyRetired&&!s.manualSuperseded);
@@ -80,7 +90,12 @@ export function registerPlan({source,date,blockId,state,id,planningKey}){
 export function applyRegister(state,plan){
  const replaced=new Set([...plan.removeIds,...plan.records.map(r=>r.sessionId)]);
  const existing=new Map(state.sessions.map(s=>[s.id,s]));
- state.sessions=state.sessions.filter(s=>!replaced.has(s.id)).concat(plan.sessions.map(s=>({...s,actualSeconds:existing.get(s.id)?.actualSeconds||0})));
+ state.sessions=state.sessions.filter(s=>!replaced.has(s.id)).concat(plan.sessions.map(s=>{
+  const old=existing.get(s.id);
+  const sameTime=old?.timerStartedAt===s.timerStartedAt&&old?.timerEndsAt===s.timerEndsAt;
+  return {...s,actualSeconds:old?.actualSeconds||0,
+   ...(s.registerPlanned&&sameTime?{finished:old.finished,paused:old.paused,noteWork:old.noteWork}: {})};
+ }));
  const obsolete=state.history.filter(h=>(h.registerBlock===plan.blockId||replaced.has(h.sessionId))&&!plan.records.some(r=>r.sessionId===h.sessionId)).map(h=>h.sessionId);
  state.history=state.history.filter(h=>h.registerBlock!==plan.blockId&&!replaced.has(h.sessionId)).concat(plan.records);
  for(const [key,removed,live] of [['history',obsolete,plan.records.map(r=>r.sessionId)],['sessions',plan.removeIds,plan.sessions.map(s=>s.id)]]){
@@ -91,7 +106,7 @@ export function applyRegister(state,plan){
 // Build both views from one row per session. History also holds slots without a clock.
 export function creditedWork(state,resolve,bindingPath,byArea,{includePlannedIntervals=true}={}){
  const totals=new Map(),records=new Map(state.history.map(h=>[h.sessionId,h]));
- for(const s of state.sessions)if(!records.get(s.id)?.registerBlock)records.set(s.id,s);
+ for(const s of state.sessions)if(!records.get(s.id)?.registerBlock||records.get(s.id)?.planned)records.set(s.id,s);
  const estimates=state.defaults.simple.noteEstimates||{};
  const add=(path,seconds,source,area)=>{
   if(!path||!(seconds>0))return;
@@ -103,10 +118,10 @@ export function creditedWork(state,resolve,bindingPath,byArea,{includePlannedInt
   totals.set(key,(totals.get(key)||0)+seconds);
  };
  for(const r of records.values()){
-  if(r.dailyRetired||r.manualSuperseded)continue;
+  if(r.planned||r.dailyRetired||r.manualSuperseded)continue;
   const source=bindingPath(r.noteBlockId)||'';
   const linked=r.linkedNotes?.[0]?.path||estimates[r.noteEstimateId]?.path;
-  if(r.registerBlock||includePlannedIntervals&&r.noteBlockId&&r.start&&r.end){
+  if(r.registerBlock||includePlannedIntervals&&!r.registerPlanned&&r.noteBlockId&&r.start&&r.end){
    add(linked,r.registerBlock?r.minutes*60:(sessionBounds(r).end-sessionBounds(r).start)/1000,source,r.area);
   }else{
    let allocated=0;

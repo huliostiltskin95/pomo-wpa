@@ -112,3 +112,27 @@ test('time-first daily syntax preserves scheduling, credits, highlighting and ra
  assert.equal(plan('14:00-16:00 30m Studio greco').sessions.length,4);
  assert.throws(()=>plan('25:00 30m Studio greco [[A]]'));
 });
+
+test('budget rows receive optional starts without giving credit for planned work',()=>{
+ const state=normalizeArchive({sessions:[]}),date='2099-11-25';
+ let id=0;
+ const plan=source=>prepareDailyPlan({state,source,date,blockId:'daily',id:()=>String(++id)});
+ const base=['Studio @8h',...Array.from({length:4},(_,i)=>'- [[Prova '+(i+1)+']] @90m'),'Personale @8h'].join('\n');
+ const pending=plan(base);
+ assert.equal(pending.budgets[0].assigned,6*3600);
+ assert.equal(pending.sessions.length,0);
+ applyDailyPlan(state,pending);
+ assert.equal(creditedWork(state,()=>null,()=>null).size,0);
+ const times=['15:30','17:00','21:00','22:30'];
+ const timed=base.replace(/@90m/g,()=>('@90m +'+times.shift()));
+ const scheduled=plan(timed);
+ assert.deepEqual(scheduled.sessions.map(s=>[s.start,s.end]),[
+  ['15:30','17:00'],['17:00','18:30'],['21:00','22:30'],['22:30','00:00']
+ ]);
+ assert.deepEqual(scheduled.sessions.map(s=>s.id),pending.records.map(r=>r.sessionId));
+ applyDailyPlan(state,scheduled);
+ assert.equal(creditedWork(state,()=>null,()=>null).size,0);
+ state.sessions[0].actualSeconds=120;
+ assert.equal(creditedWork(state,()=>null,()=>null).get('Prova 1.md'),120);
+ assert.throws(()=>plan(timed.replace('+17:00','+16:45')),/sovrappongono/);
+});

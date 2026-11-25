@@ -254,13 +254,13 @@ test('assigned study time is editable in the daily note and becomes one linked t
  await p.onload();
  await p.assignTime({area:'Studio',minutes:30},date,note);
  const file=files.get(date+'.md');
- assert.match(file.text,/Studio @30m \[\[Letture\/Libro.md\|Libro\]\]/);
+ assert.match(file.text,/- \[\[Letture\/Libro.md\|Libro\]\] @30m @Studio/);
  assert.equal(p.state.sessions.length,0);
  assert.equal(p.active(),null);
  await p.onunload();
  file.text=file.text.replace('@30m','@40m');
  const next=new PluginClass();next.app.vault=vault;await next.onload();
- await next.daily.loadAllocations(date);
+ await next.daily.syncFile(file.path);
  const [allocation]=next.allocatedOn(date);
  assert.equal(allocation.minutes,40);
  assert.equal(allocation.note.path,note.path);
@@ -275,7 +275,7 @@ test('assigned study time is editable in the daily note and becomes one linked t
  assert.match(file.text,/@40m/);
  await next.scheduleAllocation(allocation,'13:00');
  assert.equal(next.allocatedOn(date).length,0);
- assert.doesNotMatch(file.text,/@40m/);
+ assert.match(file.text,/@40m \+13:00 @Studio/);
  const session=next.state.sessions.find(item=>item.start==='13:00');
  assert.equal(session.date,date);
  assert.equal(session.end,'13:40');
@@ -296,16 +296,22 @@ test('migration adds each previous allocation once and preserves the existing da
   process:async(_file,edit)=>{file.text=edit(file.text);}
  };
  await p.onload();
+ file.text+='\n```tempvs-assegnazioni\nStudio @25m [[Lettura]]\n```\n';
+ await p.daily.migrateAllocationBlock(file);
+ await p.daily.syncFile(file.path);
+ assert.doesNotMatch(file.text,/tempvs-assegnazioni/);
+ assert.match(file.text,/- \[\[Lettura\]\] @25m @Studio/);
  const previous={id:'legacy-test',date,area:'Studio',minutes:50};
  p.allocations=[previous];
  await p.daily.migrateAllocations();
  assert.equal(getSaved().allocations.length,0);
- assert(file.text.startsWith(original));
- assert.equal(p.allocatedOn(date).length,1);
+ assert.match(file.text,/^# Sabato[\s\S]*Studio \+16:00-17:00 -60m/);
+ assert.equal(file.text.match(/```TEMPVS/g).length,1);
+ assert.equal(p.allocatedOn(date).length,2);
  // Retry a migration interrupted after writing the Markdown, before saving plugin data.
  p.allocations=[previous];
  await p.daily.migrateAllocations();
- assert.equal(file.text.match(/Studio @50m/g).length,1);
+ assert.equal(file.text.match(/@50m @Studio/g).length,1);
  assert.equal(getSaved().allocations.length,0);
  await p.onunload();
 });
