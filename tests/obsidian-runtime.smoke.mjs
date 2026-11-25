@@ -255,6 +255,7 @@ test('assigned study time is editable in the daily note and becomes one linked t
  await p.assignTime({area:'Studio',minutes:30},date,note);
  const file=files.get(date+'.md');
  assert.match(file.text,/- \[\[Letture\/Libro.md\|Libro\]\] @30m @Studio/);
+ file.text=file.text.replace('```TEMPVS\n','```TEMPVS\nStudio = 8h\n').replace(' @Studio','');
  assert.equal(p.state.sessions.length,0);
  assert.equal(p.active(),null);
  await p.onunload();
@@ -275,7 +276,7 @@ test('assigned study time is editable in the daily note and becomes one linked t
  assert.match(file.text,/@40m/);
  await next.scheduleAllocation(allocation,'13:00');
  assert.equal(next.allocatedOn(date).length,0);
- assert.match(file.text,/@40m \+13:00 @Studio/);
+ assert.match(file.text,/Studio = 8h\n- .* @40m \+13:00/);
  const session=next.state.sessions.find(item=>item.start==='13:00');
  assert.equal(session.date,date);
  assert.equal(session.end,'13:40');

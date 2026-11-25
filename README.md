@@ -1,13 +1,15 @@
-## Obsidian 0.5.36 · assegnazioni e orari nello stesso blocco
+## Obsidian 0.5.38 · budget lordo nella nota giornaliera
 
-Le attività senza orario stanno nel blocco `TEMPVS` insieme ai budget. La riga `Studio @8h` indica il budget dell’area. Le righe precedute da un trattino indicano le attività. Aggiungi `+15:30` alla fine della durata quando scegli l’ora di inizio.
+Le attività senza orario stanno nel blocco `TEMPVS` insieme ai budget. La riga `Studio = 8h` dichiara il totale lordo pianificato per l’area senza creare sessioni o occupare orari. Le righe precedute da un trattino indicano le attività. Aggiungi `+15:30` alla fine della durata per creare una sessione sulla data della nota, anche da **Imposta orario** nel pannello. Solo le righe con un intervallo effettivo partecipano al controllo delle sovrapposizioni.
 
 ```TEMPVS
-Studio @8h
+Studio = 8h
 - [[Prova 1]] @90m +15:30
 - [[Prova 2]] @90m
-Personale @8h
+Personale = 8h
 ```
+
+Le vecchie intestazioni come `Studio @8h` restano compatibili. Per rendere esplicito il budget, sostituiscile con `Studio = 8h` lasciando intatte le righe delle attività.
 
 Le nuove assegnazioni create dall’agenda o dalle note di lettura vanno nello stesso blocco. Se l’area non ha un budget, TEMPVS scrive l’area sulla riga, per esempio `- [[Prova 1]] @90m @Studio`. Puoi anche usare **Imposta orario** nell’agenda per aggiornare la riga. All’apertura di Obsidian, TEMPVS integra i precedenti blocchi di assegnazione compatibili nel blocco giornaliero.
 

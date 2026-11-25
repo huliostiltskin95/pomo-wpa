@@ -1,3 +1,4 @@
+import {matchBudgetHeading} from './area-register.js';
 import {findDailyBlocks,replaceDailyBlock} from './daily-plan.js';
 import {noteLinks} from './notes-integration.js';
 import {parseQuick} from '../core/tempo-simple.js';
@@ -58,10 +59,9 @@ export function appendUnifiedAllocation(markdown,allocation){
   throw Error('Usa un solo blocco TEMPVS chiuso nella nota giornaliera.');
  const block=blocks[0];
  const lines=block?.source.split(/\r?\n/)||[];
- const heading=line=>line.trim().match(/^([^\[+@=-][^\[+@=]*?)\s+@\d+(?:[.,]\d+)?[hms]?$/i)?.[1];
- const at=lines.findIndex(line=>heading(line)?.toLowerCase()===allocation.area.toLowerCase());
+ const at=lines.findIndex(line=>matchBudgetHeading(line)?.name.toLowerCase()===allocation.area.toLowerCase());
  let end=at+1;
- while(at>=0&&end<lines.length&&!heading(lines[end]))end++;
+ while(at>=0&&end<lines.length&&!matchBudgetHeading(lines[end]))end++;
  lines.splice(at>=0?end:lines.length,0,unifiedAllocationRow(allocation,at<0));
  const source=lines.join('\n');
  if(block)return replaceDailyBlock(markdown,block,source);

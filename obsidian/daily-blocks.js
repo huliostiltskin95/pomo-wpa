@@ -1,3 +1,4 @@
+import {matchBudgetHeading} from './area-register.js';
 import {allocationBlock,appendUnifiedAllocation,mergeAllocationBlocks,readAllocations} from './daily-allocations.js';
 import {DailyPlannerModal} from './daily-planner-modal.js';
 import {creditedWork} from './daily-register.js';
@@ -628,6 +629,8 @@ class DailyBlock extends MarkdownRenderChild {
    if(isRegister(this.source)){
     const rows=this.controller.plugin.state.history.filter(h=>h.registerBlock===this.controller.bindingId(this.ctx.sourcePath));
     el.createEl('small',{text:error||new Intl.NumberFormat('it-IT',{maximumFractionDigits:2}).format(rows.reduce((sum,h)=>sum+h.minutes,0))+' min registrati, pause comprese',attr:{role:error?'alert':'status'}});
+    const legacy=lines.map(matchBudgetHeading).find(heading=>heading?.legacy);
+    if(legacy&&!error)el.createEl('small',{cls:'tempvs-muted',text:'Per il budget usa '+legacy.name+' = '+legacy.value+legacy.unit+'.'});
     return;
    }
    const manual=daySessions(this.controller.plugin.state,context.date,this.controller.bindingId(this.ctx.sourcePath)).filter(s=>s.noteBlockId===this.controller.bindingId(this.ctx.sourcePath));

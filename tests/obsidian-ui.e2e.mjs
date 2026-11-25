@@ -135,6 +135,7 @@ try {
   await page.evaluate(async()=>{
     const file=allocationVault.getAbstractFileByPath('2099-11-08.md');
     file.text=file.text.replace('- @120m','- [[Letture/Santrock|Santrock et al. (2017) Psicologia dello sviluppo: p. 101–102]] @90m');
+    file.text=file.text.replace('```TEMPVS\n','```TEMPVS\nStudio = 8h\n').replace(' @Studio','');
     if(!file.text.includes('```TEMPVS'))throw Error('Missing unified block');
     await plugin.daily.syncFile(file.path);
   });
@@ -162,7 +163,7 @@ try {
   await page.waitForFunction(()=>plugin.allocatedOn('2099-11-08').length===0&&plugin.state.sessions.some(s=>s.date==='2099-11-08'&&s.start==='13:00'&&s.end==='14:30'));
   await page.evaluate(async()=>{
     const file=allocationVault.getAbstractFileByPath('2099-11-08.md');
-    if(!file.text.includes('@90m +13:00'))throw Error('Missing start in Markdown');
+    if(!file.text.includes('Studio = 8h')||!file.text.includes('@90m +13:00'))throw Error('Missing start in Markdown');
     file.text=file.text.replace('@90m +13:00','@90m +14:00');
     await plugin.daily.syncFile(file.path);
   });

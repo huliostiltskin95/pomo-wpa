@@ -593,7 +593,13 @@ function appendNoteLink(description = "", path) {
 // obsidian/area-register.js
 var quantity = "(\\d+(?:[.,]\\d+)?)([hms]?)";
 var time = "((?:[01]\\d|2[0-3]):[0-5]\\d)";
-var areaLine = new RegExp("^(.+?)\\s+@" + quantity + "$", "i");
+var areaLine = new RegExp("^([^-].*?)\\s+(@|=\\s*)" + quantity + "$", "i");
+function matchBudgetHeading(line) {
+  const match = line.trim().match(areaLine);
+  if (!match || match[1].includes("[[") || match[2] !== "@" && match[1].includes("@")) return null;
+  const [, name, operator, value, unit] = match;
+  return { name: name.trim(), value, unit, legacy: operator === "@" };
+}
 var taskLine = new RegExp("^-\\s*(\\[\\[[^\\]\\[]+\\]\\])\\s+@" + quantity + "\\s*=\\s*(\\d+)(?:\\s+\\+" + time + ")?$", "i");
 var plannedTask = new RegExp("^-\\s*(?:(\\[\\[[^\\]\\[]+\\]\\])\\s+)?@" + quantity + "(?:\\s+\\+" + time + ")?(?:\\s+-(\\d+)m)?(?:\\s+@(.+?))?$", "i");
 var compactTask = /^-\s*((?:\[\[[^\[\]]+\]\]\s+)+)(\d+(?:[.,]\d+)?)([hms])(?:\s*=\s*(\d+))?(?:\s+\+((?:[01]\d|2[0-3]):[0-5]\d))?\s+@(.+?)$/i;
@@ -601,7 +607,7 @@ var possibleTask = new RegExp("^-?\\s*(\\[\\[[^\\]\\[]+\\]\\])\\s*[@*]?\\s*" + q
 var possibleArea = new RegExp("^(.+?)\\s+[@*]?" + quantity + "$", "i");
 var isAreaRegister = (source) => source?.split(/\r?\n/).some((line) => {
   const text = expandDailyLine(line.replace(/\s+<!-- tempvs-allocation:[\w-]+ -->\s*$/, "").trim());
-  return areaLine.test(text) || plannedTask.test(text) || /^\s*-?\s*\[\[.*\]\]\s+[@*\d]/.test(text) || !/[+=]/.test(text) && !text.startsWith("@") && possibleArea.test(text);
+  return matchBudgetHeading(text) || plannedTask.test(text) || /^\s*-?\s*\[\[.*\]\]\s+[@*\d]/.test(text) || !/[+=]/.test(text) && !text.startsWith("@") && possibleArea.test(text);
 });
 function readableDuration(seconds) {
   const h = Math.floor(seconds / 3600), m = Math.floor(seconds % 3600 / 60), s = Math.round(seconds % 60);
@@ -618,7 +624,7 @@ function suggestion(line) {
   const incomplete = line.match(new RegExp("^-?\\s*(\\[\\[[^\\]\\[]+\\]\\])\\s+[@*]?" + quantity + "$", "i"));
   if (incomplete) return "- " + incomplete[1] + " @" + incomplete[2] + incomplete[3] + " = 1";
   const area = line.match(possibleArea);
-  return area ? area[1] + " @" + area[2] + area[3] : "- [[Nota]] @1h = 2 +14:00";
+  return area ? area[1] + " = " + area[2] + area[3] : "- [[Nota]] @1h = 2 +14:00";
 }
 function parseAreaRegister(source, areas) {
   const budgets = [], slots = [];
@@ -627,11 +633,11 @@ function parseAreaRegister(source, areas) {
     const line = expandDailyLine(raw.replace(/\s+<!-- tempvs-allocation:[\w-]+ -->\s*$/, "").trim());
     if (!line || /^date:\s*\d{4}-\d\d-\d\d$/i.test(line) || /^<!-- tempvs-block:[\w-]+ -->$/.test(line)) continue;
     try {
-      const heading = line.match(areaLine);
-      if (heading && !line.includes("[[")) {
-        const area2 = areas.find((a) => a.name.toLowerCase() === heading[1].trim().toLowerCase());
+      const heading = matchBudgetHeading(line);
+      if (heading) {
+        const area2 = areas.find((a) => a.name.toLowerCase() === heading.name.toLowerCase());
         if (!area2) throw Error("Area sconosciuta. Aree disponibili: " + areas.map((a) => a.name).join(", "));
-        budget = { area: area2.name, areaId: area2.id, seconds: secondsOf(heading[2], heading[3]), assigned: 0 };
+        budget = { area: area2.name, areaId: area2.id, seconds: secondsOf(heading.value, heading.unit), assigned: 0 };
         budgets.push(budget);
         continue;
       }
@@ -1142,6 +1148,17 @@ function applyDailyPlan(state, proposal) {
 // obsidian/syntax.js
 var tokens = /^\s*T:|(?<=\s)@[^\d\s][^\n]*$|<!--.*?(?:-->|$)|\[\[[^\]]*(?:\]\]|$)|^\s*date:(?=\s|$)|\b\d{4}-\d{2}-\d{2}\b|\+?\d{2}:\d{2}(?:-\d{2}:\d{2})?|\bx\d+\b|=\s*\d+|\b\d+(?:[.,]\d+)?[hms]\b|[@~-]\d+(?:[.,]\d+)?[hms]?|^\s*-(?=\s|$)/gi;
 function syntaxTokens(line) {
+  const budget = matchBudgetHeading(line);
+  if (budget && !budget.legacy) {
+    const from = line.search(/\S/);
+    const separator = line.indexOf("=", from + budget.name.length);
+    const duration2 = separator + 1 + line.slice(separator + 1).search(/\S/);
+    return [
+      { from, to: from + budget.name.length, kind: "area" },
+      { from: separator, to: separator + 1, kind: "punctuation" },
+      { from: duration2, to: line.trimEnd().length, kind: "duration" }
+    ];
+  }
   const parts = [];
   const add = (from, to, kind) => {
     if (to > from) parts.push({ from, to, kind });
@@ -1609,10 +1626,9 @@ function appendUnifiedAllocation(markdown2, allocation) {
     throw Error("Usa un solo blocco TEMPVS chiuso nella nota giornaliera.");
   const block = blocks[0];
   const lines = block?.source.split(/\r?\n/) || [];
-  const heading = (line) => line.trim().match(/^([^\[+@=-][^\[+@=]*?)\s+@\d+(?:[.,]\d+)?[hms]?$/i)?.[1];
-  const at = lines.findIndex((line) => heading(line)?.toLowerCase() === allocation.area.toLowerCase());
+  const at = lines.findIndex((line) => matchBudgetHeading(line)?.name.toLowerCase() === allocation.area.toLowerCase());
   let end = at + 1;
-  while (at >= 0 && end < lines.length && !heading(lines[end])) end++;
+  while (at >= 0 && end < lines.length && !matchBudgetHeading(lines[end])) end++;
   lines.splice(at >= 0 ? end : lines.length, 0, unifiedAllocationRow(allocation, at < 0));
   const source = lines.join("\n");
   if (block) return replaceDailyBlock(markdown2, block, source);
@@ -2609,6 +2625,8 @@ var DailyBlock = class extends import_obsidian4.MarkdownRenderChild {
       if (isRegister(this.source)) {
         const rows = this.controller.plugin.state.history.filter((h) => h.registerBlock === this.controller.bindingId(this.ctx.sourcePath));
         el.createEl("small", { text: error || new Intl.NumberFormat("it-IT", { maximumFractionDigits: 2 }).format(rows.reduce((sum, h) => sum + h.minutes, 0)) + " min registrati, pause comprese", attr: { role: error ? "alert" : "status" } });
+        const legacy = lines.map(matchBudgetHeading).find((heading) => heading?.legacy);
+        if (legacy && !error) el.createEl("small", { cls: "tempvs-muted", text: "Per il budget usa " + legacy.name + " = " + legacy.value + legacy.unit + "." });
         return;
       }
       const manual = daySessions(this.controller.plugin.state, context.date, this.controller.bindingId(this.ctx.sourcePath)).filter((s) => s.noteBlockId === this.controller.bindingId(this.ctx.sourcePath));

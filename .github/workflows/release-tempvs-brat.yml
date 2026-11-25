@@ -81,4 +81,4 @@ jobs:
             obsidian/dist/styles.css#styles.css \
             --target "${{ github.sha }}" \
             --title "TEMPVS $VERSION" \
-            --notes "Corregge la sovrapposizione dei comandi nelle assegnazioni senza orario, anche con titoli lunghi e pannelli stretti."
+            --notes "Usa Area = 8h per dichiarare un budget lordo senza riservare orari. Le vecchie intestazioni Area @8h restano compatibili."

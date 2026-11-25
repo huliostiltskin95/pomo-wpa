@@ -136,3 +136,22 @@ test('budget rows receive optional starts without giving credit for planned work
  assert.equal(creditedWork(state,()=>null,()=>null).get('Prova 1.md'),120);
  assert.throws(()=>plan(timed.replace('+17:00','+16:45')),/sovrappongono/);
 });
+
+test('gross budgets reserve no time on the daily note date',()=>{
+ const date='2099-11-25';
+ const state=normalizeArchive({sessions:[
+  {id:'today',title:'Studio',area:'Studio',date:'2099-11-24',start:'10:00',end:'11:00',workMinutes:25,breakEnabled:true}
+ ]});
+ const source=['Studio = 8h',...['60m +10:00','90m','60m','90m','60m','60m','60m'].map(
+  (duration,index)=>'- [[Nota '+index+'|Lettura '+index+']] @'+duration),'Personale = 8h'].join('\n');
+ const plan=text=>prepareDailyPlan({state,source:text,date,blockId:'daily',now:new Date('2099-11-24T09:00')});
+ const result=plan(source);
+ assert.deepEqual(result.budgets.map(b=>[b.area,b.seconds,b.assigned]),[
+  ['Studio',28800,28800],['Personale',28800,0]
+ ]);
+ assert.equal(result.records.length,7);
+ assert.deepEqual(result.sessions.map(s=>[s.date,s.start,s.end]),[[date,'10:00','11:00']]);
+ assert.deepEqual(plan(source.replace(/ = /g,' @')).budgets,result.budgets);
+ assert.equal(plan('Personale = 8h').records.length,0);
+ assert.throws(()=>plan(source.replace('@90m','@90m +10:30')),/sovrappongono/);
+});

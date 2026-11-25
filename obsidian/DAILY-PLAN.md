@@ -1,3 +1,16 @@
+## Budget lordo per area
+
+```TEMPVS
+Studio = 8h
+- [[Psicologia dello sviluppo]] @60m +10:00
+- [[Storia antica]] @90m
+Personale = 8h
+```
+
+`Studio = 8h` e `Personale = 8h` indicano i totali lordi pianificati. Le intestazioni non occupano intervalli in agenda. Nell’esempio la prima attività occupa dalle 10:00 alle 11:00 sulla data della nota quotidiana. La seconda resta disponibile in agenda sotto **Da programmare** finché non aggiungi un orario nel testo o con **Imposta orario**. Il controllo delle sovrapposizioni confronta solo gli intervalli effettivi.
+
+Le intestazioni precedenti come `Studio @8h` continuano a funzionare. Per migrare, modifica solo l’intestazione in `Studio = 8h`. Le sintassi storiche con orario o numero di pomodori continuano a usare le regole descritte sotto.
+
 ## Pianifica la giornata · 0.5.32
 
 Dalla palette dei comandi scegli **Pianifica la giornata**. Controlla il nome della nota, compila orari, durata lorda, area e nota di riferimento e premi **Aggiungi alla giornata**. Per una fascia il riferimento è facoltativo. Per registrare un’attività senza orario lascia vuoti entrambi gli orari e indica la nota. Il comando usa la nota quotidiana aperta oppure quella di oggi se già presente. Aggiunge una riga al blocco TEMPVS e crea il blocco quando manca.

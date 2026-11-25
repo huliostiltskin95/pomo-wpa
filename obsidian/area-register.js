@@ -4,7 +4,13 @@ import {noteLinks} from './notes-integration.js';
 
 const quantity='(\\d+(?:[.,]\\d+)?)([hms]?)';
 const time='((?:[01]\\d|2[0-3]):[0-5]\\d)';
-const areaLine=new RegExp('^(.+?)\\s+@'+quantity+'$','i');
+const areaLine=new RegExp('^([^-].*?)\\s+(@|=\\s*)'+quantity+'$','i');
+export function matchBudgetHeading(line){
+ const match=line.trim().match(areaLine);
+ if(!match||match[1].includes('[[')||(match[2]!=='@'&&match[1].includes('@')))return null;
+ const [,name,operator,value,unit]=match;
+ return {name:name.trim(),value,unit,legacy:operator==='@'};
+}
 const taskLine=new RegExp('^-\\s*(\\[\\[[^\\]\\[]+\\]\\])\\s+@'+quantity+'\\s*=\\s*(\\d+)(?:\\s+\\+'+time+')?$','i');
 const plannedTask=new RegExp('^-\\s*(?:(\\[\\[[^\\]\\[]+\\]\\])\\s+)?@'+quantity+'(?:\\s+\\+'+time+')?(?:\\s+-(\\d+)m)?(?:\\s+@(.+?))?$','i');
 const compactTask=/^-\s*((?:\[\[[^\[\]]+\]\]\s+)+)(\d+(?:[.,]\d+)?)([hms])(?:\s*=\s*(\d+))?(?:\s+\+((?:[01]\d|2[0-3]):[0-5]\d))?\s+@(.+?)$/i;
@@ -12,7 +18,7 @@ const possibleTask=new RegExp('^-?\\s*(\\[\\[[^\\]\\[]+\\]\\])\\s*[@*]?\\s*'+qua
 const possibleArea=new RegExp('^(.+?)\\s+[@*]?'+quantity+'$','i');
 export const isAreaRegister=source=>source?.split(/\r?\n/).some(line=>{
  const text=expandDailyLine(line.replace(/\s+<!-- tempvs-allocation:[\w-]+ -->\s*$/,'').trim());
- return areaLine.test(text)||plannedTask.test(text)||/^\s*-?\s*\[\[.*\]\]\s+[@*\d]/.test(text)||
+ return matchBudgetHeading(text)||plannedTask.test(text)||/^\s*-?\s*\[\[.*\]\]\s+[@*\d]/.test(text)||
   (!/[+=]/.test(text)&&!text.startsWith('@')&&possibleArea.test(text));
 });
 export function readableDuration(seconds){
@@ -30,7 +36,7 @@ function suggestion(line){
  const incomplete=line.match(new RegExp('^-?\\s*(\\[\\[[^\\]\\[]+\\]\\])\\s+[@*]?'+quantity+'$','i'));
  if(incomplete)return '- '+incomplete[1]+' @'+incomplete[2]+incomplete[3]+' = 1';
  const area=line.match(possibleArea);
- return area?area[1]+' @'+area[2]+area[3]:'- [[Nota]] @1h = 2 +14:00';
+ return area?area[1]+' = '+area[2]+area[3]:'- [[Nota]] @1h = 2 +14:00';
 }
 export function parseAreaRegister(source,areas){
  const budgets=[],slots=[];let budget;
@@ -38,11 +44,11 @@ export function parseAreaRegister(source,areas){
   const line=expandDailyLine(raw.replace(/\s+<!-- tempvs-allocation:[\w-]+ -->\s*$/,'').trim());
   if(!line||/^date:\s*\d{4}-\d\d-\d\d$/i.test(line)||/^<!-- tempvs-block:[\w-]+ -->$/.test(line))continue;
   try{
-   const heading=line.match(areaLine);
-   if(heading&&!line.includes('[[')){
-    const area=areas.find(a=>a.name.toLowerCase()===heading[1].trim().toLowerCase());
+   const heading=matchBudgetHeading(line);
+   if(heading){
+    const area=areas.find(a=>a.name.toLowerCase()===heading.name.toLowerCase());
     if(!area)throw Error('Area sconosciuta. Aree disponibili: '+areas.map(a=>a.name).join(', '));
-    budget={area:area.name,areaId:area.id,seconds:secondsOf(heading[2],heading[3]),assigned:0};
+    budget={area:area.name,areaId:area.id,seconds:secondsOf(heading.value,heading.unit),assigned:0};
     budgets.push(budget);continue;
    }
    const planned=line.match(plannedTask);

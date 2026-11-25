@@ -1,7 +1,16 @@
+import {matchBudgetHeading} from './area-register.js';
 import {timeFirstArea} from './plain-syntax.js';
 // Offsets refer to the original line so rendering never rewrites Markdown.
 const tokens = /^\s*T:|(?<=\s)@[^\d\s][^\n]*$|<!--.*?(?:-->|$)|\[\[[^\]]*(?:\]\]|$)|^\s*date:(?=\s|$)|\b\d{4}-\d{2}-\d{2}\b|\+?\d{2}:\d{2}(?:-\d{2}:\d{2})?|\bx\d+\b|=\s*\d+|\b\d+(?:[.,]\d+)?[hms]\b|[@~-]\d+(?:[.,]\d+)?[hms]?|^\s*-(?=\s|$)/gi;
 export function syntaxTokens(line){
+  const budget=matchBudgetHeading(line);
+  if(budget&&!budget.legacy){
+    const from=line.search(/\S/);
+    const separator=line.indexOf('=',from+budget.name.length);
+    const duration=separator+1+line.slice(separator+1).search(/\S/);
+    return [{from,to:from+budget.name.length,kind:'area'},{from:separator,to:separator+1,kind:'punctuation'},
+      {from:duration,to:line.trimEnd().length,kind:'duration'}];
+  }
   const parts=[];
   const add=(from,to,kind)=>{if(to>from)parts.push({from,to,kind});};
   const area=timeFirstArea(line);

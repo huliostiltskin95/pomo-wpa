@@ -7,7 +7,7 @@ test('syntax styling preserves the complete task, including its anchor and alias
  const line='- [[Personale#Budapest|Budapest]] @1h = 2 +02:50';
  const styled=syntaxTokens(line).map(({from,to,kind})=>[line.slice(from,to),kind]);
  assert.deepEqual(styled,[['-','punctuation'],['[[','punctuation'],['Personale','link'],['#Budapest','section'],['|','punctuation'],['Budapest','alias'],[']]','punctuation'],['@1h','duration'],['= 2','count'],['+02:50','time']]);
- for(const [line,kinds] of [['Studio @8h',['area','duration']],['date: 1995-01-01',['keyword','date']],['@Studio 10h',['area','duration']]]){
+ for(const [line,kinds] of [['Studio = 8h',['area','punctuation','duration']],['Studio @8h',['area','duration']],['date: 1995-01-01',['keyword','date']],['@Studio 10h',['area','duration']]]){
   assert.deepEqual(syntaxTokens(line).map(t=>t.kind),kinds);
  }
 });
