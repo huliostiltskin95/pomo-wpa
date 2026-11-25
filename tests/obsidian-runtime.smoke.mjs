@@ -236,3 +236,34 @@ test('ordinary activity imports a checkbox and freezes deduplicated recorded foc
  assert.equal(p.state.history.length,1);
  await p.onunload();
 });
+
+test('assigned study time survives restart and becomes one linked timer session',async()=>{
+ const {PluginClass}=mockPlugin(false),p=new PluginClass();
+ await p.onload();
+ const date='2099-11-08',note={path:'Letture/Libro.md',label:'Libro'};
+ await p.assignTime({area:'Studio',minutes:30},date,note);
+ assert.equal(p.state.sessions.length,0);
+ assert.equal(p.active(),null);
+ await p.onunload();
+ const next=new PluginClass();await next.onload();
+ const [allocation]=next.allocations;
+ assert.equal(allocation.note.path,note.path);
+ const save=next.saveData.bind(next);
+ next.saveData=()=>Promise.reject(Error('disk full'));
+ await assert.rejects(next.scheduleAllocation(allocation.id,'13:00'),/disk full/);
+ assert.equal(next.allocations.length,1);
+ assert.equal(next.state.sessions.length,0);
+ next.saveData=save;
+ await next.schedule('Studio @30m +15:00',date);
+ await assert.rejects(next.scheduleAllocation(allocation.id,'15:15'),/sovrappongono/);
+ assert.equal(next.allocations.length,1);
+ await next.scheduleAllocation(allocation.id,'13:00');
+ assert.equal(next.allocations.length,0);
+ const session=next.state.sessions.find(item=>item.start==='13:00');
+ assert.equal(session.date,date);
+ assert.equal(session.start,'13:00');
+ assert.equal(session.end,'13:30');
+ assert.equal(session.linkedNotes[0].path,note.path);
+ await assert.rejects(next.scheduleAllocation(allocation.id,'14:00'),/non più disponibile/);
+ await next.onunload();
+});

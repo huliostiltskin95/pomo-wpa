@@ -1385,6 +1385,34 @@ var NoteEstimates = class {
     if (plugin.state.sessions.some((s) => !s.finished && sessionBounds(s).start < end && sessionBounds(s).end > now)) throw Error("Questo intervallo \xE8 gi\xE0 occupato. Assegna la nota alla sessione in agenda.");
     await plugin.change(() => plugin.state.sessions.push(session));
   }
+  planStudy(note, area, minutes) {
+    const modal = new import_obsidian2.Modal(this.plugin.app);
+    modal.onOpen = () => {
+      modal.contentEl.createEl("h2", { text: "Assegna tempo di studio" });
+      modal.contentEl.createEl("p", { text: note.title + " \xB7 " + area.name });
+      const form = modal.contentEl.createEl("form", { cls: "tempvs-form" });
+      const date = form.createEl("label", { text: "Giorno di studio" }).createEl("input", { attr: { type: "date", required: "", value: localDateString() } });
+      const duration2 = form.createEl("label", { text: "Durata \xB7 minuti" }).createEl("input", { attr: { type: "number", required: "", min: "1", max: "1439", value: String(minutes) } });
+      const error = form.createDiv({ attr: { role: "alert" } });
+      const save = form.createEl("button", { text: "Assegna tempo", cls: "mod-cta", attr: { type: "submit" } });
+      form.onsubmit = async (event) => {
+        event.preventDefault();
+        if (save.disabled) return;
+        save.disabled = true;
+        try {
+          await this.plugin.assignTime({ area: area.name, areaId: area.id, minutes: duration2.valueAsNumber }, date.value, { path: note.path, label: note.title });
+          modal.close();
+          new import_obsidian2.Notice("Tempo di studio assegnato al " + date.value + ".");
+        } catch (e) {
+          error.textContent = e.message;
+        } finally {
+          save.disabled = false;
+        }
+      };
+    };
+    modal.onClose = () => modal.contentEl.empty();
+    modal.open();
+  }
   totals(includePlannedIntervals = true) {
     const cache = this.plugin.app.metadataCache;
     return creditedWork(this.plugin.state, (p, source) => cache?.getFirstLinkpathDest?.(p, source)?.path, (id) => this.plugin.dailyNotes?.[id]?.path, void 0, { includePlannedIntervals });
@@ -1410,6 +1438,7 @@ var NoteEstimates = class {
     const areas = this.plugin.config.areas.filter((area2) => note.entries.some((entry) => matchesArea(entry, { area: area2.name, areaId: area2.id })));
     const area = areas.find((a) => a.id === choices.areaId) || areas[0];
     if (!note.completed && area) {
+      action(actions, "Assegna tempo", () => this.planStudy(note, area, choices.minutes || 30));
       action(actions, "Avvia " + area.name, () => {
         const selected = areas.find((a) => a.id === choices.areaId) || area;
         return this.start(note, { area: selected.name, areaId: selected.id, minutes: choices.minutes || 30 });
@@ -1704,6 +1733,14 @@ var DailyBlocks = class {
     if (this.plugin.app.workspace.on) this.plugin.registerEvent(this.plugin.app.workspace.on("editor-change", (_editor, view) => {
       if (view?.file?.extension === "md") this.schedule(view.file.path);
     }));
+    if (this.plugin.app.workspace.on) this.plugin.registerEvent(this.plugin.app.workspace.on("file-open", (file) => {
+      const date = this.panelDay(file);
+      if (date) this.selectDay(file.path, date);
+      else for (const { view } of this.plugin.app.workspace.getLeavesOfType?.("tempvs-timer") || []) {
+        if (file && view) view.dailyContext = null;
+      }
+      if (file?.extension === "md" && !date) this.schedule(file.path);
+    }));
     if (vault?.on) {
       this.plugin.registerEvent(vault.on("modify", (file) => {
         if (file.extension === "md") this.schedule(file.path);
@@ -1798,10 +1835,17 @@ var DailyBlocks = class {
     const records = [...plugin.state.sessions, ...plugin.state.history || []];
     const sourceOf = (r) => this.bindings[r.noteBlockId]?.path || "";
     const changes = records.filter((r) => r.linkedNotes?.some((n) => move(n.path, sourceOf(r)) !== n.path));
-    if (!affected.length && !notes.length && !changes.length && !bindings.some(([, b]) => relocated(b.path) !== b.path)) return;
+    const allocations = (plugin.allocations || []).map((entry) => {
+      if (!entry.note) return entry;
+      const path = move(entry.note.path);
+      return path === entry.note.path ? entry : { ...entry, note: { ...entry.note, path } };
+    });
+    const allocationsChanged = allocations.some((entry, index) => entry !== plugin.allocations[index]);
+    if (!allocationsChanged && !affected.length && !notes.length && !changes.length && !bindings.some(([, b]) => relocated(b.path) !== b.path)) return;
     this.applying = true;
     try {
       await plugin.change(() => {
+        if (allocationsChanged) plugin.allocations = allocations;
         for (const r of changes) for (const n of r.linkedNotes) {
           const path = move(n.path, sourceOf(r));
           if (n.path === n.label) n.label = path;
@@ -1914,12 +1958,27 @@ var DailyBlocks = class {
   protectedBlocks(id) {
     return Object.entries(this.bindings).filter(([other, b]) => other !== id && this.plugin.app.vault.getAbstractFileByPath(b.path)).map(([other]) => other);
   }
+  panelDay(file = this.plugin.app.workspace.getActiveFile?.()) {
+    if (file?.extension !== "md") return null;
+    const bound = this.bindings[this.bindingId(file.path)];
+    if (bound) return bound.date;
+    try {
+      return resolveDailyDate("", file, {
+        moment: globalThis.moment,
+        format: this.plugin.app.internalPlugins?.getPluginById("daily-notes")?.instance?.options?.format || "YYYY-MM-DD",
+        frontmatter: this.plugin.app.metadataCache?.getFileCache(file)?.frontmatter
+      });
+    } catch {
+      return null;
+    }
+  }
   selectDay(path, date) {
     if (this.plugin.app.workspace.getActiveFile?.()?.path !== path) return;
-    for (const leaf of this.plugin.app.workspace.getLeavesOfType?.("tempvs-timer") || []) {
-      if (leaf.view) {
-        leaf.view.day = date;
-        leaf.view.update?.(true);
+    for (const { view } of this.plugin.app.workspace.getLeavesOfType?.("tempvs-timer") || []) {
+      if (view?.dailyContext === path + ":" + date) continue;
+      if (view?.selectDay) {
+        view.dailyContext = path + ":" + date;
+        view.selectDay(date);
       }
     }
   }
@@ -3519,7 +3578,15 @@ var TempvsView = class extends import_obsidian6.ItemView {
     return "timer";
   }
   async onOpen() {
+    this.followDailyNote();
     this.draw();
+  }
+  followDailyNote() {
+    const date = this.plugin.daily.panelDay();
+    if (date) {
+      this.day = date;
+      this.dailyContext = this.plugin.app.workspace.getActiveFile()?.path + ":" + date;
+    }
   }
   async onClose() {
   }
@@ -3552,19 +3619,10 @@ var TempvsView = class extends import_obsidian6.ItemView {
     const sessionHeader = root.createDiv({ cls: "tempvs-section-heading" });
     sessionHeader.createEl("h4", { text: "La tua agenda" });
     const nav = sessionHeader.createDiv({ cls: "tempvs-date-nav" });
-    iconButton(nav, "chevron-left", "Giorno precedente", () => {
-      this.day = shiftDate(this.day, -1);
-      this.update(true);
-    });
+    iconButton(nav, "chevron-left", "Giorno precedente", () => this.selectDay(shiftDate(this.day, -1)));
     const dateLabel = nav.createEl("button", { cls: "tempvs-day-label", text: "Oggi", attr: { title: "Torna a oggi", "aria-label": "Data selezionata: oggi. Torna a oggi" } });
-    dateLabel.onclick = () => {
-      this.day = today();
-      this.update(true);
-    };
-    iconButton(nav, "chevron-right", "Giorno successivo", () => {
-      this.day = shiftDate(this.day, 1);
-      this.update(true);
-    });
+    dateLabel.onclick = () => this.selectDay(today());
+    iconButton(nav, "chevron-right", "Giorno successivo", () => this.selectDay(shiftDate(this.day, 1)));
     root.createDiv({ cls: "tempvs-daily-status", attr: { role: "status" } });
     root.createDiv({ cls: "tempvs-sessions" });
     root.createDiv({ cls: "tempvs-estimates" });
@@ -3635,13 +3693,32 @@ var TempvsView = class extends import_obsidian6.ItemView {
     });
     const planBox = create.createDiv({ cls: "tempvs-method-plan" });
     const plan = planBox.createEl("form", { cls: "tempvs-form" });
-    const dateInput = field(plan, "Giorno").createEl("input", { attr: { type: "date", "aria-label": "Data", value: today() } });
+    this.planDay = null;
+    const dateInput = field(plan, "Giorno").createEl("input", { attr: { type: "date", "aria-label": "Data", value: this.day } });
     dateInput.required = true;
     const plannedArea = field(plan, "Area").createEl("select", { attr: { "aria-label": "Area da pianificare" } });
     for (const a of plugin.config.areas) plannedArea.createEl("option", { text: a.name, value: a.name });
     const planFields = plan.createDiv({ cls: "tempvs-plan-fields" });
-    const startTime = field(planFields, "Ora di inizio").createEl("input", { attr: { type: "time", required: "", value: "09:00" } });
+    const startTime = field(planFields, "Ora di inizio").createEl("input", { attr: { type: "time" } });
     const duration2 = field(planFields, "Durata \xB7 minuti").createEl("input", { attr: { type: "number", min: "1", max: "1439", value: "30", required: "" } });
+    plan.createEl("p", { text: "Lascia vuoto l\u2019orario per assegnare la durata e impostare il timer in seguito." });
+    let plannedNote;
+    const noteField = plan.createDiv({ cls: "tempvs-controls" });
+    const noteChoice = button(noteField, "Collega nota dell\u2019attivit\xE0", () => new SessionNotePicker(plugin.app, (value) => {
+      const [note] = noteLinks(value);
+      if (!note) throw Error("Nota non valida.");
+      plannedNote = note;
+      noteChoice.textContent = note.label;
+      clearNote.hidden = false;
+    }).open());
+    noteChoice.type = "button";
+    const clearNote = button(noteField, "Scollega nota dell\u2019attivit\xE0", () => {
+      plannedNote = void 0;
+      noteChoice.textContent = "Collega nota dell\u2019attivit\xE0";
+      clearNote.hidden = true;
+    });
+    clearNote.type = "button";
+    clearNote.hidden = true;
     const cycleInput = field(plan, "Pomodoro lordo \xB7 minuti (facoltativo)").createEl("input", { attr: { type: "number", min: "1", max: "1439", placeholder: "Es. 60 \u2192 50 focus + 10 pausa", "aria-label": "Durata lorda del pomodoro" } });
     const cycleHint = plan.createEl("p", { cls: "tempvs-help", text: "Lascia vuoto per usare il focus predefinito. La durata totale della sessione comprende tutte le pause." });
     cycleInput.addEventListener("input", () => {
@@ -3659,6 +3736,7 @@ var TempvsView = class extends import_obsidian6.ItemView {
     const updatePlanMode = () => {
       const textMode = Boolean(lines.value.trim());
       for (const input of [plannedArea, startTime, duration2, cycleInput]) input.disabled = textMode;
+      noteField.hidden = textMode;
     };
     lines.addEventListener("input", updatePlanMode);
     plan.createEl("button", { text: "Programma", cls: "mod-cta", attr: { type: "submit" } });
@@ -3668,13 +3746,19 @@ var TempvsView = class extends import_obsidian6.ItemView {
       plan.dataset.busy = "true";
       const submit = plan.querySelector('[type="submit"]');
       submit.disabled = true;
-      const text = lines.value.trim() || `${plannedArea.value} @${duration2.value}m +${startTime.value}${cycleInput.value ? " -" + cycleInput.value + "m" : ""}`;
-      plugin.schedule(text, dateInput.value).then(() => {
+      const date = dateInput.value;
+      const text = lines.value.trim();
+      const area2 = plugin.config.areas.find((a) => a.name === plannedArea.value);
+      const request = { area: area2?.name, areaId: area2?.id, minutes: duration2.valueAsNumber };
+      if (cycleInput.value) request.cycleMinutes = cycleInput.valueAsNumber;
+      const save = text ? plugin.schedule(text, date) : startTime.value ? plugin.scheduleRequests([{ ...request, start: startTime.value }], date, plannedNote) : plugin.assignTime(request, date, plannedNote);
+      save.then(() => {
+        clearNote.click();
         lines.value = "";
+        startTime.value = "";
         updatePlanMode();
-        this.day = dateInput.value;
         this.togglePanel(null, true);
-        this.update(true);
+        this.selectDay(date);
       }).catch((err) => new import_obsidian6.Notice(err.message)).finally(() => {
         delete plan.dataset.busy;
         submit.disabled = false;
@@ -3720,6 +3804,11 @@ var TempvsView = class extends import_obsidian6.ItemView {
     };
     this.showCreation();
     this.applyPanel();
+    this.update(true);
+  }
+  selectDay(day) {
+    this.day = day;
+    this.showCreation();
     this.update(true);
   }
   showCreation() {
@@ -3849,6 +3938,8 @@ var TempvsView = class extends import_obsidian6.ItemView {
       dayLabel.setAttribute("aria-label", "Data selezionata: " + this.day + ". Torna a oggi");
     }
     const list = root.querySelector(".tempvs-sessions");
+    const pendingTime = new Map([...list.querySelectorAll("[data-allocation]")].map((input) => [input.dataset.allocation, input.value]));
+    const focusedTime = list.ownerDocument?.activeElement?.dataset?.allocation;
     list.empty();
     const now = /* @__PURE__ */ new Date();
     const registered = plugin.state.history.filter((h) => h.registerBlock && h.registerDay === this.day);
@@ -3872,6 +3963,32 @@ var TempvsView = class extends import_obsidian6.ItemView {
       const totals = /* @__PURE__ */ new Map();
       for (const r of registered) totals.set(r.area, (totals.get(r.area) || 0) + r.minutes);
       if (!budgets.length) list.createEl("small", { text: [...totals].map(([area2, min]) => area2 + " " + min + " min").join(" \xB7 ") });
+    }
+    for (const allocation of plugin.allocations.filter((item) => item.date === this.day)) {
+      const item = list.createDiv({ cls: "tempvs-session" });
+      const form = item.createEl("form", { cls: "tempvs-form" });
+      form.createEl("strong", { text: allocation.area + " \xB7 " + allocation.minutes + " min \xB7 Da programmare" });
+      if (allocation.note) button(item, allocation.note.label, () => plugin.app.workspace.openLinkText(allocation.note.path, "", false));
+      const time2 = form.createEl("label", { text: "Ora di inizio" }).createEl("input", { attr: { type: "time", required: "" } });
+      time2.dataset.allocation = allocation.id;
+      time2.value = pendingTime.get(allocation.id) || "";
+      if (focusedTime === allocation.id) time2.focus({ preventScroll: true });
+      const submit = form.createEl("button", { text: "Imposta orario", attr: { type: "submit" } });
+      form.onsubmit = async (event) => {
+        event.preventDefault();
+        if (submit.disabled) return;
+        submit.disabled = true;
+        try {
+          await plugin.scheduleAllocation(allocation.id, time2.value);
+        } catch (error) {
+          new import_obsidian6.Notice(error.message);
+        } finally {
+          submit.disabled = false;
+        }
+      };
+      iconButton(item, "trash-2", "Elimina tempo assegnato", () => plugin.change(() => {
+        plugin.allocations = plugin.allocations.filter((entry) => entry.id !== allocation.id);
+      }));
     }
     const sessions = plugin.state.sessions.filter((s) => {
       if (s.registerMinutes) return false;
@@ -4071,6 +4188,7 @@ var TempvsPlugin = class extends import_obsidian6.Plugin {
       if (data && !data.archive && !Array.isArray(data.sessions) && Object.keys(data).length)
         throw Error("Formato precedente non riconosciuto: nessun dato verr\xE0 sovrascritto.");
       this.state = normalizeArchive(data?.archive || (Array.isArray(data?.sessions) ? data : ZERO()));
+      this.allocations = Array.isArray(data?.allocations) ? data.allocations : [];
       this.dailyNotes = Object.assign(/* @__PURE__ */ Object.create(null), data?.dailyNotes || {});
       this.cloudData = data?.cloudData && typeof data.cloudData === "object" ? data.cloudData : {};
       this.compact = typeof data?.ui?.compact === "boolean" ? data.ui.compact : import_obsidian6.Platform.isMobile;
@@ -4316,9 +4434,10 @@ var TempvsPlugin = class extends import_obsidian6.Plugin {
     const cloudData = this.cloudStorage?.snapshot() || {};
     const audio = { kind: this.audioKind, volume: this.audioVolume };
     const notifications = { sound: this.chimeEnabled };
+    const allocations = JSON.parse(JSON.stringify(this.allocations));
     const dailyNotes = JSON.parse(JSON.stringify(this.dailyNotes || {}));
     const write = this.writeChain.catch(() => {
-    }).then(() => this.saveData({ archive, cloudData, ui: { compact: this.compact, layout: this.layout, timerStyle: this.timerStyle, clockSize: this.clockSize }, audio, notifications, dailyNotes }));
+    }).then(() => this.saveData({ archive, cloudData, ui: { compact: this.compact, layout: this.layout, timerStyle: this.timerStyle, clockSize: this.clockSize }, audio, notifications, dailyNotes, allocations }));
     this.writeChain = write;
     await write;
     if (JSON.stringify(this.state) === JSON.stringify(archive)) this.dirty = false;
@@ -4330,12 +4449,14 @@ var TempvsPlugin = class extends import_obsidian6.Plugin {
     try {
       this.record();
       const previous = JSON.stringify(this.state);
+      const previousAllocations = this.allocations;
       try {
         mutator();
         this.state = normalizeArchive(this.state);
         await this.persist();
       } catch (error) {
         this.state = JSON.parse(previous);
+        this.allocations = previousAllocations;
         this.refresh(true);
         throw error;
       }
@@ -4441,18 +4562,52 @@ var TempvsPlugin = class extends import_obsidian6.Plugin {
     const requests = parseQuick(text.split("\n").map((line) => expandRange(line.trim())).join("\n"), this.config.areas);
     if (!requests.length) throw Error("Inserisci almeno una sessione.");
     if (requests.some((r) => !r.start)) throw Error("Per ora specifica +HH:MM per ogni sessione. Le fasce automatiche saranno aggiunte successivamente.");
+    await this.scheduleRequests(requests, date);
+    new import_obsidian6.Notice("TEMPVS: " + requests.length + " sessioni programmate.");
+  }
+  async assignTime(request, date, note) {
+    if (!validDay(date)) throw Error("Data non valida.");
+    if (!this.config.areas.some((area) => area.name === request.area)) throw Error("Area non valida.");
+    if (!Number.isInteger(request.minutes) || request.minutes < 1 || request.minutes > 1439)
+      throw Error("Durata da 1 a 1439 minuti.");
+    planSessions([request], [], [], this.state.defaults);
+    await this.change(() => {
+      this.allocations = [...this.allocations, { ...request, date, note, id: uuid() }];
+    });
+  }
+  async scheduleRequests(requests, date, note) {
+    if (!validDay(date)) throw Error("Data non valida.");
+    await this.change(() => {
+      const sessions = this.plannedSessions(requests, date);
+      if (note) for (const session of sessions) session.linkedNotes = [note];
+      this.state.sessions.push(...sessions);
+    });
+  }
+  plannedSessions(requests, date) {
     const result = planSessions(
       requests,
       [],
-      this.state.sessions.filter((s) => !s.finished),
+      this.state.sessions.filter((s) => !s.finished && !s.dailyRetired && !s.manualSuperseded),
       this.state.defaults,
       /* @__PURE__ */ new Date(),
       uuid,
       date
     );
-    if (result.remainder || !result.sessions?.length) throw Error("Programmazione incompleta.");
-    await this.change(() => this.state.sessions.push(...result.sessions));
-    new import_obsidian6.Notice("TEMPVS: " + result.sessions.length + " sessioni programmate.");
+    if (result.remainder || !result.sessions.length) throw Error("Programmazione incompleta.");
+    return result.sessions;
+  }
+  async scheduleAllocation(id, start) {
+    await this.change(() => {
+      const allocation = this.allocations.find((entry) => entry.id === id);
+      if (!allocation) throw Error("Tempo assegnato non pi\xF9 disponibile.");
+      const { date, note, area, areaId, minutes, cycleMinutes } = allocation;
+      const currentArea = this.config.areas.find((item) => areaId && item.id === areaId || item.name === area);
+      if (!currentArea) throw Error("Area non pi\xF9 disponibile.");
+      const [session] = this.plannedSessions([{ area: currentArea.name, areaId: currentArea.id, minutes, cycleMinutes, start }], date);
+      if (note) session.linkedNotes = [note];
+      this.state.sessions.push(session);
+      this.allocations = this.allocations.filter((entry) => entry.id !== id);
+    });
   }
   async togglePause() {
     const s = this.active();

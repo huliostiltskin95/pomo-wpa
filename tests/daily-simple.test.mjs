@@ -86,7 +86,7 @@ test('completed morning row no longer blocks afternoon import or returns on pane
 });
 test('editor-change imports complete unsaved text and updates the active daily panel',async()=>{
  const f=fixture();const saved=f.text;let buffer=saved.replace(initial,revised),updates=0;
- const view={file:f.file,editor:{getValue:()=>buffer}},panel={day:'2099-11-14',update:()=>updates++},events={};
+ const view={file:f.file,editor:{getValue:()=>buffer}},panel={day:'2099-11-14',selectDay(date){this.day=date;updates++;}},events={};
  f.plugin.app.workspace.getActiveFile=()=>f.file;
  f.plugin.app.workspace.getLeavesOfType=type=>type==='markdown'?[{view}]:[{view:panel}];
  f.plugin.app.workspace.on=(name,handler)=>{events[name]=handler;return {};};
@@ -134,9 +134,10 @@ test('remote archive reconciliation follows unchanged note instead of writing st
  await f.daily.reconcilePlans();assert.equal(f.text,original);assert.equal(f.plugin.state.sessions.length,5);assert(f.plugin.state.syncDeleted.sessions.includes('remote'));f.daily.destroy();
 });
 test('an already synchronized open note still selects its day in the plugin panel',async()=>{
- const f=fixture();await f.daily.syncFile(f.file.path);const panel={day:'2099-11-14',update(){}};
+ const f=fixture();await f.daily.syncFile(f.file.path);const panel={day:'2099-11-14',selectDay(date){this.day=date;}};
  f.plugin.app.workspace.getActiveFile=()=>f.file;f.plugin.app.workspace.getLeavesOfType=type=>type==='tempvs-timer'?[{view:panel}]:[];
- await f.daily.syncFile(f.file.path);assert.equal(panel.day,day);f.daily.destroy();
+ await f.daily.syncFile(f.file.path);assert.equal(panel.day,day);
+ panel.day='2099-11-16';await f.daily.syncFile(f.file.path);assert.equal(panel.day,'2099-11-16');f.daily.destroy();
 });
 test('panel note editing writes one session back to daily text without losing its neighbors',async()=>{
  const f=fixture();await f.daily.syncFile(f.file.path);

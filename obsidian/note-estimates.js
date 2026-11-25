@@ -1,5 +1,5 @@
 import {creditedWork} from './daily-register.js';
-import {Notice} from 'obsidian';
+import {Modal, Notice} from 'obsidian';
 import {parseNoteEstimate,compactEstimateTime,estimatedSeconds,estimatesOf,matchesArea,estimateProgress,estimateTime,estimateResult,setEstimateCompleted} from '../core/tempo-estimates.js';
 import {localDateString,sessionBounds,formatTime} from '../core/tempo-core.js';
 import {grossCycle,manualSessionEnd} from '../core/tempo-simple.js';
@@ -48,6 +48,31 @@ export class NoteEstimates {
   if(plugin.state.sessions.some(s=>!s.finished&&sessionBounds(s).start<end&&sessionBounds(s).end>now))throw Error('Questo intervallo è già occupato. Assegna la nota alla sessione in agenda.');
   await plugin.change(()=>plugin.state.sessions.push(session));
  }
+ planStudy(note,area,minutes){
+  const modal=new Modal(this.plugin.app);
+  modal.onOpen=()=>{
+   modal.contentEl.createEl('h2',{text:'Assegna tempo di studio'});
+   modal.contentEl.createEl('p',{text:note.title+' · '+area.name});
+   const form=modal.contentEl.createEl('form',{cls:'tempvs-form'});
+   const date=form.createEl('label',{text:'Giorno di studio'}).createEl('input',{attr:{type:'date',required:'',value:localDateString()}});
+   const duration=form.createEl('label',{text:'Durata · minuti'}).createEl('input',{attr:{type:'number',required:'',min:'1',max:'1439',value:String(minutes)}});
+   const error=form.createDiv({attr:{role:'alert'}});
+   const save=form.createEl('button',{text:'Assegna tempo',cls:'mod-cta',attr:{type:'submit'}});
+   form.onsubmit=async event=>{
+    event.preventDefault();
+    if(save.disabled)return;
+    save.disabled=true;
+    try{
+     await this.plugin.assignTime({area:area.name,areaId:area.id,minutes:duration.valueAsNumber},date.value,{path:note.path,label:note.title});
+     modal.close();
+     new Notice('Tempo di studio assegnato al '+date.value+'.');
+    }catch(e){error.textContent=e.message;}
+    finally{save.disabled=false;}
+   };
+  };
+  modal.onClose=()=>modal.contentEl.empty();
+  modal.open();
+ }
  totals(includePlannedIntervals=true){
   const cache=this.plugin.app.metadataCache;
   return creditedWork(this.plugin.state,(p,source)=>cache?.getFirstLinkpathDest?.(p,source)?.path,id=>this.plugin.dailyNotes?.[id]?.path,undefined,{includePlannedIntervals});
@@ -74,6 +99,7 @@ export class NoteEstimates {
   const areas=this.plugin.config.areas.filter(area=>note.entries.some(entry=>matchesArea(entry,{area:area.name,areaId:area.id})));
   const area=areas.find(a=>a.id===choices.areaId)||areas[0];
   if(!note.completed&&area){
+   action(actions,'Assegna tempo',()=>this.planStudy(note,area,choices.minutes||30));
    action(actions,'Avvia '+area.name,()=>{
     const selected=areas.find(a=>a.id===choices.areaId)||area;
     return this.start(note,{area:selected.name,areaId:selected.id,minutes:choices.minutes||30});

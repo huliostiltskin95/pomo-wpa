@@ -31,6 +31,14 @@ export class DailyBlocks {
   for(const language of ['TEMPVS','tempvs','TEMPUS','tempus'])this.plugin.registerMarkdownCodeBlockProcessor(language,(source,el,ctx)=>ctx.addChild(new DailyBlock(el,this,ctx,source)));
   const vault=this.plugin.app.vault;
   if(this.plugin.app.workspace.on)this.plugin.registerEvent(this.plugin.app.workspace.on('editor-change',(_editor,view)=>{if(view?.file?.extension==='md')this.schedule(view.file.path);}));
+  if(this.plugin.app.workspace.on)this.plugin.registerEvent(this.plugin.app.workspace.on('file-open',file=>{
+   const date=this.panelDay(file);
+   if(date)this.selectDay(file.path,date);
+   else for(const {view} of this.plugin.app.workspace.getLeavesOfType?.('tempvs-timer')||[]){
+    if(file&&view)view.dailyContext=null;
+   }
+   if(file?.extension==='md'&&!date)this.schedule(file.path);
+  }));
   if(vault?.on){
    this.plugin.registerEvent(vault.on('modify',file=>{if(file.extension==='md')this.schedule(file.path);}));
    this.plugin.registerEvent(vault.on('delete',file=>{this.plugin.estimates?.archive(file.path).catch(e=>new Notice(e.message));}));
@@ -107,10 +115,17 @@ export class DailyBlocks {
   const records=[...plugin.state.sessions,...(plugin.state.history||[])];
   const sourceOf=r=>this.bindings[r.noteBlockId]?.path||'';
   const changes=records.filter(r=>r.linkedNotes?.some(n=>move(n.path,sourceOf(r))!==n.path));
-  if(!affected.length&&!notes.length&&!changes.length&&!bindings.some(([,b])=>relocated(b.path)!==b.path))return;
+  const allocations=(plugin.allocations||[]).map(entry=>{
+   if(!entry.note)return entry;
+   const path=move(entry.note.path);
+   return path===entry.note.path?entry:{...entry,note:{...entry.note,path}};
+  });
+  const allocationsChanged=allocations.some((entry,index)=>entry!==plugin.allocations[index]);
+  if(!allocationsChanged&&!affected.length&&!notes.length&&!changes.length&&!bindings.some(([,b])=>relocated(b.path)!==b.path))return;
   this.applying=true;
   try{
    await plugin.change(()=>{
+    if(allocationsChanged)plugin.allocations=allocations;
     for(const r of changes)for(const n of r.linkedNotes){
      const path=move(n.path,sourceOf(r));
      if(n.path===n.label)n.label=path;
@@ -182,9 +197,24 @@ export class DailyBlocks {
   this.plugin.refresh?.(true);this.refresh();
  }
  protectedBlocks(id){return Object.entries(this.bindings).filter(([other,b])=>other!==id&&this.plugin.app.vault.getAbstractFileByPath(b.path)).map(([other])=>other);}
+ panelDay(file=this.plugin.app.workspace.getActiveFile?.()){
+  if(file?.extension!=='md')return null;
+  const bound=this.bindings[this.bindingId(file.path)];
+  if(bound)return bound.date;
+  try{
+   return resolveDailyDate('',file,{
+    moment:globalThis.moment,
+    format:this.plugin.app.internalPlugins?.getPluginById('daily-notes')?.instance?.options?.format||'YYYY-MM-DD',
+    frontmatter:this.plugin.app.metadataCache?.getFileCache(file)?.frontmatter
+   });
+  }catch{return null;}
+ }
  selectDay(path,date){
   if(this.plugin.app.workspace.getActiveFile?.()?.path!==path)return;
-  for(const leaf of this.plugin.app.workspace.getLeavesOfType?.('tempvs-timer')||[]){if(leaf.view){leaf.view.day=date;leaf.view.update?.(true);}}
+  for(const {view} of this.plugin.app.workspace.getLeavesOfType?.('tempvs-timer')||[]){
+   if(view?.dailyContext===path+':'+date)continue;
+   if(view?.selectDay){view.dailyContext=path+':'+date;view.selectDay(date);}
+  }
  }
  bindingId(path){return Object.keys(this.bindings).find(id=>this.bindings[id].path===path);}
  async readMarkdown(file){

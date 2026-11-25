@@ -116,4 +116,4 @@ jobs:
             obsidian/dist/styles.css#styles.css \
             --target "${{ github.sha }}" \
             --title "TEMPVS $VERSION" \
-            --notes "Attività TEMPVS nelle note di lavoro con area, stima di concentrazione, consuntivo dalle sessioni collegate e chiusura esplicita."
+            --notes "Agenda sulla data della nota giornaliera, durata assegnabile prima di scegliere un orario e pianificazione dello studio dalla nota di lettura."

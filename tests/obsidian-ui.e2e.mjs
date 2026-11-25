@@ -108,6 +108,25 @@ try {
     for(const [key,value]of Object.entries({'background-primary':'#202027','background-secondary':'#292931','background-modifier-border':'#40404c','text-normal':'#ededf4','text-muted':'#b0b0c2','text-accent':'#b6a1ff'}))document.documentElement.style.setProperty('--'+key,value);
   });
   await page.screenshot({path:'/tmp/tempvs-ui-dark.png',fullPage:true});
+  // A daily note with no TEMPVS block still drives the panel.
+  await page.evaluate(()=>{
+    const file={path:'Daily/2099-11-07.md',basename:'2099-11-07',extension:'md'};
+    plugin.app.workspace.getActiveFile=()=>file;
+    workspaceEvents['file-open'](file);
+  });
+  assert.equal(await page.evaluate(()=>view.day),'2099-11-07');
+  await page.getByRole('button',{name:'Pianifica',exact:true}).click();
+  assert.equal(await page.getByLabel('Data',{exact:true}).inputValue(),'2099-11-07');
+  await page.getByLabel('Data',{exact:true}).fill('2099-11-08');
+  await page.getByRole('button',{name:'Programma',exact:true}).click();
+  await page.getByText('Da programmare').waitFor();
+  assert.equal(await page.evaluate(()=>plugin.allocations[0].date),'2099-11-08');
+  await page.locator('.tempvs-sessions').getByLabel('Ora di inizio').fill('13:00');
+  await page.evaluate(()=>view.update(true));
+  assert.equal(await page.locator('.tempvs-sessions').getByLabel('Ora di inizio').inputValue(),'13:00');
+  await page.getByRole('button',{name:'Imposta orario'}).click();
+  await page.waitForFunction(()=>plugin.allocations.length===0&&plugin.state.sessions.some(s=>s.date==='2099-11-08'&&s.start==='13:00'));
+  await page.evaluate(()=>plugin.app.workspace.getActiveFile=()=>null);
   // Exercise the actual TEMPVS Markdown code-block processor with a vault adapter.
   await page.evaluate(()=>{
     window.dailyText='# Daily\n\n```TEMPVS\nStudio +10:00-12:00 -30m\n```\n\nAltre note.';
@@ -168,6 +187,15 @@ try {
   });
   await page.waitForFunction(()=>plugin.estimates.notes.length===1);
   await page.waitForFunction(()=>document.querySelector('.estimate-container')?.textContent.includes('20 h'));
+  await page.locator('.estimate-container').getByRole('button',{name:'Assegna tempo',exact:true}).click();
+  const day=await page.getByLabel('Giorno di studio').inputValue();
+  const localToday=await page.evaluate(()=>{
+    const d=new Date();return [d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');
+  });
+  assert.equal(day,localToday);
+  await page.getByLabel('Giorno di studio').fill('2099-11-09');
+  await page.getByRole('button',{name:'Assegna tempo',exact:true}).last().click();
+  await page.waitForFunction(()=>plugin.allocations.some(a=>a.date==='2099-11-09'&&a.note?.path==='Studio/Platone.md'));
   const estimates=page.locator('.tempvs-estimates');
   await estimates.locator('.tempvs-estimate-details > summary').click();
   await estimates.getByLabel('Azioni studio').click();

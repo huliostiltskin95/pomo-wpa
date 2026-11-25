@@ -1,3 +1,4 @@
+import {validDay} from './daily-plan.js';
 import {syntaxExtension} from './syntax-editor.js';
 import {expandRange} from './plain-syntax.js';
 import {readableDuration} from './area-register.js';
@@ -98,7 +99,11 @@ class TempvsView extends ItemView {
   getViewType() { return VIEW_TYPE; }
   getDisplayText() { return "TEMPVS"; }
   getIcon() { return "timer"; }
-  async onOpen() { this.draw(); }
+  async onOpen() { this.followDailyNote(); this.draw(); }
+  followDailyNote() {
+    const date=this.plugin.daily.panelDay();
+    if(date){this.day=date;this.dailyContext=this.plugin.app.workspace.getActiveFile()?.path+":"+date;}
+  }
   async onClose() {}
   draw() {
     const plugin = this.plugin;
@@ -130,10 +135,10 @@ class TempvsView extends ItemView {
     const sessionHeader = root.createDiv({cls:"tempvs-section-heading"});
     sessionHeader.createEl("h4",{text:"La tua agenda"});
     const nav = sessionHeader.createDiv({cls:"tempvs-date-nav"});
-    iconButton(nav,"chevron-left","Giorno precedente",()=>{this.day=shiftDate(this.day,-1);this.update(true);});
+    iconButton(nav,"chevron-left","Giorno precedente",()=>this.selectDay(shiftDate(this.day,-1)));
     const dateLabel = nav.createEl("button",{cls:"tempvs-day-label",text:"Oggi",attr:{title:"Torna a oggi","aria-label":"Data selezionata: oggi. Torna a oggi"}});
-    dateLabel.onclick=()=>{this.day=today();this.update(true);};
-    iconButton(nav,"chevron-right","Giorno successivo",()=>{this.day=shiftDate(this.day,1);this.update(true);});
+    dateLabel.onclick=()=>this.selectDay(today());
+    iconButton(nav,"chevron-right","Giorno successivo",()=>this.selectDay(shiftDate(this.day,1)));
     root.createDiv({cls:"tempvs-daily-status",attr:{role:"status"}});
     root.createDiv({cls:"tempvs-sessions"});
     root.createDiv({cls:"tempvs-estimates"});
@@ -188,13 +193,32 @@ class TempvsView extends ItemView {
     });
     const planBox=create.createDiv({cls:"tempvs-method-plan"});
     const plan=planBox.createEl("form",{cls:"tempvs-form"});
-    const dateInput=field(plan,"Giorno").createEl("input",{attr:{type:"date","aria-label":"Data",value:today()}});
+    this.planDay=null;
+    const dateInput=field(plan,"Giorno").createEl("input",{attr:{type:"date","aria-label":"Data",value:this.day}});
     dateInput.required=true;
     const plannedArea=field(plan,"Area").createEl("select",{attr:{"aria-label":"Area da pianificare"}});
     for(const a of plugin.config.areas)plannedArea.createEl("option",{text:a.name,value:a.name});
     const planFields=plan.createDiv({cls:"tempvs-plan-fields"});
-    const startTime=field(planFields,"Ora di inizio").createEl("input",{attr:{type:"time",required:"",value:"09:00"}});
+    const startTime=field(planFields,"Ora di inizio").createEl("input",{attr:{type:"time"}});
     const duration=field(planFields,"Durata · minuti").createEl("input",{attr:{type:"number",min:"1",max:"1439",value:"30",required:""}});
+    plan.createEl("p",{text:"Lascia vuoto l’orario per assegnare la durata e impostare il timer in seguito."});
+    let plannedNote;
+    const noteField=plan.createDiv({cls:"tempvs-controls"});
+    const noteChoice=button(noteField,"Collega nota dell’attività",()=>new SessionNotePicker(plugin.app,value=>{
+      const [note]=noteLinks(value);
+      if(!note)throw Error("Nota non valida.");
+      plannedNote=note;
+      noteChoice.textContent=note.label;
+      clearNote.hidden=false;
+    }).open());
+    noteChoice.type="button";
+    const clearNote=button(noteField,"Scollega nota dell’attività",()=>{
+      plannedNote=undefined;
+      noteChoice.textContent="Collega nota dell’attività";
+      clearNote.hidden=true;
+    });
+    clearNote.type="button";
+    clearNote.hidden=true;
     const cycleInput=field(plan,"Pomodoro lordo · minuti (facoltativo)").createEl("input",{attr:{type:"number",min:"1",max:"1439",placeholder:"Es. 60 → 50 focus + 10 pausa","aria-label":"Durata lorda del pomodoro"}});
     const cycleHint=plan.createEl("p",{cls:"tempvs-help",text:"Lascia vuoto per usare il focus predefinito. La durata totale della sessione comprende tutte le pause."});
     cycleInput.addEventListener("input",()=>{
@@ -208,6 +232,7 @@ class TempvsView extends ItemView {
     const updatePlanMode=()=>{
       const textMode=Boolean(lines.value.trim());
       for(const input of [plannedArea,startTime,duration,cycleInput])input.disabled=textMode;
+      noteField.hidden=textMode;
     };
     lines.addEventListener("input",updatePlanMode);
     plan.createEl("button",{text:"Programma",cls:"mod-cta",attr:{type:"submit"}});
@@ -216,9 +241,16 @@ class TempvsView extends ItemView {
       if(plan.dataset.busy)return;
       plan.dataset.busy="true";
       const submit=plan.querySelector('[type="submit"]');submit.disabled=true;
-      const text=lines.value.trim() || `${plannedArea.value} @${duration.value}m +${startTime.value}${cycleInput.value?" -"+cycleInput.value+"m":""}`;
-      plugin.schedule(text,dateInput.value).then(()=>{
-        lines.value="";updatePlanMode();this.day=dateInput.value;this.togglePanel(null,true);this.update(true);
+      const date=dateInput.value;
+      const text=lines.value.trim();
+      const area=plugin.config.areas.find(a=>a.name===plannedArea.value);
+      const request={area:area?.name,areaId:area?.id,minutes:duration.valueAsNumber};
+      if(cycleInput.value)request.cycleMinutes=cycleInput.valueAsNumber;
+      const save=text?plugin.schedule(text,date):startTime.value
+        ?plugin.scheduleRequests([{...request,start:startTime.value}],date,plannedNote)
+        :plugin.assignTime(request,date,plannedNote);
+      save.then(()=>{
+        clearNote.click();lines.value="";startTime.value="";updatePlanMode();this.togglePanel(null,true);this.selectDay(date);
       }).catch(err=>new Notice(err.message))
         .finally(()=>{delete plan.dataset.busy;submit.disabled=false;});
     });
@@ -253,6 +285,11 @@ class TempvsView extends ItemView {
     };
     this.showCreation();
     this.applyPanel();
+    this.update(true);
+  }
+  selectDay(day) {
+    this.day=day;
+    this.showCreation();
     this.update(true);
   }
   showCreation() {
@@ -373,6 +410,8 @@ class TempvsView extends ItemView {
       dayLabel.setAttribute("aria-label","Data selezionata: "+this.day+". Torna a oggi");
     }
     const list=root.querySelector(".tempvs-sessions");
+    const pendingTime=new Map([...list.querySelectorAll("[data-allocation]")].map(input=>[input.dataset.allocation,input.value]));
+    const focusedTime=list.ownerDocument?.activeElement?.dataset?.allocation;
     list.empty();
     const now=new Date();
     const registered=plugin.state.history.filter(h=>h.registerBlock&&h.registerDay===this.day);
@@ -396,6 +435,28 @@ class TempvsView extends ItemView {
       const totals=new Map();
       for(const r of registered)totals.set(r.area,(totals.get(r.area)||0)+r.minutes);
       if(!budgets.length)list.createEl('small',{text:[...totals].map(([area,min])=>area+' '+min+' min').join(' · ')});
+    }
+    for(const allocation of plugin.allocations.filter(item=>item.date===this.day)){
+      const item=list.createDiv({cls:"tempvs-session"});
+      const form=item.createEl("form",{cls:"tempvs-form"});
+      form.createEl("strong",{text:allocation.area+" · "+allocation.minutes+" min · Da programmare"});
+      if(allocation.note)button(item,allocation.note.label,()=>plugin.app.workspace.openLinkText(allocation.note.path,"",false));
+      const time=form.createEl("label",{text:"Ora di inizio"}).createEl("input",{attr:{type:"time",required:""}});
+      time.dataset.allocation=allocation.id;
+      time.value=pendingTime.get(allocation.id)||"";
+      if(focusedTime===allocation.id)time.focus({preventScroll:true});
+      const submit=form.createEl("button",{text:"Imposta orario",attr:{type:"submit"}});
+      form.onsubmit=async event=>{
+        event.preventDefault();
+        if(submit.disabled)return;
+        submit.disabled=true;
+        try{await plugin.scheduleAllocation(allocation.id,time.value);}
+        catch(error){new Notice(error.message);}
+        finally{submit.disabled=false;}
+      };
+      iconButton(item,"trash-2","Elimina tempo assegnato",()=>plugin.change(()=>{
+        plugin.allocations=plugin.allocations.filter(entry=>entry.id!==allocation.id);
+      }));
     }
     const sessions=plugin.state.sessions.filter(s=>{
       if(s.registerMinutes)return false;
@@ -560,6 +621,7 @@ export default class TempvsPlugin extends Plugin {
       if (data && !data.archive && !Array.isArray(data.sessions) && Object.keys(data).length)
         throw Error("Formato precedente non riconosciuto: nessun dato verrà sovrascritto.");
       this.state = normalizeArchive(data?.archive || (Array.isArray(data?.sessions) ? data : ZERO()));
+      this.allocations=Array.isArray(data?.allocations)?data.allocations:[];
       this.dailyNotes=Object.assign(Object.create(null),data?.dailyNotes||{});
       this.cloudData = data?.cloudData && typeof data.cloudData === "object" ? data.cloudData : {};
       this.compact = typeof data?.ui?.compact === "boolean" ? data.ui.compact : Platform.isMobile;
@@ -776,8 +838,9 @@ export default class TempvsPlugin extends Plugin {
     const cloudData = this.cloudStorage?.snapshot() || {};
     const audio={kind:this.audioKind,volume:this.audioVolume};
     const notifications={sound:this.chimeEnabled};
+    const allocations=JSON.parse(JSON.stringify(this.allocations));
     const dailyNotes=JSON.parse(JSON.stringify(this.dailyNotes||{}));
-    const write = this.writeChain.catch(() => {}).then(() => this.saveData({ archive, cloudData, ui:{compact:this.compact,layout:this.layout,timerStyle:this.timerStyle,clockSize:this.clockSize},audio,notifications,dailyNotes }));
+    const write = this.writeChain.catch(() => {}).then(() => this.saveData({ archive, cloudData, ui:{compact:this.compact,layout:this.layout,timerStyle:this.timerStyle,clockSize:this.clockSize},audio,notifications,dailyNotes,allocations }));
     this.writeChain = write;
     await write;
     if (JSON.stringify(this.state) === JSON.stringify(archive)) this.dirty = false;
@@ -789,8 +852,9 @@ export default class TempvsPlugin extends Plugin {
     try {
       this.record();
       const previous=JSON.stringify(this.state);
+      const previousAllocations=this.allocations;
       try {mutator();this.state=normalizeArchive(this.state);await this.persist();}
-      catch(error){this.state=JSON.parse(previous);this.refresh(true);throw error;}
+      catch(error){this.state=JSON.parse(previous);this.allocations=previousAllocations;this.refresh(true);throw error;}
       // Local save succeeded: failure to persist sync metadata must not undo it.
       try {this.cloud?.changed();await this.persist();}
       catch(error){new Notice('TEMPVS: dati salvati in locale; sincronizzazione da riprovare. '+error.message);}
@@ -866,11 +930,45 @@ export default class TempvsPlugin extends Plugin {
     const requests = parseQuick(text.split('\n').map(line => expandRange(line.trim())).join('\n'), this.config.areas);
     if (!requests.length) throw Error("Inserisci almeno una sessione.");
     if (requests.some(r => !r.start)) throw Error("Per ora specifica +HH:MM per ogni sessione. Le fasce automatiche saranno aggiunte successivamente.");
-    const result = planSessions(requests, [], this.state.sessions.filter(s => !s.finished),
-      this.state.defaults, new Date(), uuid, date);
-    if (result.remainder || !result.sessions?.length) throw Error("Programmazione incompleta.");
-    await this.change(() => this.state.sessions.push(...result.sessions));
-    new Notice("TEMPVS: " + result.sessions.length + " sessioni programmate.");
+    await this.scheduleRequests(requests,date);
+    new Notice("TEMPVS: " + requests.length + " sessioni programmate.");
+  }
+  async assignTime(request,date,note) {
+    if(!validDay(date))throw Error("Data non valida.");
+    if(!this.config.areas.some(area=>area.name===request.area))throw Error("Area non valida.");
+    if(!Number.isInteger(request.minutes)||request.minutes<1||request.minutes>1439)
+      throw Error("Durata da 1 a 1439 minuti.");
+    planSessions([request],[],[],this.state.defaults);
+    await this.change(()=>{
+      this.allocations=[...this.allocations,{...request,date,note,id:uuid()}];
+    });
+  }
+  async scheduleRequests(requests,date,note) {
+    if(!validDay(date))throw Error("Data non valida.");
+    await this.change(()=>{
+      const sessions=this.plannedSessions(requests,date);
+      if(note)for(const session of sessions)session.linkedNotes=[note];
+      this.state.sessions.push(...sessions);
+    });
+  }
+  plannedSessions(requests,date) {
+    const result=planSessions(requests,[],this.state.sessions.filter(s=>!s.finished&&!s.dailyRetired&&!s.manualSuperseded),
+      this.state.defaults,new Date(),uuid,date);
+    if(result.remainder||!result.sessions.length)throw Error("Programmazione incompleta.");
+    return result.sessions;
+  }
+  async scheduleAllocation(id,start) {
+    await this.change(()=>{
+      const allocation=this.allocations.find(entry=>entry.id===id);
+      if(!allocation)throw Error("Tempo assegnato non più disponibile.");
+      const {date,note,area,areaId,minutes,cycleMinutes}=allocation;
+      const currentArea=this.config.areas.find(item=>(areaId&&item.id===areaId)||item.name===area);
+      if(!currentArea)throw Error("Area non più disponibile.");
+      const [session]=this.plannedSessions([{area:currentArea.name,areaId:currentArea.id,minutes,cycleMinutes,start}],date);
+      if(note)session.linkedNotes=[note];
+      this.state.sessions.push(session);
+      this.allocations=this.allocations.filter(entry=>entry.id!==id);
+    });
   }
   async togglePause() {
     const s = this.active();
