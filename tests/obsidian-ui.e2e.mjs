@@ -134,11 +134,27 @@ try {
   await page.getByText('Da programmare').waitFor();
   await page.evaluate(async()=>{
     const file=allocationVault.getAbstractFileByPath('2099-11-08.md');
-    file.text=file.text.replace('@120m','@90m');
+    file.text=file.text.replace('- @120m','- [[Letture/Santrock|Santrock et al. (2017) Psicologia dello sviluppo: p. 101–102]] @90m');
     if(!file.text.includes('```TEMPVS'))throw Error('Missing unified block');
     await plugin.daily.syncFile(file.path);
   });
   await page.getByText('90 min · Da programmare').waitFor();
+  const allocation=page.locator('.tempvs-allocation').first();
+  for(const width of [280,390,800]){
+    await page.setViewportSize({width,height:844});
+    const layout=await allocation.evaluate(card=>{
+      const controls=[...card.querySelectorAll('button,input')];
+      const rects=controls.map(el=>el.getBoundingClientRect());
+      const bounds=card.getBoundingClientRect();
+      return {
+        outside:rects.some(r=>r.left<bounds.left||r.right>bounds.right),
+        overlapping:rects.some((a,i)=>rects.slice(i+1).some(b=>a.left<b.right&&b.left<a.right&&a.top<b.bottom&&b.top<a.bottom)),
+        clipped:controls.some(el=>el.tagName==='BUTTON'&&(el.scrollWidth>el.clientWidth||el.scrollHeight>el.clientHeight))
+      };
+    });
+    assert.deepEqual(layout,{outside:false,overlapping:false,clipped:false},'allocation card at '+width+'px');
+  }
+  await page.setViewportSize({width:390,height:844});
   await page.locator('.tempvs-sessions').getByLabel('Ora di inizio').fill('13:00');
   await page.evaluate(()=>view.update(true));
   assert.equal(await page.locator('.tempvs-sessions').getByLabel('Ora di inizio').inputValue(),'13:00');

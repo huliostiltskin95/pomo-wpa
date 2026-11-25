@@ -441,10 +441,20 @@ class TempvsView extends ItemView {
       if(!budgets.length)list.createEl('small',{text:[...totals].map(([area,min])=>area+' '+min+' min').join(' · ')});
     }
     for(const allocation of plugin.allocatedOn(this.day)){
-      const item=list.createDiv({cls:"tempvs-session"});
-      const form=item.createEl("form",{cls:"tempvs-form"});
-      form.createEl("strong",{text:allocation.area+" · "+allocation.minutes+" min · Da programmare"});
-      if(allocation.note)button(item,allocation.note.label,()=>plugin.app.workspace.openLinkText(allocation.note.path,allocation.file?.path||"",false));
+      const item=list.createDiv({cls:"tempvs-session tempvs-allocation"});
+      const heading=item.createDiv({cls:"tempvs-allocation-heading"});
+      heading.createEl("strong",{text:allocation.area+" · "+allocation.minutes+" min · Da programmare"});
+      iconButton(heading,"trash-2","Elimina tempo assegnato",()=>plugin.removeAllocation(allocation));
+      const links=item.createDiv({cls:"tempvs-allocation-links"});
+      if(allocation.note){
+        const note=button(links,allocation.note.label,()=>plugin.app.workspace.openLinkText(allocation.note.path,allocation.file?.path||"",false));
+        note.addClass("tempvs-allocation-link");
+      }
+      if(allocation.file){
+        const daily=button(links,"Apri nota giornaliera",()=>plugin.app.workspace.openLinkText(allocation.file.path,"",false));
+        daily.addClass("tempvs-allocation-link");
+      }
+      const form=item.createEl("form",{cls:"tempvs-allocation-form"});
       const time=form.createEl("label",{text:"Ora di inizio"}).createEl("input",{attr:{type:"time",required:""}});
       time.dataset.allocation=allocation.id;
       time.value=pendingTime.get(allocation.id)||"";
@@ -458,8 +468,6 @@ class TempvsView extends ItemView {
         catch(error){new Notice(error.message);}
         finally{submit.disabled=false;}
       };
-      if(allocation.file)button(item,"Apri nota giornaliera",()=>plugin.app.workspace.openLinkText(allocation.file.path,"",false));
-      iconButton(item,"trash-2","Elimina tempo assegnato",()=>plugin.removeAllocation(allocation));
     }
     const sessions=plugin.state.sessions.filter(s=>{
       if(s.registerMinutes||s.registerPlanned)return false;
