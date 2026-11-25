@@ -111,7 +111,19 @@ try {
   // A daily note with no TEMPVS block still drives the panel.
   await page.evaluate(()=>{
     const file={path:'Daily/2099-11-07.md',basename:'2099-11-07',extension:'md'};
-    plugin.app.workspace.getActiveFile=()=>file;
+    const files=new Map([[file.path,{...file,text:'# Daily'}]]);
+    window.allocationVault={
+      getAbstractFileByPath:path=>files.get(path),
+      read:async file=>file.text,
+      process:async(file,edit)=>{file.text=edit(file.text);},
+      create:async(path,text)=>{
+        const file={path,text,basename:path.split('/').at(-1).slice(0,-3),extension:'md'};
+        files.set(path,file);
+        return file;
+      }
+    };
+    plugin.app.vault=allocationVault;
+    plugin.app.workspace.getActiveFile=()=>files.get(file.path);
     workspaceEvents['file-open'](file);
   });
   assert.equal(await page.evaluate(()=>view.day),'2099-11-07');
@@ -120,12 +132,17 @@ try {
   await page.getByLabel('Data',{exact:true}).fill('2099-11-08');
   await page.getByRole('button',{name:'Programma',exact:true}).click();
   await page.getByText('Da programmare').waitFor();
-  assert.equal(await page.evaluate(()=>plugin.allocations[0].date),'2099-11-08');
+  await page.evaluate(async()=>{
+    const file=allocationVault.getAbstractFileByPath('2099-11-08.md');
+    file.text=file.text.replace('@120m','@90m');
+    await plugin.daily.syncFile(file.path);
+  });
+  await page.getByText('90 min · Da programmare').waitFor();
   await page.locator('.tempvs-sessions').getByLabel('Ora di inizio').fill('13:00');
   await page.evaluate(()=>view.update(true));
   assert.equal(await page.locator('.tempvs-sessions').getByLabel('Ora di inizio').inputValue(),'13:00');
   await page.getByRole('button',{name:'Imposta orario'}).click();
-  await page.waitForFunction(()=>plugin.allocations.length===0&&plugin.state.sessions.some(s=>s.date==='2099-11-08'&&s.start==='13:00'));
+  await page.waitForFunction(()=>plugin.allocatedOn('2099-11-08').length===0&&plugin.state.sessions.some(s=>s.date==='2099-11-08'&&s.start==='13:00'&&s.end==='14:30'));
   await page.evaluate(()=>plugin.app.workspace.getActiveFile=()=>null);
   // Exercise the actual TEMPVS Markdown code-block processor with a vault adapter.
   await page.evaluate(()=>{
@@ -181,7 +198,10 @@ try {
     const previous=plugin.app.vault;
     window.estimateText='```tempus\n@Studio 20 -30m\n@Studio 10 -60m\n```';
     const file={path:'Studio/Platone.md',basename:'Platone',extension:'md'};
-    plugin.app.vault={...previous,getName:()=> 'Test',getAbstractFileByPath:path=>path===file.path?file:previous.getAbstractFileByPath(path),read:async f=>f.path===file.path?estimateText:previous.read(f)};
+    plugin.app.vault={...previous,getName:()=> 'Test',
+     getAbstractFileByPath:path=>path===file.path?file:previous.getAbstractFileByPath(path)||allocationVault.getAbstractFileByPath(path),
+     read:async f=>f.path===file.path?estimateText:f.path==='Daily/2099-11-06.md'?previous.read(f):allocationVault.read(f),
+     create:allocationVault.create};
     const root=document.body.createDiv({cls:'estimate-container'});
     plugin.processors.tempus('@Studio 20 -30m\n@Studio 10 -60m',root,{sourcePath:file.path,addChild:child=>{window.estimateChild=child;child.onload();}});
   });
@@ -195,7 +215,7 @@ try {
   assert.equal(day,localToday);
   await page.getByLabel('Giorno di studio').fill('2099-11-09');
   await page.getByRole('button',{name:'Assegna tempo',exact:true}).last().click();
-  await page.waitForFunction(()=>plugin.allocations.some(a=>a.date==='2099-11-09'&&a.note?.path==='Studio/Platone.md'));
+  await page.waitForFunction(()=>allocationVault.getAbstractFileByPath('2099-11-09.md')?.text.includes('[[Studio/Platone.md|Platone]]'));
   const estimates=page.locator('.tempvs-estimates');
   await estimates.locator('.tempvs-estimate-details > summary').click();
   await estimates.getByLabel('Azioni studio').click();

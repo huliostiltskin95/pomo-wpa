@@ -1,3 +1,4 @@
+import {allocationBlock,allocationRow,appendAllocation,readAllocations} from './daily-allocations.js';
 import {DailyPlannerModal} from './daily-planner-modal.js';
 import {creditedWork} from './daily-register.js';
 import {isLedger,updateLedger} from './note-ledger.js';
@@ -25,10 +26,14 @@ export function restoreRowIds(original,edited){
  }).join('\n');
 }
 export class DailyBlocks {
- constructor(plugin){this.plugin=plugin;this.children=new Set();this.chain=Promise.resolve();this.destroyed=false;this.applying=false;this.timers=new Map();this.errors=new Map();this.detached=new Set();this.ledgerVersions=new Map();}
+ constructor(plugin){this.plugin=plugin;this.children=new Set();this.chain=Promise.resolve();this.destroyed=false;this.applying=false;this.timers=new Map();this.errors=new Map();this.detached=new Set();this.ledgerVersions=new Map();this.allocationsByDay=new Map();}
  get bindings(){return this.plugin.dailyNotes;}
  start(){
   for(const language of ['TEMPVS','tempvs','TEMPUS','tempus'])this.plugin.registerMarkdownCodeBlockProcessor(language,(source,el,ctx)=>ctx.addChild(new DailyBlock(el,this,ctx,source)));
+  this.plugin.registerMarkdownCodeBlockProcessor('tempvs-assegnazioni',(source,el)=>{
+   el.createEl('strong',{text:'TEMPVS · Da programmare'});
+   el.createEl('pre').createEl('code',{text:source.replace(/\s+<!-- tempvs-allocation:[\w-]+ -->/g,'')});
+  });
   const vault=this.plugin.app.vault;
   if(this.plugin.app.workspace.on)this.plugin.registerEvent(this.plugin.app.workspace.on('editor-change',(_editor,view)=>{if(view?.file?.extension==='md')this.schedule(view.file.path);}));
   if(this.plugin.app.workspace.on)this.plugin.registerEvent(this.plugin.app.workspace.on('file-open',file=>{
@@ -41,6 +46,10 @@ export class DailyBlocks {
   }));
   if(vault?.on){
    this.plugin.registerEvent(vault.on('modify',file=>{if(file.extension==='md')this.schedule(file.path);}));
+   this.plugin.registerEvent(vault.on('delete',file=>{
+    for(const [day,entries] of this.allocationsByDay)if(entries.some(entry=>entry.file.path===file.path))this.allocationsByDay.delete(day);
+    this.plugin.refresh?.(true);
+   }));
    this.plugin.registerEvent(vault.on('delete',file=>{this.plugin.estimates?.archive(file.path).catch(e=>new Notice(e.message));}));
    this.plugin.registerEvent(vault.on('rename',(file,oldPath)=>{
     const newPath=file.path;
@@ -55,6 +64,108 @@ export class DailyBlocks {
   }});
   this.plugin.addCommand({id:'insert-daily-plan',name:'Inserisci blocco TEMPVS nella nota',editorCallback:editor=>editor.replaceSelection('```TEMPVS\n\n```\n')});
   this.plugin.app.workspace.onLayoutReady?.(()=>this.initialize().catch(error=>new Notice('TEMPVS: '+error.message)));
+ }
+ dailyLocation(date){
+  const {workspace,vault,internalPlugins}=this.plugin.app;
+  const active=workspace.getActiveFile?.();
+  const binding=Object.values(this.bindings).find(entry=>entry.date===date);
+  const settings=internalPlugins?.getPluginById('daily-notes')?.instance?.options||{};
+  const format=settings.format||'YYYY-MM-DD';
+  const name=moment?.(date,'YYYY-MM-DD',true)?.format?.(format)||date;
+  const path=[settings.folder,name+'.md'].filter(Boolean).join('/').replace(/^\/+|\/+(?=\/)/g,'');
+  const activeMatches=active?.extension==='md'&&(active.basename===date||active.basename===name.split('/').at(-1));
+  const cached=this.allocationsByDay.get(date)?.[0]?.file;
+  const file=(binding&&vault?.getAbstractFileByPath(binding.path))||
+   (activeMatches?active:null)||vault?.getAbstractFileByPath(path)||(cached&&vault?.getAbstractFileByPath(cached.path));
+  return {file:file?.extension==='md'?file:null,path,settings};
+ }
+ async loadAllocations(date,file=this.dailyLocation(date).file){
+  if(!file){
+   if(this.allocationsByDay.delete(date))this.plugin.refresh?.(true);
+   return;
+  }
+  const markdown=await this.readMarkdown(file);
+  this.cacheAllocations(date,file,markdown);
+ }
+ cacheAllocations(date,file,markdown){
+  const entries=readAllocations(allocationBlock(markdown),file,date,this.plugin.state.defaults.simple.areas);
+  const previous=this.allocationsByDay.get(date)||[];
+  if(!entries.length)this.allocationsByDay.delete(date);
+  else this.allocationsByDay.set(date,entries);
+  if(JSON.stringify(previous.map(({file,...entry})=>entry))!==JSON.stringify(entries.map(({file,...entry})=>entry)))
+   this.plugin.refresh?.(true);
+ }
+ async writeAllocation(allocation){
+  await this.queue(async()=>{
+   const {vault}=this.plugin.app;
+   let markdown;
+   let {file,path,settings}=this.dailyLocation(allocation.date);
+   if(!file){
+    const folders=path.split('/').slice(0,-1);
+    for(let i=1;i<=folders.length;i++){
+     const folder=folders.slice(0,i).join('/');
+     if(!vault.getAbstractFileByPath(folder))await vault.createFolder(folder);
+    }
+    const template=settings.template&&(
+     this.plugin.app.metadataCache?.getFirstLinkpathDest?.(settings.template,'')||
+     vault.getAbstractFileByPath(settings.template)
+    );
+    const initial=template?.extension==='md'?await vault.read(template):'';
+    const day=moment?.(allocation.date,'YYYY-MM-DD',true);
+    const title=path.split('/').at(-1).slice(0,-3);
+    const body=initial.replace(/{{title}}/gi,()=>title)
+     .replace(/{{date(?::([^}]+))?}}/gi,(_all,format)=>day?.format?.(format||'YYYY-MM-DD')||allocation.date)
+     .replace(/{{time(?::([^}]+))?}}/gi,(all,format)=>moment?.()?.format?.(format||'HH:mm')||all);
+    markdown=appendAllocation(body,allocationRow(allocation));
+    file=await vault.create(path,markdown);
+   }else{
+    const before=markdown=await this.readMarkdown(file);
+    const entries=readAllocations(allocationBlock(before),file,allocation.date,this.plugin.state.defaults.simple.areas);
+    if(!allocation.id||!entries.some(entry=>entry.id===allocation.id)){
+     markdown=appendAllocation(before,allocationRow(allocation));
+     await this.replaceAllocationText(file,before,markdown);
+    }
+   }
+   this.cacheAllocations(allocation.date,file,markdown);
+  });
+ }
+ async replaceAllocationText(file,before,after){
+  const {vault,workspace}=this.plugin.app;
+  await vault.process(file,current=>{
+   if(current!==before||(workspace.getLeavesOfType?.('markdown')||[]).some(({view})=>
+    view?.file?.path===file.path&&view.getMode?.()!=='preview'&&view.editor&&view.editor.getValue()!==current))
+    throw Error('La nota sta cambiando. Attendi il salvataggio e riprova.');
+   return after;
+  });
+ }
+ async consumeAllocation(entry,commit){
+  await this.queue(async()=>{
+   const {file,date,index,raw}=entry;
+   const before=await this.readMarkdown(file),block=allocationBlock(before);
+   const lines=block?.source.split(/\r?\n/);
+   if(lines?.[index]!==raw)throw Error('L’assegnazione è cambiata. Riapri la giornata e riprova.');
+   lines.splice(index,1);
+   const after=replaceDailyBlock(before,block,lines.join('\n'));
+   await this.replaceAllocationText(file,before,after);
+   this.applying=true;
+   try{if(commit)await commit();}
+   catch(error){
+    await this.replaceAllocationText(file,after,before);
+    throw error;
+   }finally{this.applying=false;}
+   this.cacheAllocations(date,file,after);
+  });
+  if(commit)await this.archiveChanged();
+ }
+ async migrateAllocations(){
+  for(const entry of this.plugin.allocations||[]){
+   try{
+    await this.writeAllocation(entry);
+    await this.plugin.change(()=>{
+     this.plugin.allocations=this.plugin.allocations.filter(item=>item.id!==entry.id);
+    });
+   }catch(error){new Notice('TEMPVS: assegnazione del '+entry.date+' ancora da trasferire. '+error.message);}
+  }
  }
  async plannerTarget(){
   const {workspace,vault,internalPlugins}=this.plugin.app;
@@ -184,6 +295,7 @@ export class DailyBlocks {
    if(this.destroyed)return;
    try{await this.syncFile(file.path,{force:true});}catch(error){this.errors.set(file.path,error.message);}
   }
+  await this.migrateAllocations();
   await this.archiveChanged();
  }
  async reconcilePlans(){
@@ -203,7 +315,7 @@ export class DailyBlocks {
   if(bound)return bound.date;
   try{
    return resolveDailyDate('',file,{
-    moment:globalThis.moment,
+    moment:moment||globalThis.moment,
     format:this.plugin.app.internalPlugins?.getPluginById('daily-notes')?.instance?.options?.format||'YYYY-MM-DD',
     frontmatter:this.plugin.app.metadataCache?.getFileCache(file)?.frontmatter
    });
@@ -274,6 +386,12 @@ export class DailyBlocks {
  syncFile(path,{force=false}={}){return this.queue(async()=>{
   if(this.detached.has(path))return;
   const context=await this.context(path);
+  const file=context?.file||this.plugin.app.vault.getAbstractFileByPath(path);
+  const date=context?.date||this.panelDay(file);
+  if(date&&file){
+   const target=this.dailyLocation(date).file;
+   if(context?.date||!target||target.path===file.path)await this.loadAllocations(date,file);
+  }
   if(!context){
    const id=this.bindingId(path);
    if(id&&isRegister(this.bindings[id].source)){

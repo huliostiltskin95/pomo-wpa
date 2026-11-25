@@ -34,13 +34,13 @@ export function resolveDailyDate(source,file,{format='YYYY-MM-DD',moment,frontma
  throw Error('Data della daily note non riconosciuta. Aggiungi «date: YYYY-MM-DD» al blocco TEMPVS.');
 }
 // Parse only top-level fences; never interpret an example inside another code fence.
-export function findDailyBlocks(markdown,includeUnclosed=false){
+export function findDailyBlocks(markdown,includeUnclosed=false,language=/^(tempvs|tempus)$/i){
  const lines=markdown.match(/[^\n]*\n|[^\n]+$/g)||[];let fence=null,offset=0;const blocks=[];
  for(let i=0;i<lines.length;i++){
   const line=lines[i].replace(/\r?\n$/,'');
   if(!fence){
    const match=line.match(/^ {0,3}(`{3,}|~{3,})([^\r\n]*)$/);
-   if(match){fence={char:match[1][0],length:match[1].length,start:offset+lines[i].length,line:i,isTempvs:/^(tempvs|tempus)$/i.test(match[2].trim())};}
+   if(match){fence={char:match[1][0],length:match[1].length,start:offset+lines[i].length,line:i,isTempvs:language.test(match[2].trim())};}
   }else if(new RegExp('^ {0,3}'+fence.char+'{'+fence.length+',}\\s*$').test(line)){
    if(fence.isTempvs)blocks.push({start:fence.start,end:offset,lineStart:fence.line,source:markdown.slice(fence.start,offset).replace(/\r?\n$/,'')});
    fence=null;

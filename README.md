@@ -1,8 +1,12 @@
-## Obsidian 0.5.34 · pianificazione per data
+## Obsidian 0.5.35 · assegnazioni nella nota giornaliera
 
-Apri una nota giornaliera accanto a TEMPVS. L’agenda ne mostra la data. Usa le frecce dell’agenda o scegli un’altra data nel modulo **Pianifica**. Imposta i minuti, collega eventualmente la nota dell’attività e lascia vuota l’ora di inizio. Nel giorno scelto, inserisci l’ora nella riga **Da programmare** e premi **Imposta orario**.
+Lascia vuoto l’orario in **Pianifica** o usa **Assegna tempo** dalla nota di lettura. TEMPVS aggiunge una riga nella nota giornaliera della data scelta. In modalità Modifica puoi cambiare area, durata o nota collegata, oppure rimuovere la riga:
 
-Per una nota di lettura con una stima TEMPVS usa **Assegna tempo**. Il modulo propone oggi e consente di scegliere qualsiasi data. I minuti assegnati restano nel vault corrente fino alla programmazione del timer.
+```tempvs-assegnazioni
+Studio @40m [[Letture/Libro]]
+```
+
+Per impostare l’orario, usa **Da programmare** nell’agenda. Le assegnazioni salvate con TEMPVS 0.5.34 vengono trasferite all’apertura di Obsidian.
 
 ## Attività nelle note Obsidian
 

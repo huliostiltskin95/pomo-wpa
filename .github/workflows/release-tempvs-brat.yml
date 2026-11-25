@@ -116,4 +116,4 @@ jobs:
             obsidian/dist/styles.css#styles.css \
             --target "${{ github.sha }}" \
             --title "TEMPVS $VERSION" \
-            --notes "Agenda sulla data della nota giornaliera, durata assegnabile prima di scegliere un orario e pianificazione dello studio dalla nota di lettura."
+            --notes "Le assegnazioni senza orario vengono salvate nella nota giornaliera e si possono modificare direttamente in Markdown."

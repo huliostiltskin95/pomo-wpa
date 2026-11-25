@@ -99,7 +99,10 @@ class TempvsView extends ItemView {
   getViewType() { return VIEW_TYPE; }
   getDisplayText() { return "TEMPVS"; }
   getIcon() { return "timer"; }
-  async onOpen() { this.followDailyNote(); this.draw(); }
+  async onOpen() { this.followDailyNote(); this.draw(); this.loadAllocations(); }
+  loadAllocations() {
+    this.plugin.daily.loadAllocations(this.day).catch(error=>new Notice(error.message));
+  }
   followDailyNote() {
     const date=this.plugin.daily.panelDay();
     if(date){this.day=date;this.dailyContext=this.plugin.app.workspace.getActiveFile()?.path+":"+date;}
@@ -289,6 +292,7 @@ class TempvsView extends ItemView {
   }
   selectDay(day) {
     this.day=day;
+    this.loadAllocations();
     this.showCreation();
     this.update(true);
   }
@@ -436,11 +440,11 @@ class TempvsView extends ItemView {
       for(const r of registered)totals.set(r.area,(totals.get(r.area)||0)+r.minutes);
       if(!budgets.length)list.createEl('small',{text:[...totals].map(([area,min])=>area+' '+min+' min').join(' · ')});
     }
-    for(const allocation of plugin.allocations.filter(item=>item.date===this.day)){
+    for(const allocation of plugin.allocatedOn(this.day)){
       const item=list.createDiv({cls:"tempvs-session"});
       const form=item.createEl("form",{cls:"tempvs-form"});
       form.createEl("strong",{text:allocation.area+" · "+allocation.minutes+" min · Da programmare"});
-      if(allocation.note)button(item,allocation.note.label,()=>plugin.app.workspace.openLinkText(allocation.note.path,"",false));
+      if(allocation.note)button(item,allocation.note.label,()=>plugin.app.workspace.openLinkText(allocation.note.path,allocation.file?.path||"",false));
       const time=form.createEl("label",{text:"Ora di inizio"}).createEl("input",{attr:{type:"time",required:""}});
       time.dataset.allocation=allocation.id;
       time.value=pendingTime.get(allocation.id)||"";
@@ -450,13 +454,12 @@ class TempvsView extends ItemView {
         event.preventDefault();
         if(submit.disabled)return;
         submit.disabled=true;
-        try{await plugin.scheduleAllocation(allocation.id,time.value);}
+        try{await plugin.scheduleAllocation(allocation,time.value);}
         catch(error){new Notice(error.message);}
         finally{submit.disabled=false;}
       };
-      iconButton(item,"trash-2","Elimina tempo assegnato",()=>plugin.change(()=>{
-        plugin.allocations=plugin.allocations.filter(entry=>entry.id!==allocation.id);
-      }));
+      if(allocation.file)button(item,"Apri nota giornaliera",()=>plugin.app.workspace.openLinkText(allocation.file.path,"",false));
+      iconButton(item,"trash-2","Elimina tempo assegnato",()=>plugin.removeAllocation(allocation));
     }
     const sessions=plugin.state.sessions.filter(s=>{
       if(s.registerMinutes)return false;
@@ -939,8 +942,15 @@ export default class TempvsPlugin extends Plugin {
     if(!Number.isInteger(request.minutes)||request.minutes<1||request.minutes>1439)
       throw Error("Durata da 1 a 1439 minuti.");
     planSessions([request],[],[],this.state.defaults);
-    await this.change(()=>{
-      this.allocations=[...this.allocations,{...request,date,note,id:uuid()}];
+    await this.daily.writeAllocation({...request,date,note});
+  }
+  allocatedOn(date) {
+    const entries=this.daily.allocationsByDay.get(date)||[];
+    return [...entries,...this.allocations.filter(item=>item.date===date&&!entries.some(entry=>entry.id===item.id))];
+  }
+  removeAllocation(entry) {
+    return entry.file?this.daily.consumeAllocation(entry):this.change(()=>{
+      this.allocations=this.allocations.filter(item=>item.id!==entry.id);
     });
   }
   async scheduleRequests(requests,date,note) {
@@ -957,18 +967,25 @@ export default class TempvsPlugin extends Plugin {
     if(result.remainder||!result.sessions.length)throw Error("Programmazione incompleta.");
     return result.sessions;
   }
-  async scheduleAllocation(id,start) {
-    await this.change(()=>{
-      const allocation=this.allocations.find(entry=>entry.id===id);
-      if(!allocation)throw Error("Tempo assegnato non più disponibile.");
-      const {date,note,area,areaId,minutes,cycleMinutes}=allocation;
+  async scheduleAllocation(allocation,start) {
+    const {date,note,area,areaId,minutes,cycleMinutes,focusMinutes,customBreakMinutes}=allocation;
+    const commit=()=>this.change(()=>{
+      if(!allocation.file&&!this.allocations.some(entry=>entry.id===allocation.id))
+        throw Error("Tempo assegnato non più disponibile.");
       const currentArea=this.config.areas.find(item=>(areaId&&item.id===areaId)||item.name===area);
       if(!currentArea)throw Error("Area non più disponibile.");
-      const [session]=this.plannedSessions([{area:currentArea.name,areaId:currentArea.id,minutes,cycleMinutes,start}],date);
-      if(note)session.linkedNotes=[note];
+      const request={area:currentArea.name,areaId:currentArea.id,minutes,cycleMinutes,focusMinutes,customBreakMinutes,start};
+      const [session]=this.plannedSessions([request],date);
+      if(note){
+        const target=this.app.metadataCache?.getFirstLinkpathDest?.(note.path.split('#')[0],allocation.file?.path||'');
+        const anchor=note.path.includes('#')?note.path.slice(note.path.indexOf('#')):'';
+        session.linkedNotes=[target?{...note,path:target.path+anchor}:note];
+      }
       this.state.sessions.push(session);
-      this.allocations=this.allocations.filter(entry=>entry.id!==id);
+      this.allocations=this.allocations.filter(entry=>entry.id!==allocation.id);
     });
+    if(allocation.file)await this.daily.consumeAllocation(allocation,commit);
+    else await commit();
   }
   async togglePause() {
     const s = this.active();

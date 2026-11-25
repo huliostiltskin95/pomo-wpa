@@ -846,7 +846,7 @@ function resolveDailyDate(source, file, { format = "YYYY-MM-DD", moment: moment2
   }
   throw Error("Data della daily note non riconosciuta. Aggiungi \xABdate: YYYY-MM-DD\xBB al blocco TEMPVS.");
 }
-function findDailyBlocks(markdown2, includeUnclosed = false) {
+function findDailyBlocks(markdown2, includeUnclosed = false, language2 = /^(tempvs|tempus)$/i) {
   const lines = markdown2.match(/[^\n]*\n|[^\n]+$/g) || [];
   let fence = null, offset = 0;
   const blocks = [];
@@ -855,7 +855,7 @@ function findDailyBlocks(markdown2, includeUnclosed = false) {
     if (!fence) {
       const match = line.match(/^ {0,3}(`{3,}|~{3,})([^\r\n]*)$/);
       if (match) {
-        fence = { char: match[1][0], length: match[1].length, start: offset + lines[i].length, line: i, isTempvs: /^(tempvs|tempus)$/i.test(match[2].trim()) };
+        fence = { char: match[1][0], length: match[1].length, start: offset + lines[i].length, line: i, isTempvs: language2.test(match[2].trim()) };
       }
     } else if (new RegExp("^ {0,3}" + fence.char + "{" + fence.length + ",}\\s*$").test(line)) {
       if (fence.isTempvs) blocks.push({ start: fence.start, end: offset, lineStart: fence.line, source: markdown2.slice(fence.start, offset).replace(/\r?\n$/, "") });
@@ -1514,6 +1514,47 @@ var NoteEstimates = class {
   }
 };
 
+// obsidian/daily-allocations.js
+var language = /^tempvs-assegnazioni$/i;
+var identity = /\s+<!-- tempvs-allocation:([\w-]+) -->\s*$/;
+function allocationBlock(markdown2) {
+  const blocks = findDailyBlocks(markdown2, true, language);
+  if (blocks.length !== findDailyBlocks(markdown2, false, language).length)
+    throw Error("Chiudi il blocco TEMPVS delle assegnazioni.");
+  if (blocks.length > 1) throw Error("Usa un solo blocco di assegnazioni TEMPVS per nota.");
+  return blocks[0];
+}
+function readAllocations(block, file, date, areas) {
+  const entries = [];
+  for (const [index, raw] of (block?.source || "").split(/\r?\n/).entries()) {
+    if (!raw.trim()) continue;
+    const marker = raw.match(identity);
+    const links = /\[\[[^\]\n]+\]\]/g;
+    const row2 = raw.replace(identity, "");
+    const [note] = noteLinks(row2.match(links)?.join(" "));
+    try {
+      const [request] = parseQuick(row2.replace(links, "").trim(), areas);
+      if (!request || request.start || request.minutes > 1439)
+        throw Error("Usa una durata da 1 a 1439 minuti senza orario.");
+      entries.push({ ...request, id: marker?.[1] || file.path + ":" + index, date, note, file, raw, index });
+    } catch (error) {
+      throw Error("Assegnazione TEMPVS, riga " + (index + 1) + ": " + error.message);
+    }
+  }
+  return entries;
+}
+function allocationRow({ area, minutes, cycleMinutes, note, id }) {
+  return area + " @" + minutes + "m" + (cycleMinutes ? " -" + cycleMinutes + "m" : "") + (note ? " [[" + note.path + (note.label && note.label !== note.path ? "|" + note.label : "") + "]]" : "") + (id ? " <!-- tempvs-allocation:" + id + " -->" : "");
+}
+function appendAllocation(markdown2, row2) {
+  const block = allocationBlock(markdown2);
+  if (block) return replaceDailyBlock(markdown2, block, [block.source, row2].filter(Boolean).join("\n"));
+  const nl = markdown2.includes("\r\n") ? "\r\n" : "\n";
+  const next = (markdown2 ? markdown2 + (markdown2.endsWith(nl) ? nl : nl + nl) : "") + "```tempvs-assegnazioni" + nl + row2 + nl + "```" + nl;
+  if (!allocationBlock(next)) throw Error("Chiudi il blocco di codice aperto nella nota.");
+  return next;
+}
+
 // obsidian/daily-planner-modal.js
 var import_obsidian3 = require("obsidian");
 var DailyPlannerModal = class extends import_obsidian3.Modal {
@@ -1723,12 +1764,17 @@ var DailyBlocks = class {
     this.errors = /* @__PURE__ */ new Map();
     this.detached = /* @__PURE__ */ new Set();
     this.ledgerVersions = /* @__PURE__ */ new Map();
+    this.allocationsByDay = /* @__PURE__ */ new Map();
   }
   get bindings() {
     return this.plugin.dailyNotes;
   }
   start() {
-    for (const language of ["TEMPVS", "tempvs", "TEMPUS", "tempus"]) this.plugin.registerMarkdownCodeBlockProcessor(language, (source, el, ctx) => ctx.addChild(new DailyBlock(el, this, ctx, source)));
+    for (const language2 of ["TEMPVS", "tempvs", "TEMPUS", "tempus"]) this.plugin.registerMarkdownCodeBlockProcessor(language2, (source, el, ctx) => ctx.addChild(new DailyBlock(el, this, ctx, source)));
+    this.plugin.registerMarkdownCodeBlockProcessor("tempvs-assegnazioni", (source, el) => {
+      el.createEl("strong", { text: "TEMPVS \xB7 Da programmare" });
+      el.createEl("pre").createEl("code", { text: source.replace(/\s+<!-- tempvs-allocation:[\w-]+ -->/g, "") });
+    });
     const vault = this.plugin.app.vault;
     if (this.plugin.app.workspace.on) this.plugin.registerEvent(this.plugin.app.workspace.on("editor-change", (_editor, view) => {
       if (view?.file?.extension === "md") this.schedule(view.file.path);
@@ -1744,6 +1790,10 @@ var DailyBlocks = class {
     if (vault?.on) {
       this.plugin.registerEvent(vault.on("modify", (file) => {
         if (file.extension === "md") this.schedule(file.path);
+      }));
+      this.plugin.registerEvent(vault.on("delete", (file) => {
+        for (const [day, entries] of this.allocationsByDay) if (entries.some((entry) => entry.file.path === file.path)) this.allocationsByDay.delete(day);
+        this.plugin.refresh?.(true);
       }));
       this.plugin.registerEvent(vault.on("delete", (file) => {
         this.plugin.estimates?.archive(file.path).catch((e) => new import_obsidian4.Notice(e.message));
@@ -1772,6 +1822,106 @@ var DailyBlocks = class {
     } });
     this.plugin.addCommand({ id: "insert-daily-plan", name: "Inserisci blocco TEMPVS nella nota", editorCallback: (editor) => editor.replaceSelection("```TEMPVS\n\n```\n") });
     this.plugin.app.workspace.onLayoutReady?.(() => this.initialize().catch((error) => new import_obsidian4.Notice("TEMPVS: " + error.message)));
+  }
+  dailyLocation(date) {
+    const { workspace, vault, internalPlugins } = this.plugin.app;
+    const active = workspace.getActiveFile?.();
+    const binding = Object.values(this.bindings).find((entry) => entry.date === date);
+    const settings = internalPlugins?.getPluginById("daily-notes")?.instance?.options || {};
+    const format = settings.format || "YYYY-MM-DD";
+    const name = (0, import_obsidian4.moment)?.(date, "YYYY-MM-DD", true)?.format?.(format) || date;
+    const path = [settings.folder, name + ".md"].filter(Boolean).join("/").replace(/^\/+|\/+(?=\/)/g, "");
+    const activeMatches = active?.extension === "md" && (active.basename === date || active.basename === name.split("/").at(-1));
+    const cached = this.allocationsByDay.get(date)?.[0]?.file;
+    const file = binding && vault?.getAbstractFileByPath(binding.path) || (activeMatches ? active : null) || vault?.getAbstractFileByPath(path) || cached && vault?.getAbstractFileByPath(cached.path);
+    return { file: file?.extension === "md" ? file : null, path, settings };
+  }
+  async loadAllocations(date, file = this.dailyLocation(date).file) {
+    if (!file) {
+      if (this.allocationsByDay.delete(date)) this.plugin.refresh?.(true);
+      return;
+    }
+    const markdown2 = await this.readMarkdown(file);
+    this.cacheAllocations(date, file, markdown2);
+  }
+  cacheAllocations(date, file, markdown2) {
+    const entries = readAllocations(allocationBlock(markdown2), file, date, this.plugin.state.defaults.simple.areas);
+    const previous = this.allocationsByDay.get(date) || [];
+    if (!entries.length) this.allocationsByDay.delete(date);
+    else this.allocationsByDay.set(date, entries);
+    if (JSON.stringify(previous.map(({ file: file2, ...entry }) => entry)) !== JSON.stringify(entries.map(({ file: file2, ...entry }) => entry)))
+      this.plugin.refresh?.(true);
+  }
+  async writeAllocation(allocation) {
+    await this.queue(async () => {
+      const { vault } = this.plugin.app;
+      let markdown2;
+      let { file, path, settings } = this.dailyLocation(allocation.date);
+      if (!file) {
+        const folders = path.split("/").slice(0, -1);
+        for (let i = 1; i <= folders.length; i++) {
+          const folder = folders.slice(0, i).join("/");
+          if (!vault.getAbstractFileByPath(folder)) await vault.createFolder(folder);
+        }
+        const template = settings.template && (this.plugin.app.metadataCache?.getFirstLinkpathDest?.(settings.template, "") || vault.getAbstractFileByPath(settings.template));
+        const initial = template?.extension === "md" ? await vault.read(template) : "";
+        const day = (0, import_obsidian4.moment)?.(allocation.date, "YYYY-MM-DD", true);
+        const title = path.split("/").at(-1).slice(0, -3);
+        const body = initial.replace(/{{title}}/gi, () => title).replace(/{{date(?::([^}]+))?}}/gi, (_all, format) => day?.format?.(format || "YYYY-MM-DD") || allocation.date).replace(/{{time(?::([^}]+))?}}/gi, (all, format) => (0, import_obsidian4.moment)?.()?.format?.(format || "HH:mm") || all);
+        markdown2 = appendAllocation(body, allocationRow(allocation));
+        file = await vault.create(path, markdown2);
+      } else {
+        const before = markdown2 = await this.readMarkdown(file);
+        const entries = readAllocations(allocationBlock(before), file, allocation.date, this.plugin.state.defaults.simple.areas);
+        if (!allocation.id || !entries.some((entry) => entry.id === allocation.id)) {
+          markdown2 = appendAllocation(before, allocationRow(allocation));
+          await this.replaceAllocationText(file, before, markdown2);
+        }
+      }
+      this.cacheAllocations(allocation.date, file, markdown2);
+    });
+  }
+  async replaceAllocationText(file, before, after) {
+    const { vault, workspace } = this.plugin.app;
+    await vault.process(file, (current) => {
+      if (current !== before || (workspace.getLeavesOfType?.("markdown") || []).some(({ view }) => view?.file?.path === file.path && view.getMode?.() !== "preview" && view.editor && view.editor.getValue() !== current))
+        throw Error("La nota sta cambiando. Attendi il salvataggio e riprova.");
+      return after;
+    });
+  }
+  async consumeAllocation(entry, commit) {
+    await this.queue(async () => {
+      const { file, date, index, raw } = entry;
+      const before = await this.readMarkdown(file), block = allocationBlock(before);
+      const lines = block?.source.split(/\r?\n/);
+      if (lines?.[index] !== raw) throw Error("L\u2019assegnazione \xE8 cambiata. Riapri la giornata e riprova.");
+      lines.splice(index, 1);
+      const after = replaceDailyBlock(before, block, lines.join("\n"));
+      await this.replaceAllocationText(file, before, after);
+      this.applying = true;
+      try {
+        if (commit) await commit();
+      } catch (error) {
+        await this.replaceAllocationText(file, after, before);
+        throw error;
+      } finally {
+        this.applying = false;
+      }
+      this.cacheAllocations(date, file, after);
+    });
+    if (commit) await this.archiveChanged();
+  }
+  async migrateAllocations() {
+    for (const entry of this.plugin.allocations || []) {
+      try {
+        await this.writeAllocation(entry);
+        await this.plugin.change(() => {
+          this.plugin.allocations = this.plugin.allocations.filter((item) => item.id !== entry.id);
+        });
+      } catch (error) {
+        new import_obsidian4.Notice("TEMPVS: assegnazione del " + entry.date + " ancora da trasferire. " + error.message);
+      }
+    }
   }
   async plannerTarget() {
     const { workspace, vault, internalPlugins } = this.plugin.app;
@@ -1938,6 +2088,7 @@ var DailyBlocks = class {
         this.errors.set(file.path, error.message);
       }
     }
+    await this.migrateAllocations();
     await this.archiveChanged();
   }
   async reconcilePlans() {
@@ -1964,7 +2115,7 @@ var DailyBlocks = class {
     if (bound) return bound.date;
     try {
       return resolveDailyDate("", file, {
-        moment: globalThis.moment,
+        moment: import_obsidian4.moment || globalThis.moment,
         format: this.plugin.app.internalPlugins?.getPluginById("daily-notes")?.instance?.options?.format || "YYYY-MM-DD",
         frontmatter: this.plugin.app.metadataCache?.getFileCache(file)?.frontmatter
       });
@@ -2050,6 +2201,12 @@ var DailyBlocks = class {
     return this.queue(async () => {
       if (this.detached.has(path)) return;
       const context = await this.context(path);
+      const file = context?.file || this.plugin.app.vault.getAbstractFileByPath(path);
+      const date = context?.date || this.panelDay(file);
+      if (date && file) {
+        const target = this.dailyLocation(date).file;
+        if (context?.date || !target || target.path === file.path) await this.loadAllocations(date, file);
+      }
       if (!context) {
         const id = this.bindingId(path);
         if (id && isRegister(this.bindings[id].source)) {
@@ -3580,6 +3737,10 @@ var TempvsView = class extends import_obsidian6.ItemView {
   async onOpen() {
     this.followDailyNote();
     this.draw();
+    this.loadAllocations();
+  }
+  loadAllocations() {
+    this.plugin.daily.loadAllocations(this.day).catch((error) => new import_obsidian6.Notice(error.message));
   }
   followDailyNote() {
     const date = this.plugin.daily.panelDay();
@@ -3808,6 +3969,7 @@ var TempvsView = class extends import_obsidian6.ItemView {
   }
   selectDay(day) {
     this.day = day;
+    this.loadAllocations();
     this.showCreation();
     this.update(true);
   }
@@ -3964,11 +4126,11 @@ var TempvsView = class extends import_obsidian6.ItemView {
       for (const r of registered) totals.set(r.area, (totals.get(r.area) || 0) + r.minutes);
       if (!budgets.length) list.createEl("small", { text: [...totals].map(([area2, min]) => area2 + " " + min + " min").join(" \xB7 ") });
     }
-    for (const allocation of plugin.allocations.filter((item) => item.date === this.day)) {
+    for (const allocation of plugin.allocatedOn(this.day)) {
       const item = list.createDiv({ cls: "tempvs-session" });
       const form = item.createEl("form", { cls: "tempvs-form" });
       form.createEl("strong", { text: allocation.area + " \xB7 " + allocation.minutes + " min \xB7 Da programmare" });
-      if (allocation.note) button(item, allocation.note.label, () => plugin.app.workspace.openLinkText(allocation.note.path, "", false));
+      if (allocation.note) button(item, allocation.note.label, () => plugin.app.workspace.openLinkText(allocation.note.path, allocation.file?.path || "", false));
       const time2 = form.createEl("label", { text: "Ora di inizio" }).createEl("input", { attr: { type: "time", required: "" } });
       time2.dataset.allocation = allocation.id;
       time2.value = pendingTime.get(allocation.id) || "";
@@ -3979,16 +4141,15 @@ var TempvsView = class extends import_obsidian6.ItemView {
         if (submit.disabled) return;
         submit.disabled = true;
         try {
-          await plugin.scheduleAllocation(allocation.id, time2.value);
+          await plugin.scheduleAllocation(allocation, time2.value);
         } catch (error) {
           new import_obsidian6.Notice(error.message);
         } finally {
           submit.disabled = false;
         }
       };
-      iconButton(item, "trash-2", "Elimina tempo assegnato", () => plugin.change(() => {
-        plugin.allocations = plugin.allocations.filter((entry) => entry.id !== allocation.id);
-      }));
+      if (allocation.file) button(item, "Apri nota giornaliera", () => plugin.app.workspace.openLinkText(allocation.file.path, "", false));
+      iconButton(item, "trash-2", "Elimina tempo assegnato", () => plugin.removeAllocation(allocation));
     }
     const sessions = plugin.state.sessions.filter((s) => {
       if (s.registerMinutes) return false;
@@ -4571,8 +4732,15 @@ var TempvsPlugin = class extends import_obsidian6.Plugin {
     if (!Number.isInteger(request.minutes) || request.minutes < 1 || request.minutes > 1439)
       throw Error("Durata da 1 a 1439 minuti.");
     planSessions([request], [], [], this.state.defaults);
-    await this.change(() => {
-      this.allocations = [...this.allocations, { ...request, date, note, id: uuid() }];
+    await this.daily.writeAllocation({ ...request, date, note });
+  }
+  allocatedOn(date) {
+    const entries = this.daily.allocationsByDay.get(date) || [];
+    return [...entries, ...this.allocations.filter((item) => item.date === date && !entries.some((entry) => entry.id === item.id))];
+  }
+  removeAllocation(entry) {
+    return entry.file ? this.daily.consumeAllocation(entry) : this.change(() => {
+      this.allocations = this.allocations.filter((item) => item.id !== entry.id);
     });
   }
   async scheduleRequests(requests, date, note) {
@@ -4596,18 +4764,25 @@ var TempvsPlugin = class extends import_obsidian6.Plugin {
     if (result.remainder || !result.sessions.length) throw Error("Programmazione incompleta.");
     return result.sessions;
   }
-  async scheduleAllocation(id, start) {
-    await this.change(() => {
-      const allocation = this.allocations.find((entry) => entry.id === id);
-      if (!allocation) throw Error("Tempo assegnato non pi\xF9 disponibile.");
-      const { date, note, area, areaId, minutes, cycleMinutes } = allocation;
+  async scheduleAllocation(allocation, start) {
+    const { date, note, area, areaId, minutes, cycleMinutes, focusMinutes, customBreakMinutes } = allocation;
+    const commit = () => this.change(() => {
+      if (!allocation.file && !this.allocations.some((entry) => entry.id === allocation.id))
+        throw Error("Tempo assegnato non pi\xF9 disponibile.");
       const currentArea = this.config.areas.find((item) => areaId && item.id === areaId || item.name === area);
       if (!currentArea) throw Error("Area non pi\xF9 disponibile.");
-      const [session] = this.plannedSessions([{ area: currentArea.name, areaId: currentArea.id, minutes, cycleMinutes, start }], date);
-      if (note) session.linkedNotes = [note];
+      const request = { area: currentArea.name, areaId: currentArea.id, minutes, cycleMinutes, focusMinutes, customBreakMinutes, start };
+      const [session] = this.plannedSessions([request], date);
+      if (note) {
+        const target = this.app.metadataCache?.getFirstLinkpathDest?.(note.path.split("#")[0], allocation.file?.path || "");
+        const anchor = note.path.includes("#") ? note.path.slice(note.path.indexOf("#")) : "";
+        session.linkedNotes = [target ? { ...note, path: target.path + anchor } : note];
+      }
       this.state.sessions.push(session);
-      this.allocations = this.allocations.filter((entry) => entry.id !== id);
+      this.allocations = this.allocations.filter((entry) => entry.id !== allocation.id);
     });
+    if (allocation.file) await this.daily.consumeAllocation(allocation, commit);
+    else await commit();
   }
   async togglePause() {
     const s = this.active();

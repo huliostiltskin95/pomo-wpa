@@ -1,3 +1,4 @@
+import * as dailyAllocations from '../obsidian/daily-allocations.js';
 import * as ledger from '../obsidian/note-ledger.js';
 import {creditedWork} from '../obsidian/daily-register.js';
 import {isEstimateSource} from '../core/tempo-estimates.js';
@@ -35,7 +36,7 @@ test('removing completed rows preserves the archive and accepts the new plan',()
 });
 // Exercise the controller source independently of whether a bundle was built first.
 const code=fs.readFileSync(new URL('../obsidian/daily-blocks.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'').replace(/export /g,'');
-const context={...ledger,creditedWork,...movedLinks,...dailyPlan,normalizeArchive,isEstimateSource,MarkdownRenderChild:class{},Notice:class{},moment:()=>({isValid:()=>false}),module:{exports:{}},console,setTimeout,clearTimeout,crypto:globalThis.crypto};
+const context={...dailyAllocations,...ledger,creditedWork,...movedLinks,...dailyPlan,normalizeArchive,isEstimateSource,MarkdownRenderChild:class{},Notice:class{},moment:()=>({isValid:()=>false}),module:{exports:{}},console,setTimeout,clearTimeout,crypto:globalThis.crypto};
 vm.createContext(context);vm.runInContext(code+'\nmodule.exports.DailyBlocks=DailyBlocks;',context);
 function fixture(date=day){
  let text='# Daily\n\n```TEMPVS\n'+initial+'\n```\n\nOther text';

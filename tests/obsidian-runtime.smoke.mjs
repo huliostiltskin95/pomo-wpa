@@ -237,33 +237,75 @@ test('ordinary activity imports a checkbox and freezes deduplicated recorded foc
  await p.onunload();
 });
 
-test('assigned study time survives restart and becomes one linked timer session',async()=>{
+test('assigned study time is editable in the daily note and becomes one linked timer session',async()=>{
  const {PluginClass}=mockPlugin(false),p=new PluginClass();
+ const date='2099-11-08',note={path:'Letture/Libro.md',label:'Libro'},files=new Map();
+ const vault={
+  getAbstractFileByPath:path=>files.get(path),
+  read:async file=>file.text,
+  process:async(file,edit)=>{file.text=edit(file.text);},
+  create:async(path,text)=>{
+   const file={path,text,basename:date,extension:'md'};
+   files.set(path,file);
+   return file;
+  }
+ };
+ p.app.vault=vault;
  await p.onload();
- const date='2099-11-08',note={path:'Letture/Libro.md',label:'Libro'};
  await p.assignTime({area:'Studio',minutes:30},date,note);
+ const file=files.get(date+'.md');
+ assert.match(file.text,/Studio @30m \[\[Letture\/Libro.md\|Libro\]\]/);
  assert.equal(p.state.sessions.length,0);
  assert.equal(p.active(),null);
  await p.onunload();
- const next=new PluginClass();await next.onload();
- const [allocation]=next.allocations;
+ file.text=file.text.replace('@30m','@40m');
+ const next=new PluginClass();next.app.vault=vault;await next.onload();
+ await next.daily.loadAllocations(date);
+ const [allocation]=next.allocatedOn(date);
+ assert.equal(allocation.minutes,40);
  assert.equal(allocation.note.path,note.path);
  const save=next.saveData.bind(next);
  next.saveData=()=>Promise.reject(Error('disk full'));
- await assert.rejects(next.scheduleAllocation(allocation.id,'13:00'),/disk full/);
- assert.equal(next.allocations.length,1);
+ await assert.rejects(next.scheduleAllocation(allocation,'13:00'),/disk full/);
+ assert.match(file.text,/@40m/);
  assert.equal(next.state.sessions.length,0);
  next.saveData=save;
  await next.schedule('Studio @30m +15:00',date);
- await assert.rejects(next.scheduleAllocation(allocation.id,'15:15'),/sovrappongono/);
- assert.equal(next.allocations.length,1);
- await next.scheduleAllocation(allocation.id,'13:00');
- assert.equal(next.allocations.length,0);
+ await assert.rejects(next.scheduleAllocation(allocation,'15:15'),/sovrappongono/);
+ assert.match(file.text,/@40m/);
+ await next.scheduleAllocation(allocation,'13:00');
+ assert.equal(next.allocatedOn(date).length,0);
+ assert.doesNotMatch(file.text,/@40m/);
  const session=next.state.sessions.find(item=>item.start==='13:00');
  assert.equal(session.date,date);
- assert.equal(session.start,'13:00');
- assert.equal(session.end,'13:30');
+ assert.equal(session.end,'13:40');
  assert.equal(session.linkedNotes[0].path,note.path);
- await assert.rejects(next.scheduleAllocation(allocation.id,'14:00'),/non più disponibile/);
+ await assert.rejects(next.scheduleAllocation(allocation,'14:00'),/cambiata/);
  await next.onunload();
+});
+
+test('migration adds each previous allocation once and preserves the existing daily block',async()=>{
+ const {PluginClass,getSaved}=mockPlugin(false),p=new PluginClass();
+ const date='2099-11-08',path='Daily/'+date+'.md';
+ const original='# Sabato\n\n```TEMPVS\nStudio +16:00-17:00 -60m\n```\n';
+ const file={path,basename:date,extension:'md',text:original};
+ p.app.internalPlugins={getPluginById:()=>({instance:{options:{folder:'Daily'}}})};
+ p.app.vault={
+  getAbstractFileByPath:p=>p===path?file:null,
+  read:async()=>file.text,
+  process:async(_file,edit)=>{file.text=edit(file.text);}
+ };
+ await p.onload();
+ const previous={id:'legacy-test',date,area:'Studio',minutes:50};
+ p.allocations=[previous];
+ await p.daily.migrateAllocations();
+ assert.equal(getSaved().allocations.length,0);
+ assert(file.text.startsWith(original));
+ assert.equal(p.allocatedOn(date).length,1);
+ // Retry a migration interrupted after writing the Markdown, before saving plugin data.
+ p.allocations=[previous];
+ await p.daily.migrateAllocations();
+ assert.equal(file.text.match(/Studio @50m/g).length,1);
+ assert.equal(getSaved().allocations.length,0);
+ await p.onunload();
 });
