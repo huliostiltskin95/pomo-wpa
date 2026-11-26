@@ -334,12 +334,15 @@ try {
   await page.setViewportSize({width:320,height:800});
   assert(await page.locator('.tempvs-session-resource').first().isVisible());
   await page.evaluate(async()=>{
-    window.screenshotNote=['```TEMPVS','date: 2026-11-15','Studio @8h','- [[Greco]] @6h = 12','Personale @4h','- [[Personale#Budapest|Budapest]] @1h = 2 +02:50','```'].join('\n');
+    window.screenshotNote=['```TEMPVS','date: 2026-11-15','Studio @8h','- [[Greco]] @6h = 12 +09:00','Personale @4h','- [[Personale#Budapest|Budapest]] @1h = 2 +02:50','```'].join('\n');
     await plugin.daily.syncFile('agenda/15 novembre 2026.md');
   });
   await page.waitForFunction(()=>document.querySelector('.tempvs-sessions')?.textContent.includes('3 h disponibili'));
   assert.equal(await page.locator('.tempvs-sessions tbody tr').count(),14);
-  assert.match(await page.locator('.tempvs-sessions tbody tr').last().textContent(),/03:20.*Budapest.*30 min/);
+  const rows=page.locator('.tempvs-sessions tbody tr');
+  assert.match(await rows.first().textContent(),/02:50.*Budapest/);
+  assert.match(await rows.nth(1).textContent(),/03:20.*Budapest.*30 min/);
+  assert.match(await rows.last().textContent(),/Greco/);
   await page.evaluate(()=>plugin.commands['plan-daily-note'].callback());
   const planner=page.locator('form').filter({has:page.getByRole('button',{name:'Aggiungi alla giornata'})});
   await planner.getByLabel('Inizio',{exact:true}).fill('16:00');

@@ -81,4 +81,4 @@ jobs:
             obsidian/dist/styles.css#styles.css \
             --target "${{ github.sha }}" \
             --title "TEMPVS $VERSION" \
-            --notes "Usa Area = 8h per dichiarare un budget lordo senza riservare orari. Le vecchie intestazioni Area @8h restano compatibili."
+            --notes "Il pannello mostra le sessioni in ordine cronologico e le attività senza orario in fondo."

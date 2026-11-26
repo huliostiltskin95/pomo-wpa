@@ -425,17 +425,65 @@ class TempvsView extends ItemView {
       list.createEl('p',{text:b.area+' · '+readableDuration(b.assigned)+' su '+readableDuration(b.seconds)+
         (difference?' · '+readableDuration(Math.abs(difference))+(difference>0?' disponibili':' oltre il budget'):'')});
     }
-    if(registered.length){
-      const table=list.createEl('table'),head=table.createEl('thead').createEl('tr'),body=table.createEl('tbody');
-      for(const label of ['Area','Orario','Nota','Durata'])head.createEl('th',{text:label});
-      for(const record of registered){
+    const sessions=plugin.state.sessions.filter(s=>{
+      if(s.registerMinutes||s.registerPlanned)return false;
+      if(s.dailyRetired||s.manualSuperseded)return false;
+      return s.date===this.day || (this.day===today()&&sessionBounds(s).start<=now&&sessionBounds(s).end>now);
+    }).sort((a,b)=>sessionBounds(a).start-sessionBounds(b).start);
+    const expanded=this.expandedGroups??=new Set();
+    const timeline=registered.map(record=>({
+      record,
+      start:record.start ? new Date((record.date||this.day)+'T'+record.start).getTime() : Infinity
+    }));
+    for(const group of groupSessions(sessions,plugin.estimates?.notes||[])){
+      timeline.push({group,start:+sessionBounds(group.sessions[0]).start});
+    }
+    timeline.sort((a,b)=>a.start-b.start);
+    let body;
+    for(const {record,group} of timeline){
+      if(record){
+        if(!body){
+          const table=list.createEl('table'),head=table.createEl('thead').createEl('tr');
+          for(const label of ['Area','Orario','Nota','Durata'])head.createEl('th',{text:label});
+          body=table.createEl('tbody');
+        }
         const row=body.createEl('tr');
         row.createEl('td',{text:record.area});row.createEl('td',{text:record.start||'—'});
         const cell=row.createEl('td'),note=record.linkedNotes[0];
         if(note)button(cell,note.label,()=>plugin.app.workspace.openLinkText(note.path,plugin.dailyNotes[record.registerBlock]?.path||'',false));
         else cell.textContent='—';
         row.createEl('td',{text:readableDuration(Math.round(record.minutes*60))});
+        continue;
       }
+      body=null;
+      const first=group.sessions[0],last=group.sessions.at(-1),ids=group.sessions.map(s=>s.id);
+      const item=list.createDiv({cls:"tempvs-session tempvs-session-group"});
+      const info=item.createDiv({cls:"tempvs-session-info"});
+      const heading=info.createDiv({cls:"tempvs-session-heading"});
+      heading.createEl("strong",{text:first.start+"–"+last.end});
+      const badge=heading.createSpan({cls:"tempvs-area-mark",text:first.area||first.title});
+      badge.style.setProperty("--tempvs-area-color",plugin.config.areas.find(a=>a.name===first.area)?.color||"var(--interactive-accent)");
+      const current=group.sessions.find(s=>s.id===active?.id);
+      item.toggleClass("is-current",Boolean(current));
+      const done=group.sessions.filter(s=>s.finished||sessionBounds(s).end<=now).length;
+      info.createEl("small",{cls:"tempvs-muted",text:`${ids.length} ${ids.length===1?'sessione':'sessioni'} · ${Math.round((sessionBounds(last).end-sessionBounds(first).start)/60000)} min · ${done} concluse`+(current?' · '+(current.paused?'Focus sospeso':'In corso'):'')});
+      this.renderSessionNotes(info,group.notes,first,ids);
+      if(ids.length>1){
+        const detail=info.createEl("details",{cls:"tempvs-session-cycles"});
+        const key=ids.join('|');detail.open=expanded.has(key);
+        detail.addEventListener('toggle',()=>{if(detail.open)expanded.add(key);else expanded.delete(key);});
+        detail.createEl("summary",{text:"Singole sessioni"});
+        for(const s of group.sessions){
+          const row=detail.createDiv({cls:"tempvs-session-cycle"});
+          row.createEl("span",{text:s.start+'–'+s.end+' · '+(s.finished||sessionBounds(s).end<=now?'Conclusa':s.id===active?.id?'In corso':'Programmata')+(s.cycleMinutes?` · ${s.workMinutes}/${s.cycleMinutes-s.workMinutes}`:'')});
+          this.renderSessionNotes(row,group.notes,s,[s.id]);
+          if(!s.finished&&sessionBounds(s).start>now)iconButton(row,"trash-2","Elimina sessione "+s.start,()=>plugin.removeSession(s.id));
+        }
+      }else if(!first.finished&&sessionBounds(first).start>now){
+        iconButton(item,"trash-2","Elimina sessione "+(first.area||first.title),()=>plugin.removeSession(first.id));
+      }
+    }
+    if(registered.length){
       const totals=new Map();
       for(const r of registered)totals.set(r.area,(totals.get(r.area)||0)+r.minutes);
       if(!budgets.length)list.createEl('small',{text:[...totals].map(([area,min])=>area+' '+min+' min').join(' · ')});
@@ -468,40 +516,6 @@ class TempvsView extends ItemView {
         catch(error){new Notice(error.message);}
         finally{submit.disabled=false;}
       };
-    }
-    const sessions=plugin.state.sessions.filter(s=>{
-      if(s.registerMinutes||s.registerPlanned)return false;
-      if(s.dailyRetired||s.manualSuperseded)return false;
-      return s.date===this.day || (this.day===today()&&sessionBounds(s).start<=now&&sessionBounds(s).end>now);
-    }).sort((a,b)=>sessionBounds(a).start-sessionBounds(b).start);
-    const expanded=this.expandedGroups??=new Set();
-    for(const group of groupSessions(sessions,plugin.estimates?.notes||[])){
-      const first=group.sessions[0],last=group.sessions.at(-1),ids=group.sessions.map(s=>s.id);
-      const item=list.createDiv({cls:"tempvs-session tempvs-session-group"});
-      const info=item.createDiv({cls:"tempvs-session-info"});
-      const heading=info.createDiv({cls:"tempvs-session-heading"});
-      heading.createEl("strong",{text:first.start+"–"+last.end});
-      const badge=heading.createSpan({cls:"tempvs-area-mark",text:first.area||first.title});
-      badge.style.setProperty("--tempvs-area-color",plugin.config.areas.find(a=>a.name===first.area)?.color||"var(--interactive-accent)");
-      const current=group.sessions.find(s=>s.id===active?.id);
-      item.toggleClass("is-current",Boolean(current));
-      const done=group.sessions.filter(s=>s.finished||sessionBounds(s).end<=now).length;
-      info.createEl("small",{cls:"tempvs-muted",text:`${ids.length} ${ids.length===1?'sessione':'sessioni'} · ${Math.round((sessionBounds(last).end-sessionBounds(first).start)/60000)} min · ${done} concluse`+(current?' · '+(current.paused?'Focus sospeso':'In corso'):'')});
-      this.renderSessionNotes(info,group.notes,first,ids);
-      if(ids.length>1){
-        const detail=info.createEl("details",{cls:"tempvs-session-cycles"});
-        const key=ids.join('|');detail.open=expanded.has(key);
-        detail.addEventListener('toggle',()=>{if(detail.open)expanded.add(key);else expanded.delete(key);});
-        detail.createEl("summary",{text:"Singole sessioni"});
-        for(const s of group.sessions){
-          const row=detail.createDiv({cls:"tempvs-session-cycle"});
-          row.createEl("span",{text:s.start+'–'+s.end+' · '+(s.finished||sessionBounds(s).end<=now?'Conclusa':s.id===active?.id?'In corso':'Programmata')+(s.cycleMinutes?` · ${s.workMinutes}/${s.cycleMinutes-s.workMinutes}`:'')});
-          this.renderSessionNotes(row,group.notes,s,[s.id]);
-          if(!s.finished&&sessionBounds(s).start>now)iconButton(row,"trash-2","Elimina sessione "+s.start,()=>plugin.removeSession(s.id));
-        }
-      }else if(!first.finished&&sessionBounds(first).start>now){
-        iconButton(item,"trash-2","Elimina sessione "+(first.area||first.title),()=>plugin.removeSession(first.id));
-      }
     }
     if(!sessions.length&&!registered.length&&!budgets.length&&!plugin.allocatedOn(this.day).length){
       const empty=list.createDiv({cls:"tempvs-empty"});
