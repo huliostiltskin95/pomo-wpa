@@ -11,6 +11,16 @@ import {normalizeArchive} from '../core/tempo-simple.js';
 import {sessionBounds} from '../core/tempo-core.js';
 import {isRegister,applyRegister,findDailyBlocks,blockIdentity,explicitDay,resolveDailyDate,replaceDailyBlock,prepareDailyPlan,applyDailyPlan,serializeDailyPlan,archivePlanningKey,daySessions,isLocked} from './daily-plan.js';
 
+function newDailyPlanIds(plan, state) {
+  const existing = new Set(state.sessions.map((session) => session.id));
+  if (plan.records) {
+    // A register row can already have a history ID without a timed session.
+    for (const record of state.history) existing.add(record.sessionId);
+    return plan.records.map((record) => record.sessionId).filter((id) => !existing.has(id));
+  }
+  return plan.sessions.map((session) => session.id).filter((id) => !existing.has(id));
+}
+
 const uid=()=>globalThis.crypto?.randomUUID?.()||Date.now().toString(36)+'-'+Math.random().toString(36).slice(2);
 const plain=source=>source.split(/\r?\n/).filter(line=>!/^\s*<!-- tempvs-block:/.test(line)).map(line=>line.replace(/\s*<!-- tempvs-session:[^>]+-->\s*$/,'')).join('\n');
 // Restore row identities behind the editor, so the visible form stays ordinary text.
@@ -492,7 +502,7 @@ export class DailyBlocks {
  async commit(prepared){
   if(archivePlanningKey(this.plugin.state)!==prepared.planningKey)throw Error('Le sessioni sono cambiate durante la preview. Prepara nuovamente le modifiche.');
   this.validateBinding(prepared.blockId,prepared.file.path,prepared.date);
-  const newIds=prepared.sessions.filter(s=>!this.plugin.state.sessions.some(current=>current.id===s.id)).map(s=>s.id);
+  const newIds=newDailyPlanIds(prepared, this.plugin.state);
   const fresh=prepareDailyPlan({source:prepared.source,date:prepared.date,blockId:prepared.blockId,previousSource:prepared.previousSource,protectedBlockIds:prepared.protectedBlockIds,state:this.plugin.state,id:()=>newIds.shift()||uid()});
   const body=prepared.keepSource||prepared.preserveSource||fresh.records?plain(prepared.source):serializeDailyPlan(fresh.sessions,prepared.date,prepared.source);
   const canonical=explicitDay(prepared.originalSource)&&!explicitDay(body)?'date: '+prepared.date+'\n'+body:body;
@@ -508,7 +518,7 @@ export class DailyBlocks {
    try{
     if(archivePlanningKey(this.plugin.state)!==fresh.planningKey)throw Error('Le sessioni sono cambiate durante il salvataggio. Prepara nuovamente le modifiche.');
     await this.plugin.change(()=>{
-     const available=fresh.sessions.filter(s=>!this.plugin.state.sessions.some(current=>current.id===s.id)).map(s=>s.id);
+     const available=newDailyPlanIds(fresh, this.plugin.state);
      const checked=prepareDailyPlan({source:prepared.source,date:prepared.date,blockId:prepared.blockId,previousSource:prepared.previousSource,protectedBlockIds:prepared.protectedBlockIds,state:this.plugin.state,id:()=>available.shift()||uid()});
      applyDailyPlan(this.plugin.state,checked);
      this.plugin.state=normalizeArchive(this.plugin.state);

@@ -81,4 +81,4 @@ jobs:
             obsidian/dist/styles.css#styles.css \
             --target "${{ github.sha }}" \
             --title "TEMPVS $VERSION" \
-            --notes "Il pannello mostra le sessioni in ordine cronologico e le attività senza orario in fondo."
+            --notes "Corregge l’errore «Archivio sessioni non valido» durante il salvataggio della nota quotidiana con sessioni suddivise in più pomodori."
