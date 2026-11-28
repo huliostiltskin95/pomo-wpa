@@ -81,4 +81,4 @@ jobs:
             obsidian/dist/styles.css#styles.css \
             --target "${{ github.sha }}" \
             --title "TEMPVS $VERSION" \
-            --notes "Wikilink apribili nei blocchi TEMPVS, promemoria senza durata e assegnazioni flessibili nella daily."
+            --notes "Modalità e-ink per dispositivo: conto alla rovescia nel pannello visibile e avvisi in Obsidian a inizio sessione, pausa e ripresa."

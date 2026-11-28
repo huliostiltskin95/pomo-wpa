@@ -189,8 +189,8 @@ export function parseQuick(text,areas) {
   });
 }
 // Only observable time counts. Long suspended/offline gaps never become completed work.
-export function measuredFocus(session,from,to) {
-  if(to-from<=0||to-from>15000||session.paused||session.finished)return 0;
+export function measuredFocus(session,from,to,maxGap=15000) {
+  if(to-from<=0||to-from>maxGap||session.paused||session.finished)return 0;
   const bounds=sessionBounds(session);let cursor=Math.max(+from,+bounds.start),end=Math.min(+to,+bounds.end),total=0;
   while(cursor<end){const phase=getPhase(session,new Date(cursor));const next=Math.min(end,+phase.end);if(next<=cursor)break;if(phase.kind==='work')total+=next-cursor;cursor=next;}
   return total/1000;

@@ -99,7 +99,17 @@ class TempvsView extends ItemView {
   getViewType() { return VIEW_TYPE; }
   getDisplayText() { return "TEMPVS"; }
   getIcon() { return "timer"; }
-  async onOpen() { this.followDailyNote(); this.draw(); this.loadAllocations(); }
+  async onOpen() {
+    this.followDailyNote(); this.draw(); this.loadAllocations();
+    if(typeof IntersectionObserver==="function"){
+      this.visibilityObserver=new IntersectionObserver(entries=>{
+        this.timerVisible=entries.at(-1).isIntersecting;
+        this.plugin.updateClock();
+        if(this.plugin.eink && this.timerVisible)this.update(true);
+      });
+      this.visibilityObserver.observe(this.containerEl);
+    }
+  }
   loadAllocations() {
     this.plugin.daily.loadAllocations(this.day).catch(error=>new Notice(error.message));
   }
@@ -107,7 +117,11 @@ class TempvsView extends ItemView {
     const date=this.plugin.daily.panelDay();
     if(date){this.day=date;this.dailyContext=this.plugin.app.workspace.getActiveFile()?.path+":"+date;}
   }
-  async onClose() {}
+  async onClose() {
+    this.visibilityObserver?.disconnect();
+    this.timerVisible=false;
+    this.plugin.updateClock();
+  }
   draw() {
     const plugin = this.plugin;
     const root = this.containerEl.children[1];
@@ -377,10 +391,10 @@ class TempvsView extends ItemView {
     const timer=root.querySelector(".tempvs-timer");
     const area=plugin.config.areas.find(a=>a.name===(active||next)?.area);
     timer.style.setProperty("--tempvs-area-color",area?.color||"var(--interactive-accent)");
-    timer.dataset.style=plugin.timerStyle;
+    timer.dataset.style=plugin.eink?"digits":plugin.timerStyle;
     timer.dataset.size=plugin.clockSize;
     timer.style.setProperty("--tempvs-progress-angle",(phase?.progress||0)*3.6+"deg");
-    progress.hidden=!phase||plugin.timerStyle==="digits";
+    progress.hidden=plugin.eink||!phase||plugin.timerStyle==="digits";
     progress.setAttribute("aria-valuenow",String(Math.round(phase?.progress||0)));
     progress.firstElementChild.style.width=(phase?.progress||0)+"%";
     root.querySelector(".tempvs-timer-hint").textContent=phase
@@ -532,6 +546,8 @@ class TempvsSettings extends PluginSettingTab {
   display(){
     const el=this.containerEl;el.empty();
     el.createEl("h2",{text:"TEMPVS — Impostazioni"});
+    new Setting(el).setName("Modalità e-ink").setDesc("Su questo dispositivo, il conto alla rovescia si aggiorna solo nel pannello visibile. Con Obsidian aperto ricevi un avviso a inizio sessione, pausa e ripresa.")
+      .addToggle(t=>t.setValue(this.plugin.eink).onChange(value=>this.plugin.setEink(value)));
     new Setting(el).setName("Layout del timer").setDesc("Automatico, pannello laterale oppure scheda ampia su iPad e desktop.")
       .addDropdown(d=>d.addOptions({auto:"Automatico",side:"Pannello laterale",wide:"Scheda ampia"})
       .setValue(this.plugin.layout).onChange(async v=>{this.plugin.layout=v;await this.plugin.persist();await this.plugin.openView(true);}));
@@ -662,6 +678,9 @@ export default class TempvsPlugin extends Plugin {
       new Notice("TEMPVS: dati non validi, archivio lasciato intatto. " + error.message, 10000);
       throw error;
     }
+    this.einkStorageKey="tempvs:eink:"+ (this.app.vault?.getName?.()||"");
+    this.eink=window.localStorage?.getItem(this.einkStorageKey)==="on";
+    this.einkHidden=document.hidden;
     this.ambient=new TempoAmbientAudio(()=>this.refreshAudioControls());
     this.chime=new FocusEndChime();
     this.lastTick = Date.now();
@@ -738,14 +757,26 @@ export default class TempvsPlugin extends Plugin {
       this.status.addEventListener("click", () => this.openView());
       this.status.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); this.openView(); } });
     }
-    this.registerInterval(window.setInterval(() => this.tick(), 1000));
+    this.updateClock();
+    const layoutChanged=()=>{if(this.eink)this.refresh();};
+    if(this.app.workspace.on){
+      this.registerEvent(this.app.workspace.on("layout-change",layoutChanged));
+      this.registerEvent(this.app.workspace.on("active-leaf-change",layoutChanged));
+    }
     // iPadOS/WebKit requires a real user gesture before Web Audio can become audible.
     // Prepare the cue on normal interaction, independently from ambient sounds.
     const armChime=()=>{if(this.chimeEnabled)this.chime.arm();};
     this.registerDomEvent(document, "pointerdown", armChime);
     this.registerDomEvent(document, "touchstart", armChime);
     this.registerDomEvent(document, "keydown", armChime);
-    this.registerDomEvent(document, "visibilitychange", () => { if (!document.hidden) { this.tick(); this.syncAmbient(); this.refresh(true); } });
+    this.registerDomEvent(document, "visibilitychange", () => {
+      if(this.eink){
+        this.record();
+        this.einkHidden=document.hidden;
+        this.updateClock();
+        if(!document.hidden)this.refresh(true);
+      }else if(!document.hidden){this.tick();this.refresh(true);}
+    });
     this.refresh(true);
     this.cloud.init().catch(error => {
       this.cloudMessage = "Dropbox: " + error.message;
@@ -753,6 +784,76 @@ export default class TempvsPlugin extends Plugin {
     });
   }
   get config() { return this.state.defaults.simple; }
+  setEink(value){
+    this.record();
+    this.eink=value;
+    this.einkHidden=document.hidden;
+    window.localStorage?.setItem(this.einkStorageKey,value?"on":"off");
+    this.lastNoticeCheck=Date.now();
+    this.lastNotifiedPhase=this.currentNoticePhase(new Date(this.lastNoticeCheck));
+    this.refresh(true);
+  }
+  visibleTimers(){
+    if(document.hidden)return [];
+    return this.app.workspace.getLeavesOfType(VIEW_TYPE).map(leaf=>leaf.view).filter(view=>
+      view?.timerVisible && view.containerEl.getClientRects().length &&
+      (!view.containerEl.checkVisibility || view.containerEl.checkVisibility({visibilityProperty:true})));
+  }
+  updateClock(){
+    if(this.clockStopped)return;
+    const visible=this.eink?this.visibleTimers():[];
+    const active=this.eink&&visible.length?this.active():null;
+    const mode=!this.eink?"regular":active&&!active.paused?"digits":"off";
+    if(mode!==this.clockMode){
+      if(this.clockHandle!=null)window.clearInterval(this.clockHandle);
+      this.clockHandle=null;
+      this.clockMode=mode;
+      if(mode==="regular")this.clockHandle=window.setInterval(()=>this.tick(),1000);
+      if(mode==="digits")this.clockHandle=window.setInterval(()=>{
+        const views=this.visibleTimers(),session=this.active();
+        if(!views.length||!session||session.paused){this.updateClock();return;}
+        const digits=mmss(getPhase(session).remaining);
+        for(const view of views){
+          const clock=view.containerEl.querySelector(".tempvs-clock");
+          if(clock&&clock.textContent!==digits)clock.textContent=digits;
+        }
+      },1000);
+    }
+    if(this.eink && !visible.length && this.ambient.playing)this.ambient.stop();
+  }
+  scheduleBoundary(){
+    if(this.clockStopped)return;
+    const now=Date.now(),date=new Date(now);
+    let next=Infinity;
+    if(this.eink){
+      for(const session of this.state.sessions){
+        if(session.finished||session.dailyRetired||session.manualSuperseded)continue;
+        const {start,end}=sessionBounds(session);
+        if(+start>now)next=Math.min(next,+start);
+        else if(+end>now)next=Math.min(next,session.paused?+end:+getPhase(session,date).end);
+      }
+    }
+    if(next===this.boundaryAt)return;
+    window.clearTimeout(this.boundaryHandle);
+    this.boundaryAt=next;
+    if(!Number.isFinite(next))return;
+    this.boundaryHandle=window.setTimeout(()=>{
+      this.boundaryAt=null;
+      if(this.clockStopped||!this.eink)return;
+      const fired=Date.now();
+      if(fired>=next){
+        const current=this.currentNoticePhase(new Date(fired));
+        if(!document.hidden && current && current.start===next && fired-next<=8000){
+          const session=this.state.sessions.find(item=>item.id===current.id);
+          const beginning=+sessionBounds(session).start===next;
+          this.showPhaseNotice(current,beginning);
+        }
+        this.record();
+        if(this.dirty)this.persist().then(()=>this.cloud?.changed()).catch(e=>new Notice(e.message));
+      }
+      this.refresh(true);
+    },Math.min(2147483647,Math.max(1,next-now)));
+  }
   currentNoticePhase(now = new Date()) {
     const active = getActiveSession(this.state.sessions.filter(s => !s.finished), now);
     if (!active || active.paused) return null;
@@ -770,7 +871,10 @@ export default class TempvsPlugin extends Plugin {
         current.kind === previous.kind || gap < 0 || gap > 8000 ||
         nowMs - current.start < 0 || nowMs - current.start > 8000 ||
         document.hidden) return;
-    const message = current.kind === "break"
+    this.showPhaseNotice(current,false);
+  }
+  showPhaseNotice(current,beginning){
+    const message = beginning ? "TEMPVS · Inizia la sessione — " + current.area : current.kind === "break"
       ? "TEMPVS · Inizia la pausa — " + current.area
       : "TEMPVS · Riprende la concentrazione — " + current.area;
     new Notice(message, 6500);
@@ -826,21 +930,24 @@ export default class TempvsPlugin extends Plugin {
   }
   openSettings() { this.app.setting?.open(); this.app.setting?.openTabById(this.manifest.id); }
   refresh(full = false) {
+    this.updateClock();
+    this.scheduleBoundary();
     this.syncAmbient();
     const session = this.active();
     const phase = session ? getPhase(session) : null;
     if (this.status) {
-      this.status.textContent = phase ? "TEMPVS · " + mmss(phase.remaining) + " · " + (session.area || session.title) : "TEMPVS · pronto";
+      this.status.textContent = this.eink ? "TEMPVS" : phase ? "TEMPVS · " + mmss(phase.remaining) + " · " + (session.area || session.title) : "TEMPVS · pronto";
       this.status.setAttribute("aria-label", "Apri TEMPVS");
     }
-    for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) leaf.view?.update?.(full);
+    const views=this.eink?this.visibleTimers():this.app.workspace.getLeavesOfType(VIEW_TYPE).map(leaf=>leaf.view);
+    for(const view of views)view?.update?.(full);
     if(full)this.daily?.refresh();
   }
   record() {
     const now = Date.now();
-    if (now <= this.lastTick) { this.lastTick = now; return; }
+    if ((this.eink && this.einkHidden) || now <= this.lastTick) { this.lastTick = now; return; }
     for (const s of this.state.sessions) {
-      const elapsed = measuredFocus(s, this.lastTick, now);
+      const elapsed = measuredFocus(s, this.lastTick, now, this.eink ? Infinity : 15000);
       if (elapsed > 0) { s.actualSeconds = (s.actualSeconds || 0) + elapsed; this.dirty = true; }
     }
     this.lastTick = now;
@@ -1059,6 +1166,9 @@ export default class TempvsPlugin extends Plugin {
     }
   }
   async onunload() {
+    this.clockStopped=true;
+    if(this.clockHandle!=null)window.clearInterval(this.clockHandle);
+    window.clearTimeout(this.boundaryHandle);
     this.daily?.destroy();
     await this.daily?.chain.catch(()=>{});
     this.cloud?.destroy();

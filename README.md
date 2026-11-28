@@ -1,3 +1,7 @@
+## TEMPVS 0.6.1 · Modalità e-ink
+
+Attiva **Modalità e-ink** nelle impostazioni di TEMPVS sul lettore. La preferenza è locale al dispositivo. Il pannello visibile mostra il conto alla rovescia in sole cifre. Quando leggi una nota con il pannello chiuso, TEMPVS sospende gli aggiornamenti al secondo e calcola il prossimo cambio di fase dagli orari della sessione. A inizio sessione, pausa e ripresa compare un avviso in Obsidian. Il suono segue l’impostazione **Avvisi sonori**. Gli avvisi richiedono Obsidian aperto in primo piano.
+
 ## TEMPVS 0.6.0 per Obsidian
 
 Lo sviluppo di TEMPVS prosegue sul plugin Obsidian. Per installarlo o aggiornarlo con BRAT usa `huliostiltskin95/pomo-wpa`.

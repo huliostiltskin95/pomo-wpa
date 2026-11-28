@@ -6,6 +6,7 @@ import {webcrypto} from "node:crypto";
 
 function mockPlugin(mobile) {
   let saved=null;
+  const storage=new Map(),intervals=new Map(),notices=[];let clockId=0;
   const element=()=>({addClass(){},setAttribute(){},addEventListener(){},textContent:""});
   const workspace={
     getLeavesOfType:()=>[],
@@ -32,7 +33,7 @@ function mockPlugin(mobile) {
   class PluginSettingTab { constructor(app,plugin){this.app=app;this.plugin=plugin;} }
   class Setting {}
   const setIcon=()=>{};
-  class Notice {constructor(message){if(/failed|errore/i.test(message))throw Error(message);}}
+  class Notice {constructor(message){notices.push(message);if(/failed|errore/i.test(message))throw Error(message);}}
   const context={
     module:{exports:{}},exports:{},require:id=>{
       if(id!=="obsidian")throw Error("Unexpected external "+id);
@@ -41,14 +42,14 @@ function mockPlugin(mobile) {
     console,Date,Intl,Math,JSON,Map,Set,Symbol,Error,Number,String,Boolean,Array,Object,
     Promise,URL,URLSearchParams,TextEncoder,Uint8Array,btoa,clearTimeout,setTimeout,
     crypto:webcrypto,navigator:{onLine:false},
-    window:{setInterval:()=>1,setTimeout,clearTimeout},
+    window:{localStorage:{getItem:key=>storage.get(key),setItem:(key,value)=>storage.set(key,value)},setInterval:fn=>{intervals.set(++clockId,fn);return clockId;},clearInterval:id=>intervals.delete(id),setTimeout,clearTimeout},
     document:{hidden:false}
   };
   const code=readFileSync("obsidian/dist/main.js","utf8");
   vm.runInNewContext(code,context,{filename:"tempvs-obsidian.cjs"});
   const PluginClass=context.module.exports.default;
   assert.equal(typeof PluginClass,"function");
-  return {PluginClass,getSaved:()=>saved};
+  return {PluginClass,getSaved:()=>saved,intervals,notices,context};
 }
 for(const mobile of [false,true])test("Obsidian "+(mobile?"mobile":"desktop")+" runtime loads and preserves a completed session",async()=>{
   const {PluginClass,getSaved}=mockPlugin(mobile);
@@ -315,4 +316,44 @@ test('migration adds each previous allocation once and preserves the existing da
  assert.equal(file.text.match(/@50m @Studio/g).length,1);
  assert.equal(getSaved().allocations.length,0);
  await p.onunload();
+});
+
+test('e-ink uses one boundary alarm and no hidden countdown, retains focus and restores the device preference',async()=>{
+ const {PluginClass,intervals,notices,context}=mockPlugin(true);
+ const p=new PluginClass();await p.onload();
+ const origin=new Date(2026,10,28,10).getTime();
+ let now=origin;
+ context.Date=class extends Date{
+   constructor(...args){super(...(args.length?args:[now]));}
+   static now(){return now;}
+ };
+ let alarm;
+ context.window.setTimeout=(callback,delay)=>{alarm={callback,delay};return 1;};
+ context.window.clearTimeout=()=>{alarm=null;};
+ p.chimeEnabled=false;p.lastTick=now;p.setEink(true);
+ assert.equal(intervals.size,0);
+ const start=origin+60000,end=start+1800000;
+ p.state.sessions=[{id:'eink-test',title:'Studio',area:'Studio',date:'2026-11-28',start:'10:01',end:'10:31',workMinutes:25,breakEnabled:true,
+   timerStartedAt:new Date(start).toISOString(),timerEndsAt:new Date(end).toISOString()}];
+ p.refresh();
+ assert.equal(alarm.delay,60000);
+ now=start;alarm.callback();
+ assert.match(notices.at(-1),/Inizia la sessione/);
+ assert.equal(alarm.delay,1500000);
+ const view={timerVisible:true,containerEl:{getClientRects:()=>[{}]},update(){}};
+ p.app.workspace.getLeavesOfType=()=>[{view}];p.updateClock();
+ assert.equal(intervals.size,1);
+ view.timerVisible=false;p.updateClock();
+ assert.equal(intervals.size,0);
+ now=start+1500000;alarm.callback();
+ assert.match(notices.at(-1),/Inizia la pausa/);
+ assert.equal(p.state.sessions[0].actualSeconds,1500);
+ assert.equal(alarm.delay,300000);
+ now=end;alarm.callback();
+ assert.equal(alarm,null);assert.equal(intervals.size,0);
+ await p.onunload();
+ const next=new PluginClass();await next.onload();
+ assert.equal(next.eink,true);assert.equal(intervals.size,0);
+ next.setEink(false);assert.equal(intervals.size,1);
+ await next.onunload();assert.equal(intervals.size,0);
 });
