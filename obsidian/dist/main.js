@@ -8003,6 +8003,29 @@ function matchBudgetHeading(line) {
   return { name: name.trim(), value, unit, legacy: operator === "@" };
 }
 var taskLine = new RegExp("^-\\s*(\\[\\[[^\\]\\[]+\\]\\])\\s+@" + quantity + "\\s*=\\s*(\\d+)(?:\\s+\\+" + time + ")?$", "i");
+var timedTask = new RegExp("^-\\s*(\\[\\[[^\\]\\[]+\\]\\])\\s+@" + quantity + "\\s*=\\s*(\\d+)\\s+(\\d[^@]*?)(?:\\s+@(.+))?$", "i");
+var clockRange = new RegExp("^" + time + "\\s*-\\s*" + time + "$");
+var minuteOf = (clock3) => Number(clock3.slice(0, 2)) * 60 + Number(clock3.slice(3));
+function timedSlots(match, budget, areas, sourceRow) {
+  const [, link, value, unit, count, ranges, areaName] = match;
+  const area = areaName ? areas.find((a) => a.name.toLowerCase() === areaName.toLowerCase()) : budget ? { name: budget.area, id: budget.areaId } : areas[0];
+  if (!area) throw Error("Indica un\u2019area valida.");
+  const linkedNotes = noteLinks(link);
+  const parts = ranges.split(";");
+  if (parts.length !== Number(count)) throw Error("Il numero di fasce orarie deve corrispondere al numero di sessioni.");
+  let afterMidnight = false;
+  const slots = parts.map((part) => {
+    const range2 = clockRange.exec(part.trim());
+    if (!range2 || range2[1] === range2[2]) throw Error("Usa fasce HH:MM-HH:MM con inizio e fine distinti.");
+    const [, start, end] = range2, delta = minuteOf(end) - minuteOf(start);
+    const dayOffset = afterMidnight ? 1 : 0;
+    if (delta < 0) afterMidnight = true;
+    return { area: area.name, areaId: area.id, linkedNotes, sourceRow, start, end, dayOffset, minutes: delta < 0 ? 1440 + delta : delta };
+  });
+  if (slots.reduce((total, slot) => total + slot.minutes * 60, 0) !== secondsOf(value, unit))
+    throw Error("La somma delle fasce orarie deve corrispondere alla durata lorda della riga.");
+  return slots;
+}
 var plannedTask = /^-\s*(?:(\[\[[^\]\[]+\]\])\s+)?@(\d+(?:[.,]\d+)?)([hms]?)(?:\s+\+((?:[01]\d|2[0-3]):[0-5]\d)(?::([0-5]\d(?:\.\d{1,3})?))?)?(?:\s+-(\d+)m)?(?:\s+~(\d+)m)?(?:\s+!(\d+)m)?(?:\s+(\+1d))?(?:\s+@(.+?))?$/i;
 var compactTask = /^-\s*((?:\[\[[^\[\]]+\]\]\s+)+)(\d+(?:[.,]\d+)?)([hms])(?:\s*=\s*(\d+))?(?:\s+\+((?:[01]\d|2[0-3]):[0-5]\d))?\s+@(.+?)$/i;
 var possibleTask = new RegExp("^-?\\s*(\\[\\[[^\\]\\[]+\\]\\])\\s*[@*]?\\s*" + quantity + "\\s*=?\\s+(\\d+)(?:\\s*\\+?\\s*" + time + ")?$", "i");
@@ -8042,6 +8065,11 @@ function parseAreaRegister(source, areas) {
         budget = { area: area2.name, areaId: area2.id, seconds: secondsOf(heading.value, heading.unit), assigned: 0 };
         if (budgets.some((item) => item.areaId === area2.id)) throw Error("Indica un solo budget per area e giorno.");
         budgets.push(budget);
+        continue;
+      }
+      const timed = line.match(timedTask);
+      if (timed) {
+        slots.push(...timedSlots(timed, budget, areas, index));
         continue;
       }
       const planned = line.match(plannedTask);
@@ -8089,7 +8117,7 @@ function parseAreaRegister(source, areas) {
       if (!compact && (line.match(/\[\[/g) || []).length > 1) throw Error("Nel vecchio formato usa un solo wikilink per riga.");
       const task = compact || line.match(taskLine);
       if (!task) throw Error("Sintassi da correggere. Prova: " + suggestion(line));
-      const area = compact ? areas.find((a) => a.name.toLowerCase() === compact[6].trim().toLowerCase()) : budget;
+      const area = compact ? areas.find((a) => a.name.toLowerCase() === compact[6].trim().toLowerCase()) : budget || areas[0];
       if (compact && !area) throw Error("Area sconosciuta: " + compact[6]);
       if (!area) throw Error("Indica l\u2019area sulla riga, per esempio 30m Studio [[Nota]].");
       const [, link, value, unit, countText] = task, linkedNotes = noteLinks(link);
@@ -8100,7 +8128,7 @@ function parseAreaRegister(source, areas) {
       let offset = 0;
       for (let i = 0; i < count; i++) {
         const duration2 = Math.floor(seconds / count) + Number(i < seconds % count);
-        slots.push({ area: compact ? area.name : area.area, areaId: compact ? area.id : area.areaId, sourceRow: index, minutes: duration2 / 60, linkedNotes, start: start || null, offset });
+        slots.push({ area: area.name || area.area, areaId: area.id || area.areaId, sourceRow: index, minutes: duration2 / 60, linkedNotes, start: start || null, offset });
         offset += duration2;
       }
     } catch (error) {
@@ -8187,6 +8215,7 @@ function registerPlan({ source, date, blockId, state, id, planningKey: planningK
       area: slot.area,
       areaId: slot.areaId,
       start: startTime && start.getSeconds() ? startTime + ":" + String(start.getSeconds()).padStart(2, "0") : startTime,
+      ...slot.end ? { end: slot.end } : {},
       minutes: slot.minutes,
       measured: !slot.planned,
       linkedNotes: slot.linkedNotes,
@@ -11075,6 +11104,13 @@ var TempvsView = class extends import_obsidian7.ItemView {
     const pendingTime = new Map([...list.querySelectorAll("[data-allocation]")].map((input) => [input.dataset.allocation, input.value]));
     const focusedTime = list.ownerDocument?.activeElement?.dataset?.allocation;
     list.empty();
+    const tint = (element, id, name) => {
+      if (plugin.eink) return;
+      const area2 = plugin.config.areas.find((a) => id && a.id === id || a.name === name);
+      if (!area2?.color) return;
+      element.addClass("tempvs-agenda-tint");
+      element.style.setProperty("--tempvs-area-color", area2.color);
+    };
     const now = /* @__PURE__ */ new Date();
     const registered = plugin.state.history.filter((h) => h.registerBlock && h.registerDay === this.day && !h.planned);
     const binding = Object.values(plugin.dailyNotes || {}).find((b) => b.date === this.day);
@@ -11111,6 +11147,7 @@ var TempvsView = class extends import_obsidian7.ItemView {
       if (event) {
         body = null;
         const item2 = list.createDiv({ cls: "tempvs-session tempvs-calendar-event" });
+        tint(item2, event.area);
         const info2 = item2.createDiv({ cls: "tempvs-session-info" });
         info2.createEl("strong", { text: event.time + " \xB7 " + event.title });
         const area2 = info2.createEl("select", { attr: { "aria-label": "Area per " + event.title } });
@@ -11131,8 +11168,9 @@ var TempvsView = class extends import_obsidian7.ItemView {
           body = table.createEl("tbody");
         }
         const row3 = body.createEl("tr");
+        tint(row3, record.areaId, record.area);
         row3.createEl("td", { text: record.area });
-        row3.createEl("td", { text: record.start || "\u2014" });
+        row3.createEl("td", { text: record.end ? record.start + "\u2013" + record.end : record.start || "\u2014" });
         const cell = row3.createEl("td"), note = record.linkedNotes[0];
         if (note) button(cell, note.label, () => plugin.app.workspace.openLinkText(note.path, plugin.dailyNotes[record.registerBlock]?.path || "", false));
         else cell.textContent = "\u2014";
@@ -11145,8 +11183,8 @@ var TempvsView = class extends import_obsidian7.ItemView {
       const info = item.createDiv({ cls: "tempvs-session-info" });
       const heading = info.createDiv({ cls: "tempvs-session-heading" });
       heading.createEl("strong", { text: first.start + "\u2013" + last.end });
-      const badge = heading.createSpan({ cls: "tempvs-area-mark", text: first.area || first.title });
-      badge.style.setProperty("--tempvs-area-color", plugin.config.areas.find((a) => a.name === first.area)?.color || "var(--interactive-accent)");
+      tint(item, first.areaId, first.area);
+      heading.createSpan({ text: first.area || first.title });
       const current = group.sessions.find((s) => s.id === active?.id);
       item.toggleClass("is-current", Boolean(current));
       const done = group.sessions.filter((s) => s.finished || sessionBounds(s).end <= now).length;

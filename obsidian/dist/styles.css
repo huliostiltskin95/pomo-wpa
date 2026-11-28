@@ -211,3 +211,8 @@
 .tempvs-date-nav input[type="date"] { max-width: 9em; min-width: 0; }
 .tempvs-calendar-event .tempvs-session-info { display: grid; gap: 4px; }
 .tempvs-calendar-event select { justify-self: start; max-width: 100%; }
+
+.tempvs-sessions .tempvs-agenda-tint {
+  background-color: color-mix(in srgb, var(--tempvs-area-color) 12%, var(--background-primary));
+  box-shadow: inset 3px 0 var(--tempvs-area-color);
+}
