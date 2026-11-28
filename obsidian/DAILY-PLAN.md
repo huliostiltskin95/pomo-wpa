@@ -1,3 +1,17 @@
+## TEMPVS 0.6.0 per Obsidian
+
+Lo sviluppo di TEMPVS prosegue sul plugin Obsidian. Per installarlo o aggiornarlo con BRAT usa `huliostiltskin95/pomo-wpa`.
+
+Nella nota quotidiana puoi cominciare con un promemoria, poi modificare la stessa riga quando decidi quanto tempo dedicarci e quando iniziare.
+
+| Riga | Effetto |
+| --- | --- |
+| `[[Tacito#Agricola\|Agricola]]` | Promemoria nella daily, senza minuti o timer. |
+| `30m @Studio [[Tacito]]` | Assegna 30 minuti lordi a Studio. Compare in **Da programmare**. |
+| `14:30 30m @Studio [[Tacito]]` | Programma la stessa attività alle 14:30. |
+
+Puoi spostare orario, durata, area e wikilink sulla riga. Usa `@` davanti al nome dell’area per distinguere questa assegnazione dalle precedenti forme di registrazione. Il collegamento alla nota è facoltativo. In lettura, fai clic sul link per aprire la nota, la sezione o il blocco. Nel testo sorgente usa Cmd-clic su Mac o Ctrl-clic su Windows e Linux.
+
 ## Budget lordo per area
 
 ```TEMPVS

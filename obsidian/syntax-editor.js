@@ -1,5 +1,5 @@
 import {findDailyBlocks} from './daily-plan.js';
-import {syntaxTokens} from './syntax.js';
+import {syntaxTokens,wikiTokens} from './syntax.js';
 
 export function syntaxExtension(){
   const {Decoration,ViewPlugin}=require('@codemirror/view');
@@ -28,5 +28,20 @@ export function syntaxExtension(){
       }
       this.decorations=Decoration.set(marks,true);
     }
-  },{decorations:instance=>instance.decorations});
+  },{
+    decorations:instance=>instance.decorations,
+    eventHandlers:{mousedown(event,view){
+      if(event.button!==0||!(event.metaKey||event.ctrlKey))return false;
+      const pos=view.posAtCoords({x:event.clientX,y:event.clientY});
+      if(pos==null||!this.blocks.some(block=>pos>=block.start&&pos<block.end))return false;
+      const line=view.state.doc.lineAt(pos);
+      const link=wikiTokens(line.text).find(token=>pos>=line.from+token.from&&pos<line.from+token.to);
+      const {editorInfoField,Notice}=require('obsidian');
+      const info=view.state.field(editorInfoField,false);
+      if(!link||!info?.file)return false;
+      event.preventDefault();
+      void info.app.workspace.openLinkText(link.target,info.file.path,false).catch(e=>new Notice(e.message));
+      return true;
+    }}
+  });
 }

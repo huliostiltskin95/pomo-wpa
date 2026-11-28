@@ -1,3 +1,4 @@
+import {isReminder} from './plain-syntax.js';
 import {expandRange,usesTimeRange} from './plain-syntax.js';
 import {isRegister,registerPlan,applyRegister} from './daily-register.js';
 export {isRegister,applyRegister};
@@ -58,7 +59,7 @@ export function parseDailySource(source,areas){
  blockIdentity(source);explicitDay(source);
  const requests=[];const used=new Set();
  for(const [index,line] of source.split(/\r?\n/).entries()){
-  if(!line.trim()||blockPattern.test(line)||datePattern.test(line))continue;
+  if(isReminder(line)||!line.trim()||blockPattern.test(line)||datePattern.test(line))continue;
   try{
    const metadata=line.match(rowPattern),raw=metadata?line.slice(0,metadata.index):line;
    const linkedNotes=noteLinks(raw.match(/\[\[[^\]\n]+\]\]/g)?.join(' ')||'');
@@ -99,7 +100,9 @@ export function serializeDailyPlan(sessions,date,source=""){
   if(last&&last.key===key&&+last.until===+bounds.start&&s.date===last.date&&+bounds.end-last.from<86400000){last.end=s.end;last.until=bounds.end;}
   else groups.push({key,linkedNotes:s.linkedNotes||[],date:s.date,area:s.area||s.title,start:s.start,end:s.end,gross,from:+bounds.start,until:bounds.end});
  }
- return groups.map(g=>(g.gross===1440?`${g.area} @1440m +${g.start}`:timeFirst?`${g.start}-${g.end} ${g.gross}m ${g.area}`:`${g.area} ${short?"":"+"}${g.start}-${g.end} ${short?"":"-"}${g.gross}m`)+g.linkedNotes.map(n=>' [['+n.path+(n.label&&n.label!==n.path?'|'+n.label:'')+']]').join('')+(g.date!==date?' +1d':'')).join('\n');
+ const rows=groups.map(g=>(g.gross===1440?`${g.area} @1440m +${g.start}`:timeFirst?`${g.start}-${g.end} ${g.gross}m ${g.area}`:`${g.area} ${short?"":"+"}${g.start}-${g.end} ${short?"":"-"}${g.gross}m`)+g.linkedNotes.map(n=>' [['+n.path+(n.label&&n.label!==n.path?'|'+n.label:'')+']]').join('')+(g.date!==date?' +1d':''));
+ for(const [index,line] of source.split(/\r?\n/).entries())if(isReminder(line))rows.splice(Math.min(index,rows.length),0,line);
+ return rows.join('\n');
 }
 // Compare source rows before expanding ranges: correcting one range must update
 // its original sessions, while removing a historical row still preserves history.
@@ -142,7 +145,7 @@ function correctNoteWork(previous,seconds){
 }
 export function prepareDailyPlan({source,date,blockId,state,previousSource,protectedBlockIds,now=new Date(),id=()=>globalThis.crypto?.randomUUID?.()||Date.now().toString(36)+'-'+Math.random().toString(36).slice(2)}){
  if(!validDay(date))throw Error('Data non valida.');
- const register=isRegister(source)||(!source.split(/\r?\n/).some(line=>line.trim()&&!datePattern.test(line)&&!blockPattern.test(line))&&isRegister(previousSource));
+ const register=isRegister(source)||(!source.split(/\r?\n/).some(line=>line.trim()&&!isReminder(line)&&!datePattern.test(line)&&!blockPattern.test(line))&&isRegister(previousSource));
  if(register){
   blockIdentity(source);explicitDay(source);
   return {...registerPlan({source,date,blockId,state,id,planningKey:archivePlanningKey(state)}),previousSource,protectedBlockIds};

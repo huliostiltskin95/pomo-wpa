@@ -1,3 +1,4 @@
+import {flexibleAllocation} from './plain-syntax.js';
 import {matchBudgetHeading} from './area-register.js';
 import {allocationBlock,appendUnifiedAllocation,mergeAllocationBlocks,readAllocations} from './daily-allocations.js';
 import {DailyPlannerModal} from './daily-planner-modal.js';
@@ -157,7 +158,8 @@ export class DailyBlocks {
    const lines=context?.block.source.split(/\r?\n/);
    if(context?.date!==entry.date||!blockId||lines?.[entry.index]!==entry.raw)
     throw Error('L’assegnazione è cambiata. Riapri la giornata e riprova.');
-   if(start)lines[entry.index]=entry.raw.replace(/^(\s*-\s*(?:\[\[[^\]\[]+\]\]\s+)?@\d+(?:[.,]\d+)?[hms]?)(?=\s|$)/i,'$1 +'+start);
+   if(start && flexibleAllocation(entry.raw))lines[entry.index]=entry.raw.trimEnd()+' '+start;
+   else if(start)lines[entry.index]=entry.raw.replace(/^(\s*-\s*(?:\[\[[^\]\[]+\]\]\s+)?@\d+(?:[.,]\d+)?[hms]?)(?=\s|$)/i,'$1 +'+start);
    else lines.splice(entry.index,1);
    const source=lines.join('\n');
    const plan=prepareDailyPlan({source,date:entry.date,blockId,state:this.plugin.state,previousSource:context.block.source,
@@ -401,7 +403,7 @@ export class DailyBlocks {
   if(plans.length!==1)throw Error('Usa un solo blocco TEMPVS per nota giornaliera.');
   const block=plans[0];
   if(!block.source.trim()&&this.plugin.estimates?.find(file.path))return {file,block,markdown,kind:"estimate-empty"};
-  if(isEstimateSource(block.source))return {file,block,markdown,kind:"estimate"};
+  if(isEstimateSource(block.source.split(/\r?\n/).filter(line=>!flexibleAllocation(line)).join('\n')))return {file,block,markdown,kind:"estimate"};
   const date=resolveDailyDate(block.source,file,{
    moment,format:this.plugin.app.internalPlugins?.getPluginById('daily-notes')?.instance?.options?.format||'YYYY-MM-DD',
    frontmatter:this.plugin.app.metadataCache?.getFileCache(file)?.frontmatter
@@ -631,7 +633,8 @@ class DailyBlock extends MarkdownRenderChild {
    const lines=plain(this.source).split('\n');
    for(const [index,line] of lines.entries()){
     if(index)code.append('\n');
-    renderSyntaxLine(code,line,this.controller.plugin.config.areas);
+    renderSyntaxLine(code,line,this.controller.plugin.config.areas,(target,newLeaf)=>
+     this.controller.plugin.app.workspace.openLinkText(target,this.ctx.sourcePath,newLeaf).catch(e=>new Notice(e.message)));
    }
    const error=this.controller.errors.get(this.ctx.sourcePath);
    const binding=this.controller.bindings[this.controller.bindingId(this.ctx.sourcePath)];

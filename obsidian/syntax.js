@@ -47,11 +47,27 @@ export function syntaxTokens(line){
   if(area){parts.push({...area,kind:'area'});parts.sort((a,b)=>a.from-b.from);}
   return parts;
 }
-export function renderSyntaxLine(parent,line,areas){
+export function wikiTokens(line){
+  return Array.from(line.matchAll(/\[\[([^\[\]\n|]+)(?:\|([^\[\]\n]*))?\]\]/g),match=>({
+    from:match.index,to:match.index+match[0].length,target:match[1].trim(),
+    label:match[2]?.trim()||match[1].trim(),kind:'wiki'
+  })).filter(token=>token.target);
+}
+export function renderSyntaxLine(parent,line,areas,openLink){
   let cursor=0;
-  for(const {from,to,kind} of syntaxTokens(line)){
+  const links=wikiTokens(line);
+  const styles=syntaxTokens(line).filter(token=>!links.some(link=>link.from<token.to&&link.to>token.from));
+  for(const {from,to,kind,target,label} of [...styles,...links].sort((a,b)=>a.from-b.from)){
     parent.append(line.slice(cursor,from));
     const value=line.slice(from,to);
+    if(kind==='wiki'){
+      const anchor=parent.createEl('a',{cls:'internal-link',text:label,attr:{href:'#','data-href':target}});
+      anchor.addEventListener('click',event=>{
+        event.preventDefault();event.stopPropagation();
+        openLink(target,event.metaKey||event.ctrlKey);
+      });
+      cursor=to;continue;
+    }
     const span=parent.createSpan({text:value,cls:'tempvs-syntax-'+kind});
     if(kind==='area'){
       const area=areas.find(a=>a.name.toLowerCase()===value.replace(/^@/,'').toLowerCase());

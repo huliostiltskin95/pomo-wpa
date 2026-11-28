@@ -1,3 +1,4 @@
+import {isReminder} from './plain-syntax.js';
 import {expandDailyLine} from './plain-syntax.js';
 import {parseQuick} from '../core/tempo-simple.js';
 import {noteLinks} from './notes-integration.js';
@@ -42,7 +43,7 @@ export function parseAreaRegister(source,areas){
  const budgets=[],slots=[];let budget;
  for(const [index,raw] of source.split(/\r?\n/).entries()){
   const line=expandDailyLine(raw.replace(/\s+<!-- tempvs-allocation:[\w-]+ -->\s*$/,'').trim());
-  if(!line||/^date:\s*\d{4}-\d\d-\d\d$/i.test(line)||/^<!-- tempvs-block:[\w-]+ -->$/.test(line))continue;
+  if(isReminder(line)||!line||/^date:\s*\d{4}-\d\d-\d\d$/i.test(line)||/^<!-- tempvs-block:[\w-]+ -->$/.test(line))continue;
   try{
    const heading=matchBudgetHeading(line);
    if(heading){

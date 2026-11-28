@@ -17,3 +17,30 @@ test('editor includes an unfinished TEMPVS fence and excludes examples inside ot
  const [block]=findDailyBlocks(text,true);
  assert.equal(text.slice(block.start,block.end),'Personale @4h');
 });
+
+import {parseAreaRegister} from '../obsidian/area-register.js';
+import {parseDailySource,serializeDailyPlan} from '../obsidian/daily-plan.js';
+import {flexibleAllocation} from '../obsidian/plain-syntax.js';
+
+test('a reminder survives write-back without creating a session',()=>{
+ const reminder='[[Tacito#Agricola|Agricola]]';
+ assert.deepEqual(parseDailySource(reminder,[]),[]);
+ assert.equal(serializeDailyPlan([],'2026-11-28',reminder),reminder);
+});
+
+test('flexible allocations retain the source row, optional clock and full note target',()=>{
+ const areas=[{name:'Studio personale',id:'s'}];
+ const note='[[Tacito#Agricola|Agricola]]';
+ for(const [row,start] of [
+  ['30m @Studio personale '+note,null],
+  [note+' 14:30 @Studio personale 30m','14:30'],
+  ['@Studio personale 30m '+note+' +14:30','14:30']
+ ]){
+  const {slots}=parseAreaRegister(note+'\n'+row,areas);
+  assert.equal(slots.length,1);
+  assert.deepEqual([slots[0].minutes,slots[0].start,slots[0].planned,slots[0].sourceRow],[30,start,true,1]);
+  assert.equal(slots[0].linkedNotes[0].path,'Tacito#Agricola');
+ }
+ assert.equal(flexibleAllocation('@Studio 2h'),null);
+ assert.throws(()=>parseAreaRegister('25:00 30m @Studio personale '+note,areas),/Riga 1/);
+});

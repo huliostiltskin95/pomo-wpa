@@ -329,6 +329,12 @@ try {
     await plugin.daily.syncFile('agenda/15 novembre 2026.md');plugin.refresh(true);
   });
   assert.equal(await page.locator('.tempvs-session-info > .tempvs-session-resources .tempvs-session-resource').count(),2);
+  await page.evaluate(()=>{
+    const root=document.body.createDiv({cls:'linked-daily'});
+    plugin.processors.TEMPVS('',root,{sourcePath:'agenda/15 novembre 2026.md',addChild:child=>child.onload()});
+  });
+  await page.locator('.linked-daily code').getByRole('link',{name:'Serie TV',exact:true}).click();
+  assert.deepEqual(await page.evaluate(()=>openedResource),['personal-management#Serie TV','agenda/15 novembre 2026.md',false]);
   await page.locator('.tempvs-session-resource').first().click();
   assert.deepEqual(await page.evaluate(()=>openedResource),['personal-management#Serie TV','agenda/15 novembre 2026.md',false]);
   await page.setViewportSize({width:320,height:800});

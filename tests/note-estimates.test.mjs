@@ -1,3 +1,4 @@
+import {flexibleAllocation} from '../obsidian/plain-syntax.js';
 import * as dailyAllocations from '../obsidian/daily-allocations.js';
 import * as ledger from '../obsidian/note-ledger.js';
 import {creditedWork} from '../obsidian/daily-register.js';
@@ -59,7 +60,7 @@ function fixture(){
  Object.defineProperty(plugin,'config',{get:()=>plugin.state.defaults.simple});
  let markdown='```TEMPVS\n'+source+'\n```';let file={path:'zettel/Platone.md',basename:'Platone',extension:'md'};
  Object.assign(plugin.app.vault,{getAbstractFileByPath:p=>p===file.path?file:null,read:async()=>markdown});
- const context={...dailyAllocations,...ledger,creditedWork,...movedLinks,...estimates,...core,...simple,...dailyPlan,Notice:class{},MarkdownRenderChild:class{},moment:()=>({isValid:()=>false}),module:{exports:{}},console,setTimeout,clearTimeout,crypto:globalThis.crypto};
+ const context={flexibleAllocation,...dailyAllocations,...ledger,creditedWork,...movedLinks,...estimates,...core,...simple,...dailyPlan,Notice:class{},MarkdownRenderChild:class{},moment:()=>({isValid:()=>false}),module:{exports:{}},console,setTimeout,clearTimeout,crypto:globalThis.crypto};
  vm.createContext(context);
  for(const [path,name] of [['note-estimates.js','NoteEstimates'],['daily-blocks.js','DailyBlocks']]){
   const code=fs.readFileSync(new URL('../obsidian/'+path,import.meta.url),'utf8').replace(/^import .*;\n/gm,'').replace(/export /g,'');

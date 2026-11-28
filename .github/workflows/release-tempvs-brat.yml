@@ -29,7 +29,7 @@ jobs:
         run: npm run build:obsidian
       - name: Test plugin and shared core
         run: |
-          node --test tests/obsidian-runtime.smoke.mjs
+          node --test tests/obsidian-runtime.smoke.mjs tests/tempvs-syntax.test.mjs
       - name: Verify Obsidian UI and daily-note block
         run: |
           npm install --no-save --no-package-lock playwright
@@ -81,4 +81,4 @@ jobs:
             obsidian/dist/styles.css#styles.css \
             --target "${{ github.sha }}" \
             --title "TEMPVS $VERSION" \
-            --notes "Corregge l’errore «Archivio sessioni non valido» durante il salvataggio della nota quotidiana con sessioni suddivise in più pomodori."
+            --notes "Wikilink apribili nei blocchi TEMPVS, promemoria senza durata e assegnazioni flessibili nella daily."

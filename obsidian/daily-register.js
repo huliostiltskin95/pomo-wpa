@@ -1,3 +1,4 @@
+import {isReminder} from './plain-syntax.js';
 import {grossCycle} from '../core/tempo-simple.js';
 import {noteLinks} from './notes-integration.js';
 import {dateTime,localDateString,sessionBounds,hasSessionOverlaps,sessionsOverlap} from '../core/tempo-core.js';
@@ -13,7 +14,7 @@ export function parseRegister(source,areas){
  const groups=[];
  for(const [index,raw] of source.split(/\r?\n/).entries()){
   const line=raw.trim();
-  if(!line||/^date:\s*\d{4}-\d\d-\d\d$/i.test(line)||/^<!-- tempvs-block:[\w-]+ -->$/.test(line))continue;
+  if(isReminder(line)||!line||/^date:\s*\d{4}-\d\d-\d\d$/i.test(line)||/^<!-- tempvs-block:[\w-]+ -->$/.test(line))continue;
   const fail=message=>{throw Error('Riga '+(index+1)+': '+message);};
   const match=line.match(header);
   if(match){
