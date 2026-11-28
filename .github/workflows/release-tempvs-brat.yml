@@ -81,4 +81,4 @@ jobs:
             obsidian/dist/styles.css#styles.css \
             --target "${{ github.sha }}" \
             --title "TEMPVS $VERSION" \
-            --notes "Modalità e-ink per dispositivo: conto alla rovescia nel pannello visibile e avvisi in Obsidian a inizio sessione, pausa e ripresa."
+            --notes "Le note quotidiane sono la fonte delle durate lorde. Avvii e assegnazioni scrivono nella daily. Corretti budget per area, modifiche incomplete, stato delle sessioni e avvisi e-ink. Rimosso Dropbox dal plugin."

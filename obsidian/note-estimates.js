@@ -17,7 +17,7 @@ export class NoteEstimates {
   await this.plugin.change(()=>{
    const notes=this.plugin.config.noteEstimates??={};const preferred='note:'+encodeURIComponent(this.vault)+'/'+encodeURIComponent(file.path);
    const id=old?.id||(notes[preferred]?preferred+'/'+uid():preferred);
-   const note=notes[id]={...old,id,vault:this.vault,path:file.path,title:file.basename,entries,archived:false,completed:old?.completed||false};
+   const note=notes[id]={...old,...(!old?this.plugin.noteFlags?.[file.path]:{}),id,vault:this.vault,path:file.path,title:file.basename,entries,archived:false,completed:old?.completed||(!old&&this.plugin.noteFlags?.[file.path]?.completed)||false};
    if(activity){
     note.activity=true;
     if(note.completed!==completed){
@@ -43,10 +43,7 @@ export class NoteEstimates {
  }
  async start(note,entry){
   if(entry.kind==='total')throw Error('La stima @14h non imposta un’area: avvia una sessione dall’agenda e collega la nota.');
-  const plugin=this.plugin,now=new Date(),end=manualSessionEnd(now,entry.minutes),cycle=grossCycle(entry.minutes);
-  const session={id:uid(),title:entry.area,area:entry.area,areaId:entry.areaId,date:localDateString(now),start:formatTime(now),end:formatTime(end),timerStartedAt:now.toISOString(),timerEndsAt:end.toISOString(),workMinutes:cycle.focusMinutes,cycleMinutes:entry.minutes,breakEnabled:true,actualSeconds:0,linkedNotes:[{path:note.path,label:note.title}]};
-  if(plugin.state.sessions.some(s=>!s.finished&&sessionBounds(s).start<end&&sessionBounds(s).end>now))throw Error('Questo intervallo è già occupato. Assegna la nota alla sessione in agenda.');
-  await plugin.change(()=>plugin.state.sessions.push(session));
+  await this.plugin.start(entry.area,entry.minutes,25,undefined,{path:note.path,label:note.title},entry.minutes);
  }
  planStudy(note,area,minutes){
   const modal=new Modal(this.plugin.app);
@@ -75,13 +72,13 @@ export class NoteEstimates {
  }
  totals(includePlannedIntervals=true){
   const cache=this.plugin.app.metadataCache;
-  return creditedWork(this.plugin.state,(p,source)=>cache?.getFirstLinkpathDest?.(p,source)?.path,id=>this.plugin.dailyNotes?.[id]?.path,undefined,{includePlannedIntervals});
+  return creditedWork(this.plugin.state,(p,source)=>cache?.getFirstLinkpathDest?.(p,source)?.path,id=>this.plugin.dailyNotes?.[id]?.path,undefined,{includePlannedIntervals,dailyOnly:true});
  }
  liveProgress(note,totals){
   return {estimated:estimatedSeconds(note),done:totals.get(note.path)||0};
  }
  progress(note,totals){
-  return estimateProgress(note,this.plugin.state,{live:this.liveProgress(note,note.activity?totals.focus:totals.legacy)});
+  return estimateProgress({...note,completion:undefined},this.plugin.state,{live:this.liveProgress(note,totals.legacy)});
  }
  progressTotals(){
   return {legacy:this.totals(),focus:this.totals(false)};
@@ -91,7 +88,7 @@ export class NoteEstimates {
   if(panel)action(box,note.title,()=>this.plugin.app.workspace.openLinkText(note.path,'',false));
   const names=[...new Set(note.entries.map(entry=>entry.area).filter(Boolean))];
   const time=note.activity?compactEstimateTime(p.done)+'/'+compactEstimateTime(p.estimated):
-   'Tempo registrato '+estimateTime(p.done)+' su '+estimateTime(p.estimated);
+   'Tempo in daily '+estimateTime(p.done)+' su '+estimateTime(p.estimated);
   box.createEl('p',{text:(names.join(' / ')||'Tutte le aree')+' · '+time});
   box.createEl('strong',{text:estimateResult(note,p)});
   const actions=box.createDiv({cls:'tempvs-estimate-actions'});

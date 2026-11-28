@@ -9,8 +9,7 @@ import {DailyBlocks} from './daily-blocks.js';
 import { Plugin, ItemView, Notice, Platform, PluginSettingTab, Setting, setIcon } from "obsidian";
 import { getActiveSession, getNextSession, getPhase, sessionBounds, hasSessionOverlaps, localDateString, formatTime, mmss } from "../core/tempo-core.js";
 import { normalizeArchive, manualSessionEnd, measuredFocus, parseQuick, planSessions, grossCycle } from "../core/tempo-simple.js";
-import { createDropboxSync } from "../core/tempo-dropbox.js";
-import { dropboxRequest, createCloudStorage, chooseTempvsConflicts, confirmTempvs } from "./cloud-adapter.js";
+import { confirmTempvs } from "./cloud-adapter.js";
 import { noteLinks, appendNoteLink } from "./notes-integration.js";
 import { TempoAmbientAudio } from "../core/tempo-audio.js";
 import { FocusEndChime } from "../core/tempo-chime.js";
@@ -41,57 +40,6 @@ const iconButton = (parent, icon, label, action) => {
   return el;
 };
 const setPanel = (el, show) => { el.hidden = !show; };
-function renderCloudSettings(parent, plugin) {
-  const more = parent;
-    const cloud = more.createDiv({ cls: "tempvs-cloud tempvs-form" });
-    const status = cloud.createEl("p", { cls: "tempvs-cloud-status", text: plugin.cloudMessage || "Non collegato" });
-    status.setAttribute("role","status");
-    if(plugin.cloudInfo?.lastSyncedAt)cloud.createEl("p",{cls:"tempvs-muted",text:"Ultimo controllo Dropbox riuscito: "+new Date(plugin.cloudInfo.lastSyncedAt).toLocaleString("it-IT")});
-    const key = cloud.createEl("input", { attr: { "aria-label": "Dropbox App key", placeholder: "App key Dropbox" } });
-    const link = cloud.createEl("a", { text: "Apri autorizzazione Dropbox", href: "#", cls: "tempvs-cloud-link" });
-    link.hidden = true; link.setAttribute("target","_blank"); link.setAttribute("rel","noopener noreferrer");
-    button(cloud, "1. Autorizza su Dropbox", async () => {
-      const url = await plugin.cloud.connect(key.value);
-      link.href = url; link.hidden = false;
-      await plugin.persist();
-      new Notice("Autorizza TEMPVS su Dropbox e copia il codice mostrato.");
-    });
-    const code = cloud.createEl("input", { attr: { "aria-label": "Codice autorizzazione Dropbox", placeholder: "Incolla il codice Dropbox", autocomplete: "off" } });
-    button(cloud, "2. Completa collegamento", async () => {
-      await plugin.cloud.exchangeManualCode(code.value);
-      code.value = "";
-      await plugin.persist();
-      plugin.refresh(true);
-    });
-    const actions = cloud.createDiv({ cls: "tempvs-controls" });
-    button(actions, "Sincronizza", () => plugin.cloudOperation("sync"));
-    button(actions, "Unisci", () => plugin.cloudOperation("mergeNow"));
-    button(actions, "Salva recupero nel vault", async()=>{
-      const copy=plugin.cloud.recovery();
-      if(!copy?.data)throw Error("Nessuna copia di recupero disponibile.");
-      const filename="tempvs-recupero-"+Date.now()+".json";
-      await plugin.app.vault.create(filename,JSON.stringify(copy.data,null,2));
-      new Notice("Copia di recupero salvata nel vault: "+filename);
-    });
-    const initial = cloud.createDiv({ cls: "tempvs-controls" });
-    button(initial, "Prima unione", () => plugin.cloudOperation("firstSync","merge"));
-    button(initial, "Scarica prima copia", async () => {
-      if(await confirmTempvs(plugin.app,"Scaricare il backup Dropbox?","Se il plugin contiene già sessioni locali, verrà creata una copia di recupero prima di sostituirle."))
-        await plugin.cloudOperation("firstSync","download");
-    });
-    button(initial, "Carica prima copia", () => plugin.cloudOperation("firstSync","upload"));
-    const dangerous = cloud.createDiv({ cls: "tempvs-controls" });
-    button(dangerous, "Sovrascrivi Dropbox", async () => {
-      if(await confirmTempvs(plugin.app,"Sovrascrivere Dropbox?","L'archivio remoto verrà sostituito con quello locale. Usa Unisci per evitare perdite."))
-        await plugin.cloudOperation("forceUpload");
-    });
-    button(dangerous, "Scollega", async () => {
-      if(await confirmTempvs(plugin.app,"Scollegare Dropbox?","Le sessioni locali resteranno salvate in Obsidian."))
-        { plugin.cloud.disconnect(); await plugin.persist(); plugin.refresh(true); }
-    });
-
-}
-
 class TempvsView extends ItemView {
   constructor(leaf, plugin) {
     super(leaf); this.plugin = plugin; this.day = today(); this.panel = null; this.creation = "start"; this.panelId="tempvs-"+uuid(); this.planDay=null;
@@ -133,8 +81,7 @@ class TempvsView extends ItemView {
     brand.createEl("h3", {text:"TEMPVS"});
 
     const actions = heading.createDiv({cls:"tempvs-heading-actions"});
-    const cloud = iconButton(actions,"cloud","Impostazioni Dropbox",()=>plugin.openSettings());
-    cloud.addClass("tempvs-cloud-indicator");
+    iconButton(actions,"settings","Impostazioni TEMPVS",()=>plugin.openSettings());
     iconButton(actions,"settings","Impostazioni TEMPVS",()=>plugin.openSettings());
     const timer = root.createDiv({cls:"tempvs-timer"});
     timer.createDiv({cls:"tempvs-phase"});
@@ -407,12 +354,7 @@ class TempvsView extends ItemView {
     if(finish)finish.disabled=!active;
     root.querySelector(".tempvs-primary-controls").hidden=!active;
     this.updateSoundControls();
-    const cloud=root.querySelector(".tempvs-cloud-indicator");
-    if(cloud){
-      const status=plugin.cloudMessage||"Dropbox non collegato";
-      cloud.title=status;cloud.setAttribute("aria-label",status+" — Apri impostazioni");
-      cloud.toggleClass("tempvs-cloud-error",/errore|error|fallit/i.test(status));
-    }
+
     const dailyStatus=root.querySelector('.tempvs-daily-status');
     if(dailyStatus){
       const path=plugin.app.workspace.getActiveFile?.()?.path;
@@ -432,7 +374,7 @@ class TempvsView extends ItemView {
     const focusedTime=list.ownerDocument?.activeElement?.dataset?.allocation;
     list.empty();
     const now=new Date();
-    const registered=plugin.state.history.filter(h=>h.registerBlock&&h.registerDay===this.day&&(!h.planned||h.start));
+    const registered=plugin.state.history.filter(h=>h.registerBlock&&h.registerDay===this.day&&!h.planned);
     const budgets=Object.values(plugin.dailyNotes||{}).find(b=>b.date===this.day)?.budgets||[];
     for(const b of budgets){
       const difference=b.seconds-b.assigned;
@@ -440,7 +382,7 @@ class TempvsView extends ItemView {
         (difference?' · '+readableDuration(Math.abs(difference))+(difference>0?' disponibili':' oltre il budget'):'')});
     }
     const sessions=plugin.state.sessions.filter(s=>{
-      if(s.registerMinutes||s.registerPlanned)return false;
+      if(s.registerMinutes)return false;
       if(s.dailyRetired||s.manualSuperseded)return false;
       return s.date===this.day || (this.day===today()&&sessionBounds(s).start<=now&&sessionBounds(s).end>now);
     }).sort((a,b)=>sessionBounds(a).start-sessionBounds(b).start);
@@ -650,21 +592,30 @@ class TempvsSettings extends PluginSettingTab {
         this.display();new Notice("Area aggiunta.");
       }catch(e){new Notice(e.message);}
     }));
-    el.createEl("h3",{text:"Dropbox"});
-    renderCloudSettings(el,this.plugin);
-    el.createEl("p",{cls:"tempvs-muted",text:"Lo storico delle sessioni rimane salvato per statistiche, backup e sincronizzazione, ma non è mostrato nel timer."});
+
   }
 }
 export default class TempvsPlugin extends Plugin {
   async onload() {
     try {
       const data = await this.loadData();
-      if (data && !data.archive && !Array.isArray(data.sessions) && Object.keys(data).length)
-        throw Error("Formato precedente non riconosciuto: nessun dato verrà sovrascritto.");
-      this.state = normalizeArchive(data?.archive || (Array.isArray(data?.sessions) ? data : ZERO()));
-      this.allocations=Array.isArray(data?.allocations)?data.allocations:[];
-      this.dailyNotes=Object.assign(Object.create(null),data?.dailyNotes||{});
-      this.cloudData = data?.cloudData && typeof data.cloudData === "object" ? data.cloudData : {};
+      const legacy=data?.archive || (Array.isArray(data?.sessions)?data:null);
+      if(data && !legacy && data.format!==2 && Object.keys(data).length)throw Error("Formato impostazioni sconosciuto.");
+      // Save one offline recovery copy before replacing the old plugin data.
+      if(legacy){
+        const adapter=this.app.vault.adapter;
+        const path=this.manifest.dir+"/pre-0.7-recovery.json";
+        if(!await adapter.exists(path)){
+          await adapter.write(path,JSON.stringify({archive:legacy,dailyNotes:data.dailyNotes,allocations:data.allocations}));
+        }
+      }
+      this.state=normalizeArchive({sessions:[],defaults:data?.defaults||legacy?.defaults||ZERO().defaults});
+      this.state.defaults.simple.noteEstimates={};
+      this.dailyNotes=Object.create(null);
+      this.allocations=[];
+      this.timerFlags=data?.timerFlags||{};
+      this.noteFlags=data?.noteFlags||{};
+      this.legacyPaths=data?.dailyPaths||Object.fromEntries(Object.values(data?.dailyNotes||{}).map(b=>[b.path,b.date]));
       this.compact = typeof data?.ui?.compact === "boolean" ? data.ui.compact : Platform.isMobile;
       this.layout = ["auto","side","wide"].includes(data?.ui?.layout) ? data.ui.layout : "auto";
       this.timerStyle=["digits","ring"].includes(data?.ui?.timerStyle)?data.ui.timerStyle:"bar";
@@ -693,49 +644,6 @@ export default class TempvsPlugin extends Plugin {
     this.lastNotifiedPhase = this.currentNoticePhase(new Date(this.lastNoticeCheck));
     this.dirty = false;
     this.writeChain = Promise.resolve();
-    this.cloudMessage = "Dropbox non collegato";
-    this.cloudStorage = createCloudStorage(this.cloudData, () => {
-      this.cloudDirty = true;
-      clearTimeout(this.cloudSaveTimer);
-      this.cloudSaveTimer = window.setTimeout(() => this.persist().catch(e =>
-        new Notice("TEMPVS: errore nel salvataggio Dropbox: " + e.message)), 150);
-    });
-    this.cloud = createDropboxSync({
-      getState: () => this.state,
-      applyRemote: async remote => {
-        this.record();
-        const next = normalizeArchive(remote);
-        const previous = this.state;
-        this.state = next;
-        try { await this.persist(); }
-        catch(error) { this.state = previous; throw error; }
-        this.lastTick = Date.now();
-        this.lastNoticeCheck = this.lastTick;
-        this.lastNotifiedPhase = this.currentNoticePhase(new Date(this.lastTick));
-        for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) leaf.view?.draw?.();
-        this.syncAmbient();
-        this.refresh(true);
-        await this.daily?.reconcilePlans();
-      },
-      normalizeRemote: normalizeArchive,
-      onStatus: (message, detail) => {
-        this.cloudMessage = message;
-        this.cloudInfo = detail;
-        this.refresh(true);
-      },
-      resolveConflicts: conflicts => chooseTempvsConflicts(this.app, conflicts),
-      platform: {
-        storage: this.cloudStorage,
-        transientStorage: this.cloudStorage,
-        manualAuthorization: true,
-        request: dropboxRequest,
-        navigate: async url => {
-          this.pendingAuthUrl = url;
-          await this.persist();
-        },
-        isOnline: () => navigator.onLine !== false
-      }
-    });
     this.estimates=new NoteEstimates(this);
     this.registerEditorExtension?.(syntaxExtension());
     this.daily=new DailyBlocks(this);this.daily.start();
@@ -781,10 +689,7 @@ export default class TempvsPlugin extends Plugin {
       }else if(!document.hidden){this.tick();this.refresh(true);}
     });
     this.refresh(true);
-    this.cloud.init().catch(error => {
-      this.cloudMessage = "Dropbox: " + error.message;
-      this.refresh(true);
-    });
+
   }
   get config() { return this.state.defaults.simple; }
   setEink(value){
@@ -839,6 +744,8 @@ export default class TempvsPlugin extends Plugin {
         else if(+end>now)next=Math.min(next,session.paused?+end:+getPhase(session,date).end);
       }
     }
+    // An already due alarm may be queued behind this layout event.
+    if(this.eink && this.boundaryAt!=null && this.boundaryAt<=now)return;
     if(next===this.boundaryAt)return;
     window.clearTimeout(this.boundaryHandle);
     this.boundaryAt=next;
@@ -855,7 +762,7 @@ export default class TempvsPlugin extends Plugin {
           this.showPhaseNotice(current,beginning);
         }
         this.record();
-        if(this.dirty)this.persist().then(()=>this.cloud?.changed()).catch(e=>new Notice(e.message));
+        if(this.dirty)this.persist().catch(e=>new Notice(e.message));
       }
       this.refresh(true);
     },Math.min(2147483647,Math.max(1,next-now)));
@@ -963,26 +870,42 @@ export default class TempvsPlugin extends Plugin {
     this.record();
     const now = Date.now();
     if (this.dirty && now - this.lastSave >= 15000) {
-      this.persist().then(() => {
-        this.cloud?.changed();
-      }).catch(e => new Notice("TEMPVS: salvataggio fallito: " + e.message));
+      this.persist().catch(e => new Notice("TEMPVS: salvataggio fallito: " + e.message));
       this.lastSave = now;
     }
     if(Math.floor(now/15000)!==Math.floor((now-1000)/15000))this.daily?.refresh();
     this.refresh(Math.floor(now / 60000) !== Math.floor((now-1000)/60000));
   }
+  timerKey(s){const b=sessionBounds(s);return JSON.stringify([s.date,s.area,+b.start,+b.end]);}
+  restoreTimerFlags(sessions,existing){
+    for(const s of sessions){
+      if(existing.has(s.id))continue;
+      const flags=this.timerFlags[this.timerKey(s)];
+      if(flags && flags.until>Date.now())Object.assign(s,{paused:flags.paused,finished:flags.finished,actualSeconds:flags.actualSeconds});
+    }
+  }
   async persist() {
-    const archive = JSON.parse(JSON.stringify(this.state));
-    const cloudData = this.cloudStorage?.snapshot() || {};
-    const audio={kind:this.audioKind,volume:this.audioVolume};
-    const notifications={sound:this.chimeEnabled};
-    const allocations=JSON.parse(JSON.stringify(this.allocations));
-    const dailyNotes=JSON.parse(JSON.stringify(this.dailyNotes||{}));
-    const write = this.writeChain.catch(() => {}).then(() => this.saveData({ archive, cloudData, ui:{compact:this.compact,layout:this.layout,timerStyle:this.timerStyle,clockSize:this.clockSize},audio,notifications,dailyNotes,allocations }));
-    this.writeChain = write;
+    const defaults=JSON.parse(JSON.stringify(this.state.defaults));
+    delete defaults.simple.noteEstimates;
+    const now=Date.now();
+    for(const [key,flags] of Object.entries(this.timerFlags))if(flags.until<=now)delete this.timerFlags[key];
+    for(const session of this.state.sessions){
+      const bounds=sessionBounds(session);
+      if(+bounds.end<=now || +bounds.start>now)continue;
+      const key=this.timerKey(session);
+      this.timerFlags[key]={until:+bounds.end,paused:!!session.paused,finished:!!session.finished,actualSeconds:session.actualSeconds||0};
+    }
+    for(const note of this.estimates?.notes||[]){
+      if(note.completed)this.noteFlags[note.path]={completed:true,completion:note.completion};
+      else delete this.noteFlags[note.path];
+    }
+    const data=JSON.parse(JSON.stringify({format:2,defaults,dailyPaths:this.legacyPaths,timerFlags:this.timerFlags,noteFlags:this.noteFlags,
+      ui:{compact:this.compact,layout:this.layout,timerStyle:this.timerStyle,clockSize:this.clockSize},
+      audio:{kind:this.audioKind,volume:this.audioVolume},notifications:{sound:this.chimeEnabled}}));
+    const write=this.writeChain.catch(()=>{}).then(()=>this.saveData(data));
+    this.writeChain=write;
     await write;
-    if (JSON.stringify(this.state) === JSON.stringify(archive)) this.dirty = false;
-    if (JSON.stringify(this.cloudStorage?.snapshot() || {}) === JSON.stringify(cloudData)) this.cloudDirty = false;
+    this.dirty=false;
   }
   async change(mutator) {
     if(this.changing)throw Error('Salvataggio in corso. Attendi prima di riprovare.');
@@ -993,12 +916,9 @@ export default class TempvsPlugin extends Plugin {
       const previousAllocations=this.allocations;
       try {mutator();this.state=normalizeArchive(this.state);await this.persist();}
       catch(error){this.state=JSON.parse(previous);this.allocations=previousAllocations;this.refresh(true);throw error;}
-      // Local save succeeded: failure to persist sync metadata must not undo it.
-      try {this.cloud?.changed();await this.persist();}
-      catch(error){new Notice('TEMPVS: dati salvati in locale; sincronizzazione da riprovare. '+error.message);}
       this.refresh(true);
     } finally {this.changing=false;}
-    await this.daily?.archiveChanged();
+    if(!this.daily?.applying)await this.daily?.syncLedgers();
   }
   setSessionNote(ids,input,options={}){
     const operation=(this.noteWrite || Promise.resolve()).then(()=>this.applySessionNote(ids,input,options));
@@ -1016,7 +936,7 @@ export default class TempvsPlugin extends Plugin {
     const bindings=new Set(ids.map(id=>this.state.sessions.find(s=>s.id===id).noteBlockId).filter(Boolean));
     if(bindings.size){
       if(bindings.size!==1)throw Error('Modifica una giornata alla volta.');
-      await this.daily.updateSessionNotes([...bindings][0],updates);
+      await this.daily.editTimedRows(updates);
     }else await this.change(()=>{for(const [id,notes] of updates){const s=this.state.sessions.find(s=>s.id===id);s.linkedNotes=notes;delete s.noteEstimateId;}});
   }
   async setCompact(value){
@@ -1050,18 +970,15 @@ export default class TempvsPlugin extends Plugin {
       delete this.state.appearance.areaColors[from];
     }
   }
-  async start(area, gross, focus, pause) {
+  async start(area, gross, focus, pause, note, cycleMinutes) {
     if (!this.config.areas.some(a => a.name === area)) throw Error("Area non valida.");
     if (!Number.isInteger(gross) || gross < 1 || gross > 1439) throw Error("Durata lorda non valida.");
     if (!Number.isInteger(focus) || focus < 1 || focus > 240) throw Error("Focus da 1 a 240 minuti.");
     if (pause !== undefined && (!Number.isInteger(pause) || pause < 0 || pause >= gross)) throw Error("Pausa personalizzata non valida.");
-    const start = new Date(), end = manualSessionEnd(start, gross);
-    const s = { id: uuid(), title: area, area, date: localDateString(start), start: formatTime(start), end: formatTime(end),
-      timerStartedAt: start.toISOString(), timerEndsAt: end.toISOString(), workMinutes: focus,
-      breakEnabled: pause === undefined ? this.state.defaults.breakEnabled : pause > 0, actualSeconds: 0 };
-    if (pause !== undefined) s.customBreakMinutes = pause;
-    if (hasSessionOverlaps([...this.state.sessions.filter(s => !s.finished), s])) throw Error("Sessione sovrapposta a un'altra.");
-    await this.change(() => this.state.sessions.push(s));
+    const now=new Date();
+    await this.daily.writeAllocation({area,minutes:gross,date:localDateString(now),start:formatTime(now),note,
+      offsetMs:now.getSeconds()*1000+now.getMilliseconds(),cycleMinutes,focusMinutes:cycleMinutes?undefined:focus,
+      customBreakMinutes:pause});
   }
   async schedule(text, date) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw Error("Data non valida.");
@@ -1088,7 +1005,7 @@ export default class TempvsPlugin extends Plugin {
       const raw=binding?.source.split(/\r?\n/)[record.sourceRow];
       return file&&raw?[{...record,id:record.sessionId,file,raw,index:record.sourceRow,note:record.linkedNotes[0],unified:true}]:[];
     });
-    return [...unified,...entries,...this.allocations.filter(item=>item.date===date&&!entries.some(entry=>entry.id===item.id))];
+    return [...unified,...entries];
   }
   removeAllocation(entry) {
     if(entry.unified)return this.daily.updateUnifiedAllocation(entry);
@@ -1098,11 +1015,8 @@ export default class TempvsPlugin extends Plugin {
   }
   async scheduleRequests(requests,date,note) {
     if(!validDay(date))throw Error("Data non valida.");
-    await this.change(()=>{
-      const sessions=this.plannedSessions(requests,date);
-      if(note)for(const session of sessions)session.linkedNotes=[note];
-      this.state.sessions.push(...sessions);
-    });
+    this.plannedSessions(requests,date);
+    await this.daily.writeAllocations(requests.map(r=>({...r,date,note})));
   }
   plannedSessions(requests,date) {
     const result=planSessions(requests,[],this.state.sessions.filter(s=>!s.finished&&!s.dailyRetired&&!s.manualSuperseded),
@@ -1116,24 +1030,10 @@ export default class TempvsPlugin extends Plugin {
         throw Error('Scegli un orario futuro per avviare il timer.');
       return this.daily.updateUnifiedAllocation(allocation,start);
     }
-    const {date,note,area,areaId,minutes,cycleMinutes,focusMinutes,customBreakMinutes}=allocation;
-    const commit=()=>this.change(()=>{
-      if(!allocation.file&&!this.allocations.some(entry=>entry.id===allocation.id))
-        throw Error("Tempo assegnato non più disponibile.");
-      const currentArea=this.config.areas.find(item=>(areaId&&item.id===areaId)||item.name===area);
-      if(!currentArea)throw Error("Area non più disponibile.");
-      const request={area:currentArea.name,areaId:currentArea.id,minutes,cycleMinutes,focusMinutes,customBreakMinutes,start};
-      const [session]=this.plannedSessions([request],date);
-      if(note){
-        const target=this.app.metadataCache?.getFirstLinkpathDest?.(note.path.split('#')[0],allocation.file?.path||'');
-        const anchor=note.path.includes('#')?note.path.slice(note.path.indexOf('#')):'';
-        session.linkedNotes=[target?{...note,path:target.path+anchor}:note];
-      }
-      this.state.sessions.push(session);
-      this.allocations=this.allocations.filter(entry=>entry.id!==allocation.id);
-    });
-    if(allocation.file)await this.daily.consumeAllocation(allocation,commit);
-    else await commit();
+    if(!allocation.file)throw Error('Assegnazione assente dalla daily.');
+    await this.daily.migrateAllocationBlock(allocation.file);
+    await this.daily.syncFile(allocation.file.path);
+    throw Error('La daily usa ora il blocco unificato. Scegli la riga aggiornata per impostare l’orario.');
   }
   async togglePause() {
     const s = this.active();
@@ -1152,24 +1052,7 @@ export default class TempvsPlugin extends Plugin {
   async removeSession(id) {
     const s = this.state.sessions.find(s => s.id === id);
     if (!s || s.finished || sessionBounds(s).start <= new Date()) throw Error("Puoi eliminare solo sessioni future.");
-    await this.change(() => {
-      this.state.sessions = this.state.sessions.filter(item => item.id !== id);
-      this.state.syncDeleted.sessions.push(id);
-    });
-  }
-  async cloudOperation(method, argument) {
-    this.record();
-    if(this.dirty) await this.persist();
-    try {
-      if(method === "firstSync") await this.cloud.firstSync(argument);
-      else await this.cloud[method]();
-      await this.persist();
-      this.refresh(true);
-    } catch(error) {
-      await this.persist();
-      this.refresh(true);
-      throw error;
-    }
+    await this.daily.editTimedRows(new Map([[id,null]]));
   }
   async onunload() {
     this.clockStopped=true;
@@ -1177,12 +1060,10 @@ export default class TempvsPlugin extends Plugin {
     window.clearTimeout(this.boundaryHandle);
     this.daily?.destroy();
     await this.daily?.chain.catch(()=>{});
-    this.cloud?.destroy();
     this.chime?.destroy();
     this.ambient?.destroy();
     this.record();
-    clearTimeout(this.cloudSaveTimer);
-    if (this.dirty || this.cloudDirty) await this.persist().catch(e => console.error("TEMPVS:", e));
+    if (this.dirty) await this.persist().catch(e => console.error("TEMPVS:", e));
     await this.writeChain.catch(() => {});
   }
 }

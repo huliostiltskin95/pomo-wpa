@@ -1,3 +1,17 @@
+## TEMPVS 0.7.0 · La giornata in Obsidian
+
+Le durate delle note dipendono dalle righe delle note quotidiane. Ogni riga con durata contribuisce una sola volta al totale della **prima nota collegata**, pause comprese. Vale anche per le assegnazioni senza orario. Un wikilink da solo è un promemoria e vale zero. Le stime nelle note di lettura indicano un obiettivo. **Assegna tempo** e **Avvia** inseriscono la riga nella daily del giorno scelto.
+
+```TEMPVS
+Studio = 2h
+30m @Studio [[Tacito]]
+[[Platone]]
+```
+
+Tacito riceve 30 minuti e per Studio restano 90 minuti disponibili. Aggiungere un orario alla stessa riga programma il timer. In lettura le etichette aiutano a distinguere pianificazione e registrazione nel formato storico.
+
+Il plugin ricostruisce la giornata dalle note e salva nelle impostazioni le preferenze e lo stato temporaneo del timer. Al primo aggiornamento salva una copia di recupero statica del precedente archivio nella cartella del plugin. Le voci presenti solo in quella copia sono escluse. Per sincronizzare le giornate tra dispositivi basta la sincronizzazione del vault.
+
 ## TEMPVS 0.6.1 · Modalità e-ink
 
 Attiva **Modalità e-ink** nelle impostazioni di TEMPVS sul lettore. La preferenza è locale al dispositivo. Il pannello visibile mostra il conto alla rovescia in sole cifre. Quando leggi una nota con il pannello chiuso, TEMPVS sospende gli aggiornamenti al secondo e calcola il prossimo cambio di fase dagli orari della sessione. A inizio sessione, pausa e ripresa compare un avviso in Obsidian. Il suono segue l’impostazione **Avvisi sonori**. Gli avvisi richiedono Obsidian aperto in primo piano.

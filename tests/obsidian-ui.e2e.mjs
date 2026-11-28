@@ -42,7 +42,12 @@ try {
     window.notices=[];
     window.require=()=>({Plugin,ItemView,MarkdownRenderChild:class{constructor(el){this.containerEl=el}},Modal:class{constructor(app){this.app=app;this.contentEl=document.createElement("div")}open(){document.body.append(this.contentEl);this.onOpen()}close(){this.onClose();this.contentEl.remove()}},PluginSettingTab:class{},Setting:class{},Platform:{isMobile:true},setIcon,Notice:class{constructor(message){window.notices.push(message)}}});
     window.module={exports:{}};
-    window.mount=async()=>{const plugin=new module.exports.default();await plugin.onload();const view=plugin.factory({});leaves.push({view});await view.onOpen();window.plugin=plugin;window.view=view;};
+    window.mount=async()=>{const plugin=new module.exports.default();
+      const files=new Map();
+      plugin.app.vault={getAbstractFileByPath:path=>files.get(path),read:async f=>f.text,
+        process:async(f,edit)=>{f.text=edit(f.text);},create:async(path,text)=>{
+          const f={path,basename:path.split('/').at(-1).slice(0,-3),extension:'md',text}; files.set(path,f); return f;}};
+      await plugin.onload();const view=plugin.factory({});leaves.push({view});await view.onOpen();window.plugin=plugin;window.view=view;};
   });
   await page.addScriptTag({content:readFileSync('obsidian/dist/main.js','utf8')});
   await page.evaluate(()=>window.mount());
@@ -193,9 +198,9 @@ try {
   await page.waitForFunction(()=>plugin.state.sessions.some(s=>s.date==='2099-11-06'&&s.area==='Lavoro'&&s.start==='14:00'));
   assert.deepEqual(await page.evaluate(()=>plugin.state.sessions.filter(s=>s.date==='2099-11-06'&&s.area==='Studio').map(s=>s.id)),ids.slice(0,3));
   await page.evaluate(async()=>{const s=plugin.state.sessions.find(s=>s.area==='Lavoro'&&s.date==='2099-11-06');await plugin.removeSession(s.id);await plugin.schedule('Personale +16:00-17:00 -1h','2099-11-06');});
-  await page.waitForFunction(()=>dailyText.includes('Personale +16:00-17:00'));
+  await page.waitForFunction(()=>dailyText.includes('+16:00')&&dailyText.includes('@Personale'));
   assert(!await page.evaluate(()=>dailyText.includes('Lavoro +14:00-14:30')));
-  await page.waitForFunction(()=>document.querySelector('.daily-container code')?.textContent.includes('Personale +16:00-17:00'));
+  await page.waitForFunction(()=>document.querySelector('.daily-container code')?.textContent.includes('@Personale'));
   // A completed earlier plan must not prevent live unsaved afternoon edits.
   await page.evaluate(()=>{
     for(const session of plugin.state.sessions.filter(s=>s.date==='2099-11-06'))session.finished=true;
@@ -248,7 +253,7 @@ try {
   await page.evaluate(()=>{const old=plugin.app.vault.process;plugin.app.vault.process=async(file,change)=>{await old(file,change);window.liveDailyText=dailyText;};});
   await estimates.getByRole('button',{name:'Collega alle sessioni libere del giorno',exact:true}).click();
   await page.waitForFunction(()=>plugin.state.sessions.filter(s=>s.date==='2099-11-06'&&!s.finished).every(s=>s.linkedNotes?.length===1));
-  assert.match(await estimates.textContent(),/0%/);
+  assert.match(await estimates.textContent(),/10%/);
   assert.match(await estimates.textContent(),/20 h/);
   assert.equal(await page.locator('.tempvs-note-assignment').count(),0);
   await page.locator('.tempvs-session-cycles > summary').click();
@@ -299,6 +304,7 @@ try {
    const NativeDate=Date,clock=+new NativeDate('2026-11-15T20:25:00');
    window.Date=class extends NativeDate{constructor(...args){super(...(args.length?args:[clock]));}static now(){return clock;}};
    const file={path:'agenda/15 novembre 2026.md',basename:'15 novembre 2026',extension:'md'};
+   plugin.legacyPaths[file.path]='2026-11-15';
    window.screenshotNote='---\ntitle: 15 novembre 2026\n---\n\n# 15 novembre 2026\n\n```TEMPVS\ndate: 2026-11-15\nPersonale +01:26-01:56 -30m\nStudio +15:00-16:00 -60m\nSvago +18:30-21:00 -120m\nStudio +21:00-23:00 -60m\n```';
    plugin.dailyNotes=Object.create(null);plugin.app.workspace.getActiveFile=()=>file;
    const oldLeaves=plugin.app.workspace.getLeavesOfType;plugin.app.workspace.getLeavesOfType=type=>type==='markdown'?[]:oldLeaves(type);

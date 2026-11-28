@@ -13,7 +13,7 @@ export function matchBudgetHeading(line){
  return {name:name.trim(),value,unit,legacy:operator==='@'};
 }
 const taskLine=new RegExp('^-\\s*(\\[\\[[^\\]\\[]+\\]\\])\\s+@'+quantity+'\\s*=\\s*(\\d+)(?:\\s+\\+'+time+')?$','i');
-const plannedTask=new RegExp('^-\\s*(?:(\\[\\[[^\\]\\[]+\\]\\])\\s+)?@'+quantity+'(?:\\s+\\+'+time+')?(?:\\s+-(\\d+)m)?(?:\\s+@(.+?))?$','i');
+const plannedTask=/^-\s*(?:(\[\[[^\]\[]+\]\])\s+)?@(\d+(?:[.,]\d+)?)([hms]?)(?:\s+\+((?:[01]\d|2[0-3]):[0-5]\d)(?::([0-5]\d(?:\.\d{1,3})?))?)?(?:\s+-(\d+)m)?(?:\s+~(\d+)m)?(?:\s+!(\d+)m)?(?:\s+(\+1d))?(?:\s+@(.+?))?$/i;
 const compactTask=/^-\s*((?:\[\[[^\[\]]+\]\]\s+)+)(\d+(?:[.,]\d+)?)([hms])(?:\s*=\s*(\d+))?(?:\s+\+((?:[01]\d|2[0-3]):[0-5]\d))?\s+@(.+?)$/i;
 const possibleTask=new RegExp('^-?\\s*(\\[\\[[^\\]\\[]+\\]\\])\\s*[@*]?\\s*'+quantity+'\\s*=?\\s+(\\d+)(?:\\s*\\+?\\s*'+time+')?$','i');
 const possibleArea=new RegExp('^(.+?)\\s+[@*]?'+quantity+'$','i');
@@ -50,26 +50,29 @@ export function parseAreaRegister(source,areas){
     const area=areas.find(a=>a.name.toLowerCase()===heading.name.toLowerCase());
     if(!area)throw Error('Area sconosciuta. Aree disponibili: '+areas.map(a=>a.name).join(', '));
     budget={area:area.name,areaId:area.id,seconds:secondsOf(heading.value,heading.unit),assigned:0};
+    if(budgets.some(item=>item.areaId===area.id))throw Error('Indica un solo budget per area e giorno.');
     budgets.push(budget);continue;
    }
    const planned=line.match(plannedTask);
    if(planned){
-    const [,link,value,unit,start,cycle,explicitArea]=planned;
+    const [,link,value,unit,start,secondsPart,cycle,focus,pause,nextDay,explicitArea]=planned;
     const area=explicitArea?areas.find(item=>item.name.toLowerCase()===explicitArea.trim().toLowerCase()):budget;
     if(!area)throw Error('Indica un’area valida sopra l’assegnazione o sulla stessa riga.');
     const seconds=secondsOf(value,unit),minutes=seconds/60;
-    if(!Number.isInteger(minutes)||minutes>1439)throw Error('Usa una durata da 1 a 1439 minuti interi.');
-    if(!explicitArea)budget.assigned+=seconds;
+    if(focus&&(Number(focus)<1||Number(focus)>240)||pause&&Number(pause)>=minutes||cycle&&(focus||pause))throw Error('Controlla focus e pausa della sessione.');
+    if(!Number.isInteger(minutes)||minutes>1440)throw Error('Usa una durata da 1 a 1439 minuti interi.');
+
     const linkedNotes=noteLinks(link);
     if(link&&!linkedNotes.length)throw Error('Wikilink non valido.');
     slots.push({area:area.name||area.area,areaId:area.id||area.areaId,minutes,linkedNotes,start:start||null,
-     planned:true,sourceRow:index,...(cycle?{cycleMinutes:Number(cycle)}:{})});
+     planned:true,sourceRow:index,offset:Number(secondsPart||0),dayOffset:nextDay?1:0,
+     ...(focus?{focusMinutes:Number(focus)}:{}),...(pause?{customBreakMinutes:Number(pause)}:{}),...(cycle?{cycleMinutes:Number(cycle)}:{})});
     continue;
    }
    if(/^[^-].*?\s+\+\s*\d\d:\d\d\s*-/.test(line)){
     const links=line.match(/\[\[[^\[\]]+\]\]/g)||[];
     const range=line.replace(/\[\[[^\[\]]+\]\]/g,'').trim();
-    for(const slot of parseQuick(range,areas))slots.push({...slot,linkedNotes:noteLinks(links.join(' '))});
+    for(const slot of parseQuick(range,areas))slots.push({...slot,sourceRow:index,linkedNotes:noteLinks(links.join(' '))});
     continue;
    }
    if(/^[^-].*?\s+@.*?\s+\+\d\d:\d\d/.test(line)){
@@ -92,15 +95,20 @@ export function parseAreaRegister(source,areas){
    if(!linkedNotes.length)throw Error('Indica una nota tra parentesi quadre doppie.');
    const seconds=secondsOf(value,unit),count=Number(countText??1);
    if(count<1||count>seconds||count>86400)throw Error('Indica almeno un pomodoro, con almeno un secondo ciascuno (massimo 86400).');
-   if(!compact)budget.assigned+=seconds;
+
    const start=task[5];
    let offset=0;
    for(let i=0;i<count;i++){
     const duration=Math.floor(seconds/count)+Number(i<seconds%count);
-    slots.push({area:compact?area.name:area.area,areaId:compact?area.id:area.areaId,minutes:duration/60,linkedNotes,start:start||null,offset});
+    slots.push({area:compact?area.name:area.area,areaId:compact?area.id:area.areaId,sourceRow:index,minutes:duration/60,linkedNotes,start:start||null,offset});
     offset+=duration;
    }
   }catch(error){throw Error('Riga '+(index+1)+': '+error.message);}
+ }
+ const byArea=new Map(budgets.map(item=>[item.areaId,item]));
+ for(const slot of slots){
+  const target=byArea.get(slot.areaId);
+  if(target)target.assigned+=Math.round(slot.minutes*60);
  }
  return {budgets,slots};
 }

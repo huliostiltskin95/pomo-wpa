@@ -66,7 +66,7 @@ export function registerPlan({source,date,blockId,state,id,planningKey}){
    previous.find(h=>h.slotIndex===index&&!h.planned);
   const sessionId=match?.id||(old&&!claimed.has(old.sessionId)?old.sessionId:id());
   claimed.add(sessionId);
-  const record={sessionId,registerBlock:blockId,noteBlockId:blockId,slotIndex:index,date:dayText,registerDay:date,
+  const record={sessionId,registerBlock:blockId,noteBlockId:blockId,slotIndex:index,date:dayText,registerDay:date,sourceRow:slot.sourceRow,
    title:slot.area,area:slot.area,areaId:slot.areaId,start:startTime&&start.getSeconds()?startTime+':'+String(start.getSeconds()).padStart(2,'0'):startTime,minutes:slot.minutes,measured:!slot.planned,linkedNotes:slot.linkedNotes,...(slot.planned?{planned:true,sourceRow:slot.sourceRow}:{})};
   records.push(record);
   const chosenCycle=slot.cycleMinutes!==undefined?grossCycle(slot.cycleMinutes):null;
@@ -95,7 +95,7 @@ export function applyRegister(state,plan){
   const old=existing.get(s.id);
   const sameTime=old?.timerStartedAt===s.timerStartedAt&&old?.timerEndsAt===s.timerEndsAt;
   return {...s,actualSeconds:old?.actualSeconds||0,
-   ...(s.registerPlanned&&sameTime?{finished:old.finished,paused:old.paused,noteWork:old.noteWork}: {})};
+   ...(sameTime?{finished:old.finished,paused:old.paused,noteWork:old.noteWork}: {})};
  }));
  const obsolete=state.history.filter(h=>(h.registerBlock===plan.blockId||replaced.has(h.sessionId))&&!plan.records.some(r=>r.sessionId===h.sessionId)).map(h=>h.sessionId);
  state.history=state.history.filter(h=>h.registerBlock!==plan.blockId&&!replaced.has(h.sessionId)).concat(plan.records);
@@ -105,7 +105,7 @@ export function applyRegister(state,plan){
 }
 
 // Build both views from one row per session. History also holds slots without a clock.
-export function creditedWork(state,resolve,bindingPath,byArea,{includePlannedIntervals=true}={}){
+export function creditedWork(state,resolve,bindingPath,byArea,{includePlannedIntervals=true,dailyOnly=false}={}){
  const totals=new Map(),records=new Map(state.history.map(h=>[h.sessionId,h]));
  for(const s of state.sessions)if(!records.get(s.id)?.registerBlock||records.get(s.id)?.planned)records.set(s.id,s);
  const estimates=state.defaults.simple.noteEstimates||{};
@@ -118,6 +118,20 @@ export function creditedWork(state,resolve,bindingPath,byArea,{includePlannedInt
   }
   totals.set(key,(totals.get(key)||0)+seconds);
  };
+ if(dailyOnly){
+  const registered=new Set();
+  for(const row of state.history){
+   if(!row.registerBlock||!bindingPath(row.registerBlock))continue;
+   registered.add(row.sessionId);
+   add(row.linkedNotes?.[0]?.path,row.minutes*60,bindingPath(row.registerBlock),row.area);
+  }
+  for(const s of state.sessions){
+   if(registered.has(s.id)||!s.noteBlockId||s.dailyRetired||s.manualSuperseded||!bindingPath(s.noteBlockId))continue;
+   const bounds=sessionBounds(s);
+   add(s.linkedNotes?.[0]?.path,(bounds.end-bounds.start)/1000,bindingPath(s.noteBlockId),s.area);
+  }
+  return totals;
+ }
  for(const r of records.values()){
   if(r.planned||r.dailyRetired||r.manualSuperseded)continue;
   const source=bindingPath(r.noteBlockId)||'';

@@ -47,9 +47,10 @@ export function mergeAllocationBlocks(markdown,file,date,areas){
    result:appendUnifiedAllocation(result,{...entry,id:id.includes(':')?undefined:id}),clean);
 }
 
-export function unifiedAllocationRow({area,minutes,cycleMinutes,note,id,start},explicitArea=true){
+export function unifiedAllocationRow({area,minutes,cycleMinutes,focusMinutes,customBreakMinutes,offsetMs,dayOffset,note,id,start},explicitArea=true){
  const wiki=note?'[['+note.path+(note.label&&note.label!==note.path?'|'+note.label:'')+']] ':'';
- return '- '+wiki+'@'+minutes+'m'+(start?' +'+start:'')+(cycleMinutes?' -'+cycleMinutes+'m':'')+
+ return '- '+wiki+'@'+minutes+'m'+(start?' +'+start+(offsetMs?':'+(offsetMs/1000).toFixed(3).padStart(6,'0'):''):'')+(cycleMinutes?' -'+cycleMinutes+'m':'')+
+  (focusMinutes?' ~'+focusMinutes+'m':'')+(customBreakMinutes!==undefined?' !'+customBreakMinutes+'m':'')+(dayOffset?' +1d':'')+
   (explicitArea?' @'+area:'')+(id?' <!-- tempvs-allocation:'+id+' -->':'');
 }
 

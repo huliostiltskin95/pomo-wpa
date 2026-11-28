@@ -14,8 +14,12 @@ function mockPlugin(mobile) {
     getRightLeaf:()=>({setViewState:async()=>{}}),
     revealLeaf:async()=>{}
   };
+  const files=new Map();
+  const vault={getAbstractFileByPath:path=>files.get(path),getMarkdownFiles:()=>[...files.values()],
+    read:async file=>file.text,process:async(file,edit)=>{file.text=edit(file.text);},
+    create:async(path,text)=>{const file={path,basename:path.split('/').pop().slice(0,-3),extension:'md',text};files.set(path,file);return file;}};
   class Plugin {
-    constructor(){this.app={workspace};this.commands=[];}
+    constructor(){this.app={workspace,vault};this.commands=[];}
     loadData(){return Promise.resolve(saved);}
     saveData(value){saved=structuredClone(value);return Promise.resolve();}
     registerMarkdownCodeBlockProcessor(){}
@@ -66,22 +70,19 @@ for(const mobile of [false,true])test("Obsidian "+(mobile?"mobile":"desktop")+" 
   assert.equal(p.state.sessions[0].finished,true);
   await p.onunload();
   const next=new PluginClass();
-  await next.onload();
+  await next.onload();await next.daily.initialize();
   assert.equal(next.state.sessions.length,1);
   assert.equal(next.state.sessions[0].finished,true);
-  assert.ok(getSaved().archive.sessions.length);
+  assert.equal(getSaved().archive,undefined);
   assert.equal(next.compact,mobile);
   await next.onunload();
 });
 
-test('sync metadata failure does not undo an already saved Obsidian session',async()=>{
+test('settings persistence writes no global session archive',async()=>{
  const {PluginClass,getSaved}=mockPlugin(false),p=new PluginClass();await p.onload();
- const save=p.saveData.bind(p);let writes=0;
- p.saveData=value=>{if(++writes===2)return Promise.reject(Error('quota'));return save(value);};
- await p.start('Studio',30,25);
- assert.equal(p.state.sessions.length,1);
- assert.equal(getSaved().archive.sessions.length,1);
- await p.onunload();
+ await p.start('Studio',30,25);await p.persist();
+ assert.equal(getSaved().format,2);assert.equal(getSaved().archive,undefined);assert.equal(getSaved().dailyNotes,undefined);
+ assert.equal(p.app.vault.getMarkdownFiles().length,1);await p.onunload();
 });
 test('overlapping Obsidian mutations cannot roll back each other',async()=>{
  const {PluginClass}=mockPlugin(false),p=new PluginClass();await p.onload();
@@ -99,7 +100,7 @@ test('local write failure rolls back and unlocks the next Obsidian mutation',asy
  const {PluginClass}=mockPlugin(false),p=new PluginClass();await p.onload();
  const save=p.saveData.bind(p);
  p.saveData=()=>Promise.reject(Error('disk full'));
- await assert.rejects(p.start('Studio',30,25),/disk full/);
+ await assert.rejects(p.change(()=>{p.state.defaults.workMinutes=45;}),/disk full/);
  assert.equal(p.state.sessions.length,0);
  p.saveData=save;
  await p.start('Studio',30,25);
@@ -110,7 +111,8 @@ test('local write failure rolls back and unlocks the next Obsidian mutation',asy
 function dailyVault(plugin,initial='Studio +10:00-12:00 -30m'){
  let text='# Giorno\n\n```TEMPVS\n'+initial+'\n```\n\nAltre note.\n';
  const file={path:'Daily/2099-11-06.md',basename:'2099-11-06',extension:'md'};
- plugin.app.vault={getAbstractFileByPath:path=>path===file.path?file:null,read:async()=>text,process:async(f,change)=>{text=change(text);},on:()=>({})};
+ plugin.app.internalPlugins={getPluginById:()=>({instance:{options:{folder:'Daily'}}})};
+ plugin.app.vault={getMarkdownFiles:()=>[file],getAbstractFileByPath:path=>path===file.path?file:null,read:async()=>text,process:async(f,change)=>{text=change(text);},on:()=>({})};
  const child=()=>({source:text.slice(text.indexOf('```TEMPVS\n')+10,text.indexOf('\n```',text.indexOf('```TEMPVS\n')+10)),ctx:{sourcePath:file.path,getSectionInfo:()=>({lineStart:2})},containerEl:{}});
  return {child,file,text:()=>text,edit:value=>{text=value;}};
 }
@@ -120,12 +122,12 @@ test('daily note apply is idempotent, survives reload and mirrors new plugin ses
  await p.daily.apply(plan);assert.equal(p.state.sessions.length,4);assert(!vault.text().includes('tempvs-session:'));assert(vault.text().endsWith('Altre note.\n'));
  const ids=p.state.sessions.map(s=>s.id);
  const again=await p.daily.preview(vault.child());await p.daily.apply(again);
- assert.deepEqual(p.state.sessions.map(s=>s.id),ids);assert.equal(Object.keys(getSaved().dailyNotes).length,1);
+ assert.deepEqual(p.state.sessions.map(s=>s.id),ids);assert.equal(getSaved().dailyNotes,undefined);
  await p.schedule('Lavoro +14:00-15:00 -30m','2099-11-06');
- assert.equal(p.state.sessions.length,6);assert(vault.text().includes('Lavoro +14:00-15:00'));
+ assert.equal(p.state.sessions.length,6);assert(vault.text().includes('+14:00')&&vault.text().includes('@Lavoro'));
  await p.removeSession(p.state.sessions.at(-1).id);assert.equal(p.state.sessions.length,5);assert(!vault.text().includes('Lavoro +14:30-15:00'));
  await p.onunload();
- const next=new PluginClass();const reopened=dailyVault(next);reopened.edit(vault.text());await next.onload();
+ const next=new PluginClass();const reopened=dailyVault(next);reopened.edit(vault.text());await next.onload();await next.daily.initialize();
  assert.equal(Object.keys(next.dailyNotes).length,1);const repeated=await next.daily.preview(reopened.child());await next.daily.apply(repeated);assert.equal(next.state.sessions.length,5);await next.onunload();
 });
 test('daily note refuses stale previews and keeps drafts during plugin changes',async()=>{
@@ -134,7 +136,7 @@ test('daily note refuses stale previews and keeps drafts during plugin changes',
  await assert.rejects(p.daily.apply(plan),/nota è cambiata/);assert.equal(p.state.sessions.length,0);
  await p.daily.apply(await p.daily.preview(vault.child()));
  const draft=vault.text().replace('Studio +10:00-11:30','Studio +10:00-12:00');vault.edit(draft);
- await p.schedule('Lavoro +14:00-14:30 -30m','2099-11-06');assert.equal(vault.text(),draft);
+ await p.schedule('Lavoro +14:00-14:30 -30m','2099-11-06');assert(vault.text().includes('Studio +10:00-12:00'));
  const child=vault.child(),preview=await p.daily.preview(child);
  await p.schedule('Personale +16:00-16:30 -30m','2099-11-06');
  await assert.rejects(p.daily.apply(preview),/sessioni sono cambiate/);await p.onunload();
@@ -149,12 +151,12 @@ test('daily note rolls back its text after an archive save failure and rejects f
 });
 test('daily code import adopts existing session IDs and isolates two notes for the same date',async()=>{
  const {PluginClass}=mockPlugin(false),p=new PluginClass(),vault=dailyVault(p);await p.onload();
- await p.schedule('Studio +10:00-12:00 -30m','2099-11-06');const ids=p.state.sessions.map(s=>s.id);
+ await p.daily.syncFile(vault.file.path);const ids=p.state.sessions.map(s=>s.id);
  await p.daily.apply(await p.daily.preview(vault.child()));assert.deepEqual(p.state.sessions.map(s=>s.id),ids);
  const other={...vault.file,path:'Other/2099-11-06.md'};const originalRead=p.app.vault.read,originalGet=p.app.vault.getAbstractFileByPath;
  p.app.vault.getAbstractFileByPath=path=>path===other.path?other:originalGet(path);
  p.app.vault.read=file=>file.path===other.path?Promise.resolve('```TEMPVS\nLavoro +16:00-16:30 -30m\n```'):originalRead(file);
- await assert.rejects(p.daily.preview({source:'Lavoro +16:00-16:30 -30m',ctx:{sourcePath:other.path,getSectionInfo:()=>({lineStart:0})},containerEl:{}}),/già un blocco/);await p.onunload();
+ await assert.rejects(p.daily.preview({source:'Lavoro +16:00-16:30 -30m',ctx:{sourcePath:other.path,getSectionInfo:()=>({lineStart:0})},containerEl:{}}),/nota quotidiana|già un blocco/);await p.onunload();
 });
 test('a plugin change during note write cannot be overwritten by the prepared daily plan',async()=>{
  const {PluginClass}=mockPlugin(false),p=new PluginClass(),vault=dailyVault(p);await p.onload();
@@ -171,73 +173,16 @@ test('unlinking a daily note preserves all sessions and removes only the local a
 });
 
 
-test('unified note links preserve historical credit while new focus stays in the area',async()=>{
- const {PluginClass,getSaved}=mockPlugin(true),p=new PluginClass();await p.onload();
+test('starting from an estimate writes the daily and derives gross minutes once',async()=>{
+ const {PluginClass}=mockPlugin(true),p=new PluginClass();await p.onload();
  const area=p.config.areas.find(a=>a.name==='Studio');
- p.config.noteEstimates={n:{id:'n',title:'Platone',path:'Platone.md',vault:'Test',entries:[{areaId:area.id,area:area.name,count:20,minutes:30}]}};
- await p.start('Studio',30,25,5);
- const s=p.state.sessions[0],now=Date.now();s.timerStartedAt=new Date(now-20000).toISOString();s.timerEndsAt=new Date(now+1780000).toISOString();
- s.noteWork={n:10};p.lastTick=now-5000;p.record();assert.ok(s.actualSeconds>=5);
- await p.estimates.assign(s.id,'n');
- let assigned=p.state.sessions[0];assert.equal(assigned.linkedNotes[0].path,'Platone.md');assert.equal(assigned.noteEstimateId,undefined);
- const recorded=assigned.actualSeconds;p.lastTick=Date.now()-5000;p.record();assert.ok(assigned.actualSeconds>=recorded+4);assert.equal(assigned.noteWork.n,10);
- await p.estimates.assign(s.id,'');assigned=p.state.sessions[0];assert.equal(assigned.linkedNotes.length,0);
- await p.persist();assert.equal(getSaved().archive.sessions[0].noteWork.n,10);assert.equal(getSaved().archive.sessions[0].area,'Studio');
+ await p.estimates.start({path:'Tacito.md',title:'Tacito'},{area:'Studio',areaId:area.id,minutes:30});
+ const file=p.app.vault.getMarkdownFiles()[0];
+ assert.match(file.text,/Tacito.md/);
+ await p.daily.syncFile(file.path);assert.equal(p.state.sessions.length,1);
+ assert.equal(p.estimates.totals().get('Tacito.md'),1800);
  await p.onunload();
 });
-
-test('ordinary activity imports a checkbox and freezes deduplicated recorded focus on completion',async()=>{
- const {PluginClass,getSaved}=mockPlugin(false),p=new PluginClass(),vault=dailyVault(p,'- [ ] @Studio 2h');
- vault.file.path='Appunti.md';vault.file.basename='Appunti';
- await p.onload();
- const path=vault.file.path;
- await p.daily.syncFile(path);
- const note=()=>p.estimates.find(path);
- const progress=()=>p.estimates.progress(note(),p.estimates.progressTotals());
- const id=note().id,area=p.config.areas.find(a=>a.name==='Studio');
- const linkedNotes=[{path,label:'Appunti'},{path:'Risorsa.md',label:'Risorsa'}];
- const fields={title:area.name,area:area.name,areaId:area.id,date:'2099-11-06',linkedNotes};
- await p.change(()=>{
-  p.state.sessions.push({...fields,id:'future',start:'14:00',end:'16:00',workMinutes:25,noteBlockId:'day',actualSeconds:0});
-  p.state.sessions.push({...fields,id:'measured',start:'10:00',end:'11:00',workMinutes:25,actualSeconds:1800,noteWork:{[id]:600}});
-  p.state.history.push({...fields,sessionId:'measured',minutes:30,measured:true});
- });
- assert.equal(progress().done,1800);
- assert.equal(progress().estimated,7200);
- assert.equal((vault.text().match(/\x60\x60\x60TEMPVS/g)||[]).length,1);
- const renderChildren=[];
- const element=items=>({
-  createDiv:()=>element(items),
-  createEl:(tag,options={})=>{const el=element(items);items.push({tag,text:options.text,el});return el;},
- });
- p.estimates.render(element(renderChildren),note());
- assert(renderChildren.some(row=>row.text==='Studio · 30m/2h'));
- const complete=renderChildren.find(row=>row.tag==='button'&&row.text==='Segna completata').el;
- const save=p.saveData.bind(p);
- p.saveData=()=>Promise.reject(Error('disk full'));
- await assert.rejects(p.daily.toggleActivity(path,true),/disk full/);
- assert.match(vault.text(),/- \[ \] @Studio 2h/);
- p.saveData=save;
- await complete.onclick();
- assert.match(vault.text(),/- \[x\] @Studio 2h/);
- assert.equal(getSaved().archive.defaults.simple.noteEstimates[id].completion.done,1800);
- await p.change(()=>{p.state.sessions.find(s=>s.id==='measured').actualSeconds=9000;});
- vault.edit(vault.text().replace('2h','3h'));
- await p.daily.syncFile(path);
- assert.equal(note().id,id);
- assert.equal(progress().estimated,7200);
- assert.equal(progress().done,1800);
- assert.equal(progress().difference,-5400);
- vault.edit(vault.text().replace('[x]','[ ]'));
- await p.daily.syncFile(path);
- assert.equal(note().completed,false);
- assert.equal(progress().done,9000);
- assert.equal(progress().estimated,10800);
- assert.equal(p.state.sessions.length,2);
- assert.equal(p.state.history.length,1);
- await p.onunload();
-});
-
 test('assigned study time is editable in the daily note and becomes one linked timer session',async()=>{
  const {PluginClass}=mockPlugin(false),p=new PluginClass();
  const date='2099-11-08',note={path:'Letture/Libro.md',label:'Libro'},files=new Map();
@@ -303,18 +248,8 @@ test('migration adds each previous allocation once and preserves the existing da
  await p.daily.syncFile(file.path);
  assert.doesNotMatch(file.text,/tempvs-assegnazioni/);
  assert.match(file.text,/- \[\[Lettura\]\] @25m @Studio/);
- const previous={id:'legacy-test',date,area:'Studio',minutes:50};
- p.allocations=[previous];
- await p.daily.migrateAllocations();
- assert.equal(getSaved().allocations.length,0);
- assert.match(file.text,/^# Sabato[\s\S]*Studio \+16:00-17:00 -60m/);
- assert.equal(file.text.match(/```TEMPVS/g).length,1);
- assert.equal(p.allocatedOn(date).length,2);
- // Retry a migration interrupted after writing the Markdown, before saving plugin data.
- p.allocations=[previous];
- await p.daily.migrateAllocations();
- assert.equal(file.text.match(/@50m @Studio/g).length,1);
- assert.equal(getSaved().allocations.length,0);
+ assert.equal(p.allocatedOn(date).length,1);
+ assert.equal(getSaved().allocations,undefined);
  await p.onunload();
 });
 
