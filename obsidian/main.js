@@ -679,7 +679,10 @@ export default class TempvsPlugin extends Plugin {
       throw error;
     }
     this.einkStorageKey="tempvs:eink:"+ (this.app.vault?.getName?.()||"");
-    this.eink=window.localStorage?.getItem(this.einkStorageKey)==="on";
+    try {
+      this.eink=(this.app.loadLocalStorage ? this.app.loadLocalStorage("tempo-pomodoro:eink")
+        : window.localStorage?.getItem(this.einkStorageKey))==="on";
+    }catch{this.eink=false;}
     this.einkHidden=document.hidden;
     this.ambient=new TempoAmbientAudio(()=>this.refreshAudioControls());
     this.chime=new FocusEndChime();
@@ -788,7 +791,10 @@ export default class TempvsPlugin extends Plugin {
     this.record();
     this.eink=value;
     this.einkHidden=document.hidden;
-    window.localStorage?.setItem(this.einkStorageKey,value?"on":"off");
+    try{
+      if(this.app.saveLocalStorage)this.app.saveLocalStorage("tempo-pomodoro:eink",value?"on":"off");
+      else window.localStorage.setItem(this.einkStorageKey,value?"on":"off");
+    }catch{new Notice("Preferenza e-ink applicata per questa apertura di Obsidian.");}
     this.lastNoticeCheck=Date.now();
     this.lastNotifiedPhase=this.currentNoticePhase(new Date(this.lastNoticeCheck));
     this.refresh(true);
