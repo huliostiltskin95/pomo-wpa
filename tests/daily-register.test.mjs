@@ -155,3 +155,24 @@ test('gross budgets reserve no time on the daily note date',()=>{
  assert.equal(plan('Personale = 8h').records.length,0);
  assert.throws(()=>plan(source.replace('@90m','@90m +10:30')),/sovrappongono/);
 });
+
+test('fasce distinte della stessa attività, budget, credito e modifica',()=>{
+ const state=normalizeArchive({sessions:[]});
+ let next=0;
+ const plan=source=>prepareDailyPlan({state,source,date:'2026-11-28',blockId:'daily',id:()=>String(++next)});
+ const row='- [[Santrock|Psicologia: p. 110-119]] @1h = 2 ';
+ const times='10:00-10:30; 12:30-13:00';
+ const result=plan('Studio = 8h\n'+row+times);
+ assert.deepEqual(result.sessions.map(s=>[s.start,s.end]),[['10:00','10:30'],['12:30','13:00']]);
+ assert.equal(result.budgets[0].assigned,3600);
+ applyDailyPlan(state,result);
+ assert.equal(creditedWork(state,()=>null,()=>'daily.md',null,{dailyOnly:true}).get('Santrock.md'),3600);
+ const moved=plan(row+'23:40-00:00; 00:20-01:00 @Personale');
+ assert.deepEqual(moved.sessions.map(s=>[s.date,s.area,s.registerMinutes]),[
+  ['2026-11-28','Personale',20],['2026-11-29','Personale',40]]);
+ assert.equal(plan(row+times).sessions.length,2);
+ assert.throws(()=>plan(row+'10:00-11:00'),/numero di fasce/);
+ assert.throws(()=>plan(row+'10:00-10:30; 12:30-12:40'),/somma/);
+ assert.throws(()=>plan(row+'10:00-10:30; 10:20-10:50'),/sovrappongono/);
+ assert.throws(()=>plan(row+'10:00-10:30; 25:00-25:30'),/HH:MM/);
+});

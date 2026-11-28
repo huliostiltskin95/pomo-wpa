@@ -29,7 +29,7 @@ jobs:
         run: npm run build:obsidian
       - name: Test plugin and shared core
         run: |
-          node --test tests/obsidian-runtime.smoke.mjs tests/tempvs-syntax.test.mjs tests/google-calendar.test.mjs
+          node --test tests/obsidian-runtime.smoke.mjs tests/tempvs-syntax.test.mjs tests/daily-register.test.mjs tests/google-calendar.test.mjs
       - name: Verify Obsidian UI and daily-note block
         run: |
           npm install --no-save --no-package-lock playwright
@@ -81,4 +81,4 @@ jobs:
             obsidian/dist/styles.css#styles.css \
             --target "${{ github.sha }}" \
             --title "TEMPVS $VERSION" \
-            --notes "Importazione in sola lettura dei calendari Google scelti nelle daily esistenti, assegnazione facoltativa dell’area e pannello con timer e agenda del giorno."
+            --notes "Fasce orarie facoltative per le attività della daily e colori delle aree nel riepilogo, esclusa la modalità e-ink."

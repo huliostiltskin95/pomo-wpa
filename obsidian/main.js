@@ -372,6 +372,13 @@ class TempvsView extends ItemView {
     const pendingTime=new Map([...list.querySelectorAll("[data-allocation]")].map(input=>[input.dataset.allocation,input.value]));
     const focusedTime=list.ownerDocument?.activeElement?.dataset?.allocation;
     list.empty();
+    const tint=(element,id,name)=>{
+      if(plugin.eink)return;
+      const area=plugin.config.areas.find(a=>(id&&a.id===id)||a.name===name);
+      if(!area?.color)return;
+      element.addClass("tempvs-agenda-tint");
+      element.style.setProperty("--tempvs-area-color",area.color);
+    };
     const now=new Date();
     const registered=plugin.state.history.filter(h=>h.registerBlock&&h.registerDay===this.day&&!h.planned);
     const binding=Object.values(plugin.dailyNotes||{}).find(b=>b.date===this.day);
@@ -409,6 +416,7 @@ class TempvsView extends ItemView {
       if(event){
         body=null;
         const item=list.createDiv({cls:"tempvs-session tempvs-calendar-event"});
+        tint(item,event.area);
         const info=item.createDiv({cls:"tempvs-session-info"});
         info.createEl("strong",{text:event.time+" · "+event.title});
         const area=info.createEl("select",{attr:{"aria-label":"Area per "+event.title}});
@@ -426,7 +434,8 @@ class TempvsView extends ItemView {
           body=table.createEl('tbody');
         }
         const row=body.createEl('tr');
-        row.createEl('td',{text:record.area});row.createEl('td',{text:record.start||'—'});
+        tint(row,record.areaId,record.area);
+        row.createEl('td',{text:record.area});row.createEl('td',{text:record.end?record.start+'–'+record.end:record.start||'—'});
         const cell=row.createEl('td'),note=record.linkedNotes[0];
         if(note)button(cell,note.label,()=>plugin.app.workspace.openLinkText(note.path,plugin.dailyNotes[record.registerBlock]?.path||'',false));
         else cell.textContent='—';
@@ -439,8 +448,8 @@ class TempvsView extends ItemView {
       const info=item.createDiv({cls:"tempvs-session-info"});
       const heading=info.createDiv({cls:"tempvs-session-heading"});
       heading.createEl("strong",{text:first.start+"–"+last.end});
-      const badge=heading.createSpan({cls:"tempvs-area-mark",text:first.area||first.title});
-      badge.style.setProperty("--tempvs-area-color",plugin.config.areas.find(a=>a.name===first.area)?.color||"var(--interactive-accent)");
+      tint(item,first.areaId,first.area);
+      heading.createSpan({text:first.area||first.title});
       const current=group.sessions.find(s=>s.id===active?.id);
       item.toggleClass("is-current",Boolean(current));
       const done=group.sessions.filter(s=>s.finished||sessionBounds(s).end<=now).length;

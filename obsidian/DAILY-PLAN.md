@@ -1,3 +1,12 @@
+## Fasce facoltative per una stessa attività
+
+```TEMPVS
+Studio = 8h
+- [[Psicologia dello sviluppo]] @1h = 2 10:00-10:30; 12:30-13:00
+```
+
+Ogni fascia crea una sessione. Le due mezz’ore valgono insieme un’ora per la nota e per Studio. Le fasce possono avere durate diverse e attraversare la mezzanotte. Il loro numero e la loro durata complessiva devono coincidere con quelli dichiarati. Puoi omettere tutte le fasce per registrare la durata senza fissare gli orari. Con le fasce puoi anche indicare l’area in fondo alla riga con `@Studio`. Se mancano sia l’intestazione sia l’area esplicita, viene usata la prima area nelle impostazioni.
+
 ## TEMPVS 0.6.0 per Obsidian
 
 Lo sviluppo di TEMPVS prosegue sul plugin Obsidian. Per installarlo o aggiornarlo con BRAT usa `huliostiltskin95/pomo-wpa`.

@@ -13,6 +13,31 @@ export function matchBudgetHeading(line){
  return {name:name.trim(),value,unit,legacy:operator==='@'};
 }
 const taskLine=new RegExp('^-\\s*(\\[\\[[^\\]\\[]+\\]\\])\\s+@'+quantity+'\\s*=\\s*(\\d+)(?:\\s+\\+'+time+')?$','i');
+const timedTask=new RegExp('^-\\s*(\\[\\[[^\\]\\[]+\\]\\])\\s+@'+quantity+'\\s*=\\s*(\\d+)\\s+(\\d[^@]*?)(?:\\s+@(.+))?$','i');
+const clockRange=new RegExp('^'+time+'\\s*-\\s*'+time+'$');
+const minuteOf=clock=>Number(clock.slice(0,2))*60+Number(clock.slice(3));
+
+function timedSlots(match,budget,areas,sourceRow){
+ const [,link,value,unit,count,ranges,areaName]=match;
+ const area=areaName?areas.find(a=>a.name.toLowerCase()===areaName.toLowerCase()):
+  budget?{name:budget.area,id:budget.areaId}:areas[0];
+ if(!area)throw Error('Indica un’area valida.');
+ const linkedNotes=noteLinks(link);
+ const parts=ranges.split(';');
+ if(parts.length!==Number(count))throw Error('Il numero di fasce orarie deve corrispondere al numero di sessioni.');
+ let afterMidnight=false;
+ const slots=parts.map(part=>{
+  const range=clockRange.exec(part.trim());
+  if(!range||range[1]===range[2])throw Error('Usa fasce HH:MM-HH:MM con inizio e fine distinti.');
+  const [,start,end]=range,delta=minuteOf(end)-minuteOf(start);
+  const dayOffset=afterMidnight?1:0;
+  if(delta<0)afterMidnight=true;
+  return {area:area.name,areaId:area.id,linkedNotes,sourceRow,start,end,dayOffset,minutes:delta<0?1440+delta:delta};
+ });
+ if(slots.reduce((total,slot)=>total+slot.minutes*60,0)!==secondsOf(value,unit))
+  throw Error('La somma delle fasce orarie deve corrispondere alla durata lorda della riga.');
+ return slots;
+}
 const plannedTask=/^-\s*(?:(\[\[[^\]\[]+\]\])\s+)?@(\d+(?:[.,]\d+)?)([hms]?)(?:\s+\+((?:[01]\d|2[0-3]):[0-5]\d)(?::([0-5]\d(?:\.\d{1,3})?))?)?(?:\s+-(\d+)m)?(?:\s+~(\d+)m)?(?:\s+!(\d+)m)?(?:\s+(\+1d))?(?:\s+@(.+?))?$/i;
 const compactTask=/^-\s*((?:\[\[[^\[\]]+\]\]\s+)+)(\d+(?:[.,]\d+)?)([hms])(?:\s*=\s*(\d+))?(?:\s+\+((?:[01]\d|2[0-3]):[0-5]\d))?\s+@(.+?)$/i;
 const possibleTask=new RegExp('^-?\\s*(\\[\\[[^\\]\\[]+\\]\\])\\s*[@*]?\\s*'+quantity+'\\s*=?\\s+(\\d+)(?:\\s*\\+?\\s*'+time+')?$','i');
@@ -53,6 +78,8 @@ export function parseAreaRegister(source,areas){
     if(budgets.some(item=>item.areaId===area.id))throw Error('Indica un solo budget per area e giorno.');
     budgets.push(budget);continue;
    }
+   const timed=line.match(timedTask);
+   if(timed){slots.push(...timedSlots(timed,budget,areas,index));continue;}
    const planned=line.match(plannedTask);
    if(planned){
     const [,link,value,unit,start,secondsPart,cycle,focus,pause,nextDay,explicitArea]=planned;
@@ -88,7 +115,7 @@ export function parseAreaRegister(source,areas){
    if(!compact&&(line.match(/\[\[/g)||[]).length>1)throw Error('Nel vecchio formato usa un solo wikilink per riga.');
    const task=compact||line.match(taskLine);
    if(!task)throw Error('Sintassi da correggere. Prova: '+suggestion(line));
-   const area=compact?areas.find(a=>a.name.toLowerCase()===compact[6].trim().toLowerCase()):budget;
+   const area=compact?areas.find(a=>a.name.toLowerCase()===compact[6].trim().toLowerCase()):(budget||areas[0]);
    if(compact&&!area)throw Error('Area sconosciuta: '+compact[6]);
    if(!area)throw Error('Indica l’area sulla riga, per esempio 30m Studio [[Nota]].');
    const [,link,value,unit,countText]=task,linkedNotes=noteLinks(link);
@@ -100,7 +127,7 @@ export function parseAreaRegister(source,areas){
    let offset=0;
    for(let i=0;i<count;i++){
     const duration=Math.floor(seconds/count)+Number(i<seconds%count);
-    slots.push({area:compact?area.name:area.area,areaId:compact?area.id:area.areaId,sourceRow:index,minutes:duration/60,linkedNotes,start:start||null,offset});
+    slots.push({area:area.name||area.area,areaId:area.id||area.areaId,sourceRow:index,minutes:duration/60,linkedNotes,start:start||null,offset});
     offset+=duration;
    }
   }catch(error){throw Error('Riga '+(index+1)+': '+error.message);}

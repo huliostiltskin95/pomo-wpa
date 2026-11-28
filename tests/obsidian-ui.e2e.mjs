@@ -346,6 +346,17 @@ try {
   assert.match(await rows.first().textContent(),/02:50.*Budapest/);
   assert.match(await rows.nth(1).textContent(),/03:20.*Budapest.*30 min/);
   assert.match(await rows.last().textContent(),/Greco/);
+  await page.evaluate(async()=>{
+    window.screenshotNote=screenshotNote.replace('= 2 +02:50','= 2 02:50-03:20; 07:00-07:30');
+    await plugin.daily.syncFile('agenda/15 novembre 2026.md');
+  });
+  await page.waitForFunction(()=>document.querySelector('.tempvs-sessions')?.textContent.includes('07:00–07:30'));
+  assert.equal(await rows.first().evaluate(row=>row.style.getPropertyValue('--tempvs-area-color')),
+    await page.evaluate(()=>plugin.config.areas.find(area=>area.name==='Personale').color));
+  await page.evaluate(()=>plugin.setEink(true));
+  assert.equal(await page.locator('.tempvs-sessions .tempvs-agenda-tint').count(),0);
+  await page.evaluate(()=>plugin.setEink(false));
+  assert.equal(await page.locator('.tempvs-sessions .tempvs-agenda-tint').count(),14);
   await page.evaluate(()=>plugin.commands['plan-daily-note'].callback());
   const planner=page.locator('form').filter({has:page.getByRole('button',{name:'Aggiungi alla giornata'})});
   await planner.getByLabel('Inizio',{exact:true}).fill('16:00');

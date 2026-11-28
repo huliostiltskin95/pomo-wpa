@@ -67,7 +67,7 @@ export function registerPlan({source,date,blockId,state,id,planningKey}){
   const sessionId=match?.id||(old&&!claimed.has(old.sessionId)?old.sessionId:id());
   claimed.add(sessionId);
   const record={sessionId,registerBlock:blockId,noteBlockId:blockId,slotIndex:index,date:dayText,registerDay:date,sourceRow:slot.sourceRow,
-   title:slot.area,area:slot.area,areaId:slot.areaId,start:startTime&&start.getSeconds()?startTime+':'+String(start.getSeconds()).padStart(2,'0'):startTime,minutes:slot.minutes,measured:!slot.planned,linkedNotes:slot.linkedNotes,...(slot.planned?{planned:true,sourceRow:slot.sourceRow}:{})};
+   title:slot.area,area:slot.area,areaId:slot.areaId,start:startTime&&start.getSeconds()?startTime+':'+String(start.getSeconds()).padStart(2,'0'):startTime,...(slot.end?{end:slot.end}:{}),minutes:slot.minutes,measured:!slot.planned,linkedNotes:slot.linkedNotes,...(slot.planned?{planned:true,sourceRow:slot.sourceRow}:{})};
   records.push(record);
   const chosenCycle=slot.cycleMinutes!==undefined?grossCycle(slot.cycleMinutes):null;
   if(slot.start){
