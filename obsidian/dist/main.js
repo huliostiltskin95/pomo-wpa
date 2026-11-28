@@ -555,8 +555,8 @@ function parseQuick(text, areas) {
     }
   });
 }
-function measuredFocus(session, from, to) {
-  if (to - from <= 0 || to - from > 15e3 || session.paused || session.finished) return 0;
+function measuredFocus(session, from, to, maxGap = 15e3) {
+  if (to - from <= 0 || to - from > maxGap || session.paused || session.finished) return 0;
   const bounds = sessionBounds(session);
   let cursor = Math.max(+from, +bounds.start), end = Math.min(+to, +bounds.end), total = 0;
   while (cursor < end) {
@@ -3943,6 +3943,14 @@ var TempvsView = class extends import_obsidian6.ItemView {
     this.followDailyNote();
     this.draw();
     this.loadAllocations();
+    if (typeof IntersectionObserver === "function") {
+      this.visibilityObserver = new IntersectionObserver((entries) => {
+        this.timerVisible = entries.at(-1).isIntersecting;
+        this.plugin.updateClock();
+        if (this.plugin.eink && this.timerVisible) this.update(true);
+      });
+      this.visibilityObserver.observe(this.containerEl);
+    }
   }
   loadAllocations() {
     this.plugin.daily.loadAllocations(this.day).catch((error) => new import_obsidian6.Notice(error.message));
@@ -3955,6 +3963,9 @@ var TempvsView = class extends import_obsidian6.ItemView {
     }
   }
   async onClose() {
+    this.visibilityObserver?.disconnect();
+    this.timerVisible = false;
+    this.plugin.updateClock();
   }
   draw() {
     const plugin = this.plugin;
@@ -4266,10 +4277,10 @@ var TempvsView = class extends import_obsidian6.ItemView {
     const timer = root.querySelector(".tempvs-timer");
     const area = plugin.config.areas.find((a) => a.name === (active || next)?.area);
     timer.style.setProperty("--tempvs-area-color", area?.color || "var(--interactive-accent)");
-    timer.dataset.style = plugin.timerStyle;
+    timer.dataset.style = plugin.eink ? "digits" : plugin.timerStyle;
     timer.dataset.size = plugin.clockSize;
     timer.style.setProperty("--tempvs-progress-angle", (phase?.progress || 0) * 3.6 + "deg");
-    progress.hidden = !phase || plugin.timerStyle === "digits";
+    progress.hidden = plugin.eink || !phase || plugin.timerStyle === "digits";
     progress.setAttribute("aria-valuenow", String(Math.round(phase?.progress || 0)));
     progress.firstElementChild.style.width = (phase?.progress || 0) + "%";
     root.querySelector(".tempvs-timer-hint").textContent = phase ? "Fine sessione alle " + formatTime(phase.sessionEnd) + (active.paused ? " \xB7 L\u2019orario continua a scorrere" : "") : next ? "Inizio alle " + next.start + (next.date !== today() ? " \xB7 " + next.date : "") + " \xB7 fine alle " + next.end : "Il tuo prossimo passo: Nuova sessione";
@@ -4434,6 +4445,7 @@ var TempvsSettings = class extends import_obsidian6.PluginSettingTab {
     const el = this.containerEl;
     el.empty();
     el.createEl("h2", { text: "TEMPVS \u2014 Impostazioni" });
+    new import_obsidian6.Setting(el).setName("Modalit\xE0 e-ink").setDesc("Su questo dispositivo, il conto alla rovescia si aggiorna solo nel pannello visibile. Con Obsidian aperto ricevi un avviso a inizio sessione, pausa e ripresa.").addToggle((t) => t.setValue(this.plugin.eink).onChange((value) => this.plugin.setEink(value)));
     new import_obsidian6.Setting(el).setName("Layout del timer").setDesc("Automatico, pannello laterale oppure scheda ampia su iPad e desktop.").addDropdown((d) => d.addOptions({ auto: "Automatico", side: "Pannello laterale", wide: "Scheda ampia" }).setValue(this.plugin.layout).onChange(async (v) => {
       this.plugin.layout = v;
       await this.plugin.persist();
@@ -4591,6 +4603,13 @@ var TempvsPlugin = class extends import_obsidian6.Plugin {
       new import_obsidian6.Notice("TEMPVS: dati non validi, archivio lasciato intatto. " + error.message, 1e4);
       throw error;
     }
+    this.einkStorageKey = "tempvs:eink:" + (this.app.vault?.getName?.() || "");
+    try {
+      this.eink = (this.app.loadLocalStorage ? this.app.loadLocalStorage("tempo-pomodoro:eink") : window.localStorage?.getItem(this.einkStorageKey)) === "on";
+    } catch {
+      this.eink = false;
+    }
+    this.einkHidden = document.hidden;
     this.ambient = new TempoAmbientAudio(() => this.refreshAudioControls());
     this.chime = new FocusEndChime();
     this.lastTick = Date.now();
@@ -4678,7 +4697,14 @@ var TempvsPlugin = class extends import_obsidian6.Plugin {
         }
       });
     }
-    this.registerInterval(window.setInterval(() => this.tick(), 1e3));
+    this.updateClock();
+    const layoutChanged = () => {
+      if (this.eink) this.refresh();
+    };
+    if (this.app.workspace.on) {
+      this.registerEvent(this.app.workspace.on("layout-change", layoutChanged));
+      this.registerEvent(this.app.workspace.on("active-leaf-change", layoutChanged));
+    }
     const armChime = () => {
       if (this.chimeEnabled) this.chime.arm();
     };
@@ -4686,9 +4712,13 @@ var TempvsPlugin = class extends import_obsidian6.Plugin {
     this.registerDomEvent(document, "touchstart", armChime);
     this.registerDomEvent(document, "keydown", armChime);
     this.registerDomEvent(document, "visibilitychange", () => {
-      if (!document.hidden) {
+      if (this.eink) {
+        this.record();
+        this.einkHidden = document.hidden;
+        this.updateClock();
+        if (!document.hidden) this.refresh(true);
+      } else if (!document.hidden) {
         this.tick();
-        this.syncAmbient();
         this.refresh(true);
       }
     });
@@ -4700,6 +4730,82 @@ var TempvsPlugin = class extends import_obsidian6.Plugin {
   }
   get config() {
     return this.state.defaults.simple;
+  }
+  setEink(value) {
+    this.record();
+    this.eink = value;
+    this.einkHidden = document.hidden;
+    try {
+      if (this.app.saveLocalStorage) this.app.saveLocalStorage("tempo-pomodoro:eink", value ? "on" : "off");
+      else window.localStorage.setItem(this.einkStorageKey, value ? "on" : "off");
+    } catch {
+      new import_obsidian6.Notice("Preferenza e-ink applicata per questa apertura di Obsidian.");
+    }
+    this.lastNoticeCheck = Date.now();
+    this.lastNotifiedPhase = this.currentNoticePhase(new Date(this.lastNoticeCheck));
+    this.refresh(true);
+  }
+  visibleTimers() {
+    if (document.hidden) return [];
+    return this.app.workspace.getLeavesOfType(VIEW_TYPE).map((leaf) => leaf.view).filter((view) => view?.timerVisible && view.containerEl.getClientRects().length && (!view.containerEl.checkVisibility || view.containerEl.checkVisibility({ visibilityProperty: true })));
+  }
+  updateClock() {
+    if (this.clockStopped) return;
+    const visible = this.eink ? this.visibleTimers() : [];
+    const active = this.eink && visible.length ? this.active() : null;
+    const mode = !this.eink ? "regular" : active && !active.paused ? "digits" : "off";
+    if (mode !== this.clockMode) {
+      if (this.clockHandle != null) window.clearInterval(this.clockHandle);
+      this.clockHandle = null;
+      this.clockMode = mode;
+      if (mode === "regular") this.clockHandle = window.setInterval(() => this.tick(), 1e3);
+      if (mode === "digits") this.clockHandle = window.setInterval(() => {
+        const views = this.visibleTimers(), session = this.active();
+        if (!views.length || !session || session.paused) {
+          this.updateClock();
+          return;
+        }
+        const digits = mmss(getPhase(session).remaining);
+        for (const view of views) {
+          const clock2 = view.containerEl.querySelector(".tempvs-clock");
+          if (clock2 && clock2.textContent !== digits) clock2.textContent = digits;
+        }
+      }, 1e3);
+    }
+    if (this.eink && !visible.length && this.ambient.playing) this.ambient.stop();
+  }
+  scheduleBoundary() {
+    if (this.clockStopped) return;
+    const now = Date.now(), date = new Date(now);
+    let next = Infinity;
+    if (this.eink) {
+      for (const session of this.state.sessions) {
+        if (session.finished || session.dailyRetired || session.manualSuperseded) continue;
+        const { start, end } = sessionBounds(session);
+        if (+start > now) next = Math.min(next, +start);
+        else if (+end > now) next = Math.min(next, session.paused ? +end : +getPhase(session, date).end);
+      }
+    }
+    if (next === this.boundaryAt) return;
+    window.clearTimeout(this.boundaryHandle);
+    this.boundaryAt = next;
+    if (!Number.isFinite(next)) return;
+    this.boundaryHandle = window.setTimeout(() => {
+      this.boundaryAt = null;
+      if (this.clockStopped || !this.eink) return;
+      const fired = Date.now();
+      if (fired >= next) {
+        const current = this.currentNoticePhase(new Date(fired));
+        if (!document.hidden && current && current.start === next && fired - next <= 8e3) {
+          const session = this.state.sessions.find((item) => item.id === current.id);
+          const beginning = +sessionBounds(session).start === next;
+          this.showPhaseNotice(current, beginning);
+        }
+        this.record();
+        if (this.dirty) this.persist().then(() => this.cloud?.changed()).catch((e) => new import_obsidian6.Notice(e.message));
+      }
+      this.refresh(true);
+    }, Math.min(2147483647, Math.max(1, next - now)));
   }
   currentNoticePhase(now = /* @__PURE__ */ new Date()) {
     const active = getActiveSession(this.state.sessions.filter((s) => !s.finished), now);
@@ -4714,7 +4820,10 @@ var TempvsPlugin = class extends import_obsidian6.Plugin {
     this.lastNotifiedPhase = current;
     this.lastNoticeCheck = nowMs;
     if (!current || !previous || current.id !== previous.id || current.kind === previous.kind || gap < 0 || gap > 8e3 || nowMs - current.start < 0 || nowMs - current.start > 8e3 || document.hidden) return;
-    const message = current.kind === "break" ? "TEMPVS \xB7 Inizia la pausa \u2014 " + current.area : "TEMPVS \xB7 Riprende la concentrazione \u2014 " + current.area;
+    this.showPhaseNotice(current, false);
+  }
+  showPhaseNotice(current, beginning) {
+    const message = beginning ? "TEMPVS \xB7 Inizia la sessione \u2014 " + current.area : current.kind === "break" ? "TEMPVS \xB7 Inizia la pausa \u2014 " + current.area : "TEMPVS \xB7 Riprende la concentrazione \u2014 " + current.area;
     new import_obsidian6.Notice(message, 6500);
     if (this.chimeEnabled) void this.chime.play(current.kind).catch((error) => console.warn("TEMPVS: avviso acustico non disponibile", error));
   }
@@ -4779,24 +4888,27 @@ var TempvsPlugin = class extends import_obsidian6.Plugin {
     this.app.setting?.openTabById(this.manifest.id);
   }
   refresh(full = false) {
+    this.updateClock();
+    this.scheduleBoundary();
     this.syncAmbient();
     const session = this.active();
     const phase = session ? getPhase(session) : null;
     if (this.status) {
-      this.status.textContent = phase ? "TEMPVS \xB7 " + mmss(phase.remaining) + " \xB7 " + (session.area || session.title) : "TEMPVS \xB7 pronto";
+      this.status.textContent = this.eink ? "TEMPVS" : phase ? "TEMPVS \xB7 " + mmss(phase.remaining) + " \xB7 " + (session.area || session.title) : "TEMPVS \xB7 pronto";
       this.status.setAttribute("aria-label", "Apri TEMPVS");
     }
-    for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) leaf.view?.update?.(full);
+    const views = this.eink ? this.visibleTimers() : this.app.workspace.getLeavesOfType(VIEW_TYPE).map((leaf) => leaf.view);
+    for (const view of views) view?.update?.(full);
     if (full) this.daily?.refresh();
   }
   record() {
     const now = Date.now();
-    if (now <= this.lastTick) {
+    if (this.eink && this.einkHidden || now <= this.lastTick) {
       this.lastTick = now;
       return;
     }
     for (const s of this.state.sessions) {
-      const elapsed = measuredFocus(s, this.lastTick, now);
+      const elapsed = measuredFocus(s, this.lastTick, now, this.eink ? Infinity : 15e3);
       if (elapsed > 0) {
         s.actualSeconds = (s.actualSeconds || 0) + elapsed;
         this.dirty = true;
@@ -5066,6 +5178,9 @@ var TempvsPlugin = class extends import_obsidian6.Plugin {
     }
   }
   async onunload() {
+    this.clockStopped = true;
+    if (this.clockHandle != null) window.clearInterval(this.clockHandle);
+    window.clearTimeout(this.boundaryHandle);
     this.daily?.destroy();
     await this.daily?.chain.catch(() => {
     });
