@@ -45,7 +45,22 @@ function expandRange(line) {
   if (usesTimeRange(line)) return line.replace(timeRange, "$3 +$1 -$2$4");
   return line.replace(range, "$1 +$2 -$3");
 }
+var isReminder = (line) => /^\s*\[\[[^\[\]\n|]+(?:\|[^\[\]\n]+)?\]\]\s*$/.test(line);
+function flexibleAllocation(line) {
+  const links = line.match(/\[\[[^\[\]\n]+\]\]/g) || [];
+  if (links.length > 1) return null;
+  const fields = (links.length ? line.replace(links[0], " ") : line).trim().split(/\s+/);
+  const duration2 = fields.filter((field) => /^\d+(?:[.,]\d+)?[hm]$/i.test(field));
+  const clock2 = fields.filter((field) => /^\+?(?:[01]\d|2[0-3]):[0-5]\d$/.test(field));
+  if (fields[0]?.startsWith("@") && !links.length && !clock2.length) return null;
+  if (duration2.length !== 1 || clock2.length > 1) return null;
+  const area = fields.filter((field) => field !== duration2[0] && field !== clock2[0]).join(" ");
+  if (!/^@[^@\s\d+\-=[\]]+(?: [^@+\-=[\]]+)*$/u.test(area)) return null;
+  return ["-", ...links, "@" + duration2[0], ...clock2.length ? ["+" + clock2[0].replace(/^\+/, "")] : [], area].join(" ");
+}
 function expandDailyLine(line) {
+  const allocation = flexibleAllocation(line);
+  if (allocation) return allocation;
   const expanded = expandRange(line);
   if (expanded !== line) return expanded;
   const timed = timedActivity.exec(line);
@@ -631,7 +646,7 @@ function parseAreaRegister(source, areas) {
   let budget;
   for (const [index, raw] of source.split(/\r?\n/).entries()) {
     const line = expandDailyLine(raw.replace(/\s+<!-- tempvs-allocation:[\w-]+ -->\s*$/, "").trim());
-    if (!line || /^date:\s*\d{4}-\d\d-\d\d$/i.test(line) || /^<!-- tempvs-block:[\w-]+ -->$/.test(line)) continue;
+    if (isReminder(line) || !line || /^date:\s*\d{4}-\d\d-\d\d$/i.test(line) || /^<!-- tempvs-block:[\w-]+ -->$/.test(line)) continue;
     try {
       const heading = matchBudgetHeading(line);
       if (heading) {
@@ -714,7 +729,7 @@ function parseRegister(source, areas) {
   const groups = [];
   for (const [index, raw] of source.split(/\r?\n/).entries()) {
     const line = raw.trim();
-    if (!line || /^date:\s*\d{4}-\d\d-\d\d$/i.test(line) || /^<!-- tempvs-block:[\w-]+ -->$/.test(line)) continue;
+    if (isReminder(line) || !line || /^date:\s*\d{4}-\d\d-\d\d$/i.test(line) || /^<!-- tempvs-block:[\w-]+ -->$/.test(line)) continue;
     const fail2 = (message) => {
       throw Error("Riga " + (index + 1) + ": " + message);
     };
@@ -926,7 +941,7 @@ function parseDailySource(source, areas) {
   const requests = [];
   const used = /* @__PURE__ */ new Set();
   for (const [index, line] of source.split(/\r?\n/).entries()) {
-    if (!line.trim() || blockPattern.test(line) || datePattern.test(line)) continue;
+    if (isReminder(line) || !line.trim() || blockPattern.test(line) || datePattern.test(line)) continue;
     try {
       const metadata = line.match(rowPattern), raw = metadata ? line.slice(0, metadata.index) : line;
       const linkedNotes = noteLinks(raw.match(/\[\[[^\]\n]+\]\]/g)?.join(" ") || "");
@@ -974,7 +989,9 @@ function serializeDailyPlan(sessions, date, source = "") {
       last.until = bounds.end;
     } else groups.push({ key: key2, linkedNotes: s.linkedNotes || [], date: s.date, area: s.area || s.title, start: s.start, end: s.end, gross, from: +bounds.start, until: bounds.end });
   }
-  return groups.map((g) => (g.gross === 1440 ? `${g.area} @1440m +${g.start}` : timeFirst ? `${g.start}-${g.end} ${g.gross}m ${g.area}` : `${g.area} ${short ? "" : "+"}${g.start}-${g.end} ${short ? "" : "-"}${g.gross}m`) + g.linkedNotes.map((n) => " [[" + n.path + (n.label && n.label !== n.path ? "|" + n.label : "") + "]]").join("") + (g.date !== date ? " +1d" : "")).join("\n");
+  const rows = groups.map((g) => (g.gross === 1440 ? `${g.area} @1440m +${g.start}` : timeFirst ? `${g.start}-${g.end} ${g.gross}m ${g.area}` : `${g.area} ${short ? "" : "+"}${g.start}-${g.end} ${short ? "" : "-"}${g.gross}m`) + g.linkedNotes.map((n) => " [[" + n.path + (n.label && n.label !== n.path ? "|" + n.label : "") + "]]").join("") + (g.date !== date ? " +1d" : ""));
+  for (const [index, line] of source.split(/\r?\n/).entries()) if (isReminder(line)) rows.splice(Math.min(index, rows.length), 0, line);
+  return rows.join("\n");
 }
 function rowChanges(source, previousSource, areas, owned, date) {
   if (previousSource === void 0) return { byRequest: /* @__PURE__ */ new Map(), changedRows: /* @__PURE__ */ new Set(), previousByRow: /* @__PURE__ */ new Map(), addedRows: /* @__PURE__ */ new Set() };
@@ -1033,7 +1050,7 @@ function correctNoteWork(previous, seconds) {
 }
 function prepareDailyPlan({ source, date, blockId, state, previousSource, protectedBlockIds, now = /* @__PURE__ */ new Date(), id = () => globalThis.crypto?.randomUUID?.() || Date.now().toString(36) + "-" + Math.random().toString(36).slice(2) }) {
   if (!validDay(date)) throw Error("Data non valida.");
-  const register = isRegister(source) || !source.split(/\r?\n/).some((line) => line.trim() && !datePattern.test(line) && !blockPattern.test(line)) && isRegister(previousSource);
+  const register = isRegister(source) || !source.split(/\r?\n/).some((line) => line.trim() && !isReminder(line) && !datePattern.test(line) && !blockPattern.test(line)) && isRegister(previousSource);
   if (register) {
     blockIdentity(source);
     explicitDay(source);
@@ -1204,11 +1221,32 @@ function syntaxTokens(line) {
   }
   return parts;
 }
-function renderSyntaxLine(parent, line, areas) {
+function wikiTokens(line) {
+  return Array.from(line.matchAll(/\[\[([^\[\]\n|]+)(?:\|([^\[\]\n]*))?\]\]/g), (match) => ({
+    from: match.index,
+    to: match.index + match[0].length,
+    target: match[1].trim(),
+    label: match[2]?.trim() || match[1].trim(),
+    kind: "wiki"
+  })).filter((token) => token.target);
+}
+function renderSyntaxLine(parent, line, areas, openLink) {
   let cursor = 0;
-  for (const { from, to, kind } of syntaxTokens(line)) {
+  const links = wikiTokens(line);
+  const styles = syntaxTokens(line).filter((token) => !links.some((link) => link.from < token.to && link.to > token.from));
+  for (const { from, to, kind, target, label } of [...styles, ...links].sort((a, b) => a.from - b.from)) {
     parent.append(line.slice(cursor, from));
     const value = line.slice(from, to);
+    if (kind === "wiki") {
+      const anchor = parent.createEl("a", { cls: "internal-link", text: label, attr: { href: "#", "data-href": target } });
+      anchor.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        openLink(target, event.metaKey || event.ctrlKey);
+      });
+      cursor = to;
+      continue;
+    }
     const span = parent.createSpan({ text: value, cls: "tempvs-syntax-" + kind });
     if (kind === "area") {
       const area = areas.find((a) => a.name.toLowerCase() === value.replace(/^@/, "").toLowerCase());
@@ -1252,7 +1290,22 @@ function syntaxExtension() {
       }
       this.decorations = Decoration.set(marks, true);
     }
-  }, { decorations: (instance) => instance.decorations });
+  }, {
+    decorations: (instance) => instance.decorations,
+    eventHandlers: { mousedown(event, view) {
+      if (event.button !== 0 || !(event.metaKey || event.ctrlKey)) return false;
+      const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
+      if (pos == null || !this.blocks.some((block) => pos >= block.start && pos < block.end)) return false;
+      const line = view.state.doc.lineAt(pos);
+      const link = wikiTokens(line.text).find((token) => pos >= line.from + token.from && pos < line.from + token.to);
+      const { editorInfoField, Notice: Notice7 } = require("obsidian");
+      const info = view.state.field(editorInfoField, false);
+      if (!link || !info?.file) return false;
+      event.preventDefault();
+      void info.app.workspace.openLinkText(link.target, info.file.path, false).catch((e) => new Notice7(e.message));
+      return true;
+    } }
+  });
 }
 
 // obsidian/note-picker.js
@@ -1818,6 +1871,14 @@ function archivedLinkResolver(files, estimates, vaultName) {
 
 // obsidian/daily-blocks.js
 var import_obsidian4 = require("obsidian");
+function newDailyPlanIds(plan, state) {
+  const existing = new Set(state.sessions.map((session) => session.id));
+  if (plan.records) {
+    for (const record of state.history) existing.add(record.sessionId);
+    return plan.records.map((record) => record.sessionId).filter((id) => !existing.has(id));
+  }
+  return plan.sessions.map((session) => session.id).filter((id) => !existing.has(id));
+}
 var uid2 = () => globalThis.crypto?.randomUUID?.() || Date.now().toString(36) + "-" + Math.random().toString(36).slice(2);
 var plain = (source) => source.split(/\r?\n/).filter((line) => !/^\s*<!-- tempvs-block:/.test(line)).map((line) => line.replace(/\s*<!-- tempvs-session:[^>]+-->\s*$/, "")).join("\n");
 function restoreRowIds(original, edited) {
@@ -1991,7 +2052,8 @@ var DailyBlocks = class {
       const lines = context?.block.source.split(/\r?\n/);
       if (context?.date !== entry.date || !blockId || lines?.[entry.index] !== entry.raw)
         throw Error("L\u2019assegnazione \xE8 cambiata. Riapri la giornata e riprova.");
-      if (start) lines[entry.index] = entry.raw.replace(/^(\s*-\s*(?:\[\[[^\]\[]+\]\]\s+)?@\d+(?:[.,]\d+)?[hms]?)(?=\s|$)/i, "$1 +" + start);
+      if (start && flexibleAllocation(entry.raw)) lines[entry.index] = entry.raw.trimEnd() + " " + start;
+      else if (start) lines[entry.index] = entry.raw.replace(/^(\s*-\s*(?:\[\[[^\]\[]+\]\]\s+)?@\d+(?:[.,]\d+)?[hms]?)(?=\s|$)/i, "$1 +" + start);
       else lines.splice(entry.index, 1);
       const source = lines.join("\n");
       const plan = prepareDailyPlan({
@@ -2299,7 +2361,7 @@ var DailyBlocks = class {
     if (plans.length !== 1) throw Error("Usa un solo blocco TEMPVS per nota giornaliera.");
     const block = plans[0];
     if (!block.source.trim() && this.plugin.estimates?.find(file.path)) return { file, block, markdown: markdown2, kind: "estimate-empty" };
-    if (isEstimateSource(block.source)) return { file, block, markdown: markdown2, kind: "estimate" };
+    if (isEstimateSource(block.source.split(/\r?\n/).filter((line) => !flexibleAllocation(line)).join("\n"))) return { file, block, markdown: markdown2, kind: "estimate" };
     const date = resolveDailyDate(block.source, file, {
       moment: import_obsidian4.moment,
       format: this.plugin.app.internalPlugins?.getPluginById("daily-notes")?.instance?.options?.format || "YYYY-MM-DD",
@@ -2434,7 +2496,7 @@ var DailyBlocks = class {
   async commit(prepared) {
     if (archivePlanningKey(this.plugin.state) !== prepared.planningKey) throw Error("Le sessioni sono cambiate durante la preview. Prepara nuovamente le modifiche.");
     this.validateBinding(prepared.blockId, prepared.file.path, prepared.date);
-    const newIds = prepared.sessions.filter((s) => !this.plugin.state.sessions.some((current) => current.id === s.id)).map((s) => s.id);
+    const newIds = newDailyPlanIds(prepared, this.plugin.state);
     const fresh = prepareDailyPlan({ source: prepared.source, date: prepared.date, blockId: prepared.blockId, previousSource: prepared.previousSource, protectedBlockIds: prepared.protectedBlockIds, state: this.plugin.state, id: () => newIds.shift() || uid2() });
     const body = prepared.keepSource || prepared.preserveSource || fresh.records ? plain(prepared.source) : serializeDailyPlan(fresh.sessions, prepared.date, prepared.source);
     const canonical = explicitDay(prepared.originalSource) && !explicitDay(body) ? "date: " + prepared.date + "\n" + body : body;
@@ -2450,7 +2512,7 @@ var DailyBlocks = class {
       try {
         if (archivePlanningKey(this.plugin.state) !== fresh.planningKey) throw Error("Le sessioni sono cambiate durante il salvataggio. Prepara nuovamente le modifiche.");
         await this.plugin.change(() => {
-          const available = fresh.sessions.filter((s) => !this.plugin.state.sessions.some((current) => current.id === s.id)).map((s) => s.id);
+          const available = newDailyPlanIds(fresh, this.plugin.state);
           const checked = prepareDailyPlan({ source: prepared.source, date: prepared.date, blockId: prepared.blockId, previousSource: prepared.previousSource, protectedBlockIds: prepared.protectedBlockIds, state: this.plugin.state, id: () => available.shift() || uid2() });
           applyDailyPlan(this.plugin.state, checked);
           this.plugin.state = normalizeArchive(this.plugin.state);
@@ -2614,7 +2676,7 @@ var DailyBlock = class extends import_obsidian4.MarkdownRenderChild {
       const lines = plain(this.source).split("\n");
       for (const [index, line] of lines.entries()) {
         if (index) code.append("\n");
-        renderSyntaxLine(code, line, this.controller.plugin.config.areas);
+        renderSyntaxLine(code, line, this.controller.plugin.config.areas, (target, newLeaf) => this.controller.plugin.app.workspace.openLinkText(target, this.ctx.sourcePath, newLeaf).catch((e) => new import_obsidian4.Notice(e.message)));
       }
       const error = this.controller.errors.get(this.ctx.sourcePath);
       const binding = this.controller.bindings[this.controller.bindingId(this.ctx.sourcePath)];
@@ -4253,10 +4315,28 @@ var TempvsView = class extends import_obsidian6.ItemView {
       const difference = b.seconds - b.assigned;
       list.createEl("p", { text: b.area + " \xB7 " + readableDuration(b.assigned) + " su " + readableDuration(b.seconds) + (difference ? " \xB7 " + readableDuration(Math.abs(difference)) + (difference > 0 ? " disponibili" : " oltre il budget") : "") });
     }
-    if (registered.length) {
-      const table = list.createEl("table"), head = table.createEl("thead").createEl("tr"), body = table.createEl("tbody");
-      for (const label of ["Area", "Orario", "Nota", "Durata"]) head.createEl("th", { text: label });
-      for (const record of registered) {
+    const sessions = plugin.state.sessions.filter((s) => {
+      if (s.registerMinutes || s.registerPlanned) return false;
+      if (s.dailyRetired || s.manualSuperseded) return false;
+      return s.date === this.day || this.day === today() && sessionBounds(s).start <= now && sessionBounds(s).end > now;
+    }).sort((a, b) => sessionBounds(a).start - sessionBounds(b).start);
+    const expanded = this.expandedGroups ?? (this.expandedGroups = /* @__PURE__ */ new Set());
+    const timeline = registered.map((record) => ({
+      record,
+      start: record.start ? (/* @__PURE__ */ new Date((record.date || this.day) + "T" + record.start)).getTime() : Infinity
+    }));
+    for (const group of groupSessions(sessions, plugin.estimates?.notes || [])) {
+      timeline.push({ group, start: +sessionBounds(group.sessions[0]).start });
+    }
+    timeline.sort((a, b) => a.start - b.start);
+    let body;
+    for (const { record, group } of timeline) {
+      if (record) {
+        if (!body) {
+          const table = list.createEl("table"), head = table.createEl("thead").createEl("tr");
+          for (const label of ["Area", "Orario", "Nota", "Durata"]) head.createEl("th", { text: label });
+          body = table.createEl("tbody");
+        }
         const row2 = body.createEl("tr");
         row2.createEl("td", { text: record.area });
         row2.createEl("td", { text: record.start || "\u2014" });
@@ -4264,7 +4344,41 @@ var TempvsView = class extends import_obsidian6.ItemView {
         if (note) button(cell, note.label, () => plugin.app.workspace.openLinkText(note.path, plugin.dailyNotes[record.registerBlock]?.path || "", false));
         else cell.textContent = "\u2014";
         row2.createEl("td", { text: readableDuration(Math.round(record.minutes * 60)) });
+        continue;
       }
+      body = null;
+      const first = group.sessions[0], last = group.sessions.at(-1), ids = group.sessions.map((s) => s.id);
+      const item = list.createDiv({ cls: "tempvs-session tempvs-session-group" });
+      const info = item.createDiv({ cls: "tempvs-session-info" });
+      const heading = info.createDiv({ cls: "tempvs-session-heading" });
+      heading.createEl("strong", { text: first.start + "\u2013" + last.end });
+      const badge = heading.createSpan({ cls: "tempvs-area-mark", text: first.area || first.title });
+      badge.style.setProperty("--tempvs-area-color", plugin.config.areas.find((a) => a.name === first.area)?.color || "var(--interactive-accent)");
+      const current = group.sessions.find((s) => s.id === active?.id);
+      item.toggleClass("is-current", Boolean(current));
+      const done = group.sessions.filter((s) => s.finished || sessionBounds(s).end <= now).length;
+      info.createEl("small", { cls: "tempvs-muted", text: `${ids.length} ${ids.length === 1 ? "sessione" : "sessioni"} \xB7 ${Math.round((sessionBounds(last).end - sessionBounds(first).start) / 6e4)} min \xB7 ${done} concluse` + (current ? " \xB7 " + (current.paused ? "Focus sospeso" : "In corso") : "") });
+      this.renderSessionNotes(info, group.notes, first, ids);
+      if (ids.length > 1) {
+        const detail = info.createEl("details", { cls: "tempvs-session-cycles" });
+        const key2 = ids.join("|");
+        detail.open = expanded.has(key2);
+        detail.addEventListener("toggle", () => {
+          if (detail.open) expanded.add(key2);
+          else expanded.delete(key2);
+        });
+        detail.createEl("summary", { text: "Singole sessioni" });
+        for (const s of group.sessions) {
+          const row2 = detail.createDiv({ cls: "tempvs-session-cycle" });
+          row2.createEl("span", { text: s.start + "\u2013" + s.end + " \xB7 " + (s.finished || sessionBounds(s).end <= now ? "Conclusa" : s.id === active?.id ? "In corso" : "Programmata") + (s.cycleMinutes ? ` \xB7 ${s.workMinutes}/${s.cycleMinutes - s.workMinutes}` : "") });
+          this.renderSessionNotes(row2, group.notes, s, [s.id]);
+          if (!s.finished && sessionBounds(s).start > now) iconButton(row2, "trash-2", "Elimina sessione " + s.start, () => plugin.removeSession(s.id));
+        }
+      } else if (!first.finished && sessionBounds(first).start > now) {
+        iconButton(item, "trash-2", "Elimina sessione " + (first.area || first.title), () => plugin.removeSession(first.id));
+      }
+    }
+    if (registered.length) {
       const totals = /* @__PURE__ */ new Map();
       for (const r of registered) totals.set(r.area, (totals.get(r.area) || 0) + r.minutes);
       if (!budgets.length) list.createEl("small", { text: [...totals].map(([area2, min]) => area2 + " " + min + " min").join(" \xB7 ") });
@@ -4301,44 +4415,6 @@ var TempvsView = class extends import_obsidian6.ItemView {
           submit.disabled = false;
         }
       };
-    }
-    const sessions = plugin.state.sessions.filter((s) => {
-      if (s.registerMinutes || s.registerPlanned) return false;
-      if (s.dailyRetired || s.manualSuperseded) return false;
-      return s.date === this.day || this.day === today() && sessionBounds(s).start <= now && sessionBounds(s).end > now;
-    }).sort((a, b) => sessionBounds(a).start - sessionBounds(b).start);
-    const expanded = this.expandedGroups ?? (this.expandedGroups = /* @__PURE__ */ new Set());
-    for (const group of groupSessions(sessions, plugin.estimates?.notes || [])) {
-      const first = group.sessions[0], last = group.sessions.at(-1), ids = group.sessions.map((s) => s.id);
-      const item = list.createDiv({ cls: "tempvs-session tempvs-session-group" });
-      const info = item.createDiv({ cls: "tempvs-session-info" });
-      const heading = info.createDiv({ cls: "tempvs-session-heading" });
-      heading.createEl("strong", { text: first.start + "\u2013" + last.end });
-      const badge = heading.createSpan({ cls: "tempvs-area-mark", text: first.area || first.title });
-      badge.style.setProperty("--tempvs-area-color", plugin.config.areas.find((a) => a.name === first.area)?.color || "var(--interactive-accent)");
-      const current = group.sessions.find((s) => s.id === active?.id);
-      item.toggleClass("is-current", Boolean(current));
-      const done = group.sessions.filter((s) => s.finished || sessionBounds(s).end <= now).length;
-      info.createEl("small", { cls: "tempvs-muted", text: `${ids.length} ${ids.length === 1 ? "sessione" : "sessioni"} \xB7 ${Math.round((sessionBounds(last).end - sessionBounds(first).start) / 6e4)} min \xB7 ${done} concluse` + (current ? " \xB7 " + (current.paused ? "Focus sospeso" : "In corso") : "") });
-      this.renderSessionNotes(info, group.notes, first, ids);
-      if (ids.length > 1) {
-        const detail = info.createEl("details", { cls: "tempvs-session-cycles" });
-        const key2 = ids.join("|");
-        detail.open = expanded.has(key2);
-        detail.addEventListener("toggle", () => {
-          if (detail.open) expanded.add(key2);
-          else expanded.delete(key2);
-        });
-        detail.createEl("summary", { text: "Singole sessioni" });
-        for (const s of group.sessions) {
-          const row2 = detail.createDiv({ cls: "tempvs-session-cycle" });
-          row2.createEl("span", { text: s.start + "\u2013" + s.end + " \xB7 " + (s.finished || sessionBounds(s).end <= now ? "Conclusa" : s.id === active?.id ? "In corso" : "Programmata") + (s.cycleMinutes ? ` \xB7 ${s.workMinutes}/${s.cycleMinutes - s.workMinutes}` : "") });
-          this.renderSessionNotes(row2, group.notes, s, [s.id]);
-          if (!s.finished && sessionBounds(s).start > now) iconButton(row2, "trash-2", "Elimina sessione " + s.start, () => plugin.removeSession(s.id));
-        }
-      } else if (!first.finished && sessionBounds(first).start > now) {
-        iconButton(item, "trash-2", "Elimina sessione " + (first.area || first.title), () => plugin.removeSession(first.id));
-      }
     }
     if (!sessions.length && !registered.length && !budgets.length && !plugin.allocatedOn(this.day).length) {
       const empty = list.createDiv({ cls: "tempvs-empty" });
