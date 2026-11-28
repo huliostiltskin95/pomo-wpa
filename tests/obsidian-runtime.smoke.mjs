@@ -317,3 +317,31 @@ test('daily authority survives interrupted edits, ignores orphan history, and su
  assert.match(book.text,/T: 0h @Studio/);assert.equal(next.state.sessions.length,0);
  assert.equal(getSaved().archive,undefined);await next.onunload();
 });
+
+test('upgrade excludes archive-only sessions, allocations and Dropbox data even when the old ledger says otherwise',async()=>{
+ const {PluginClass,getSaved}=mockPlugin(false),p=new PluginClass();
+ const recovery=new Map();
+ p.manifest={dir:'.obsidian/plugins/tempo-pomodoro'};
+ p.app.vault.adapter={exists:async key=>recovery.has(key),write:async(key,data)=>recovery.set(key,data)};
+ await p.saveData({archive:{sessions:[],history:[{area:'Studio',sessionId:'obsolete',minutes:120,linkedNotes:[{path:'Libro'}]}]},
+   allocations:[{date:'2099-12-01',area:'Studio',minutes:30}],cloudData:{unused:true}});
+ const book=await p.app.vault.create('Libro.md','```TEMPVS\nT: 2h @Studio\n```');
+ await p.onload();await p.daily.initialize();
+ assert.equal(p.state.sessions.length,0);assert.equal(p.state.history.length,0);
+ assert.equal(p.allocatedOn('2099-12-01').length,0);
+ assert.equal(p.app.vault.getMarkdownFiles().length,1);
+ assert.match(book.text,/T: 0h @Studio/);
+ assert.equal(getSaved().archive,undefined);assert.equal(getSaved().cloudData,undefined);assert.equal(recovery.size,1);
+ await p.onunload();
+});
+
+test('a dated project note outside the configured daily location cannot contribute time',async()=>{
+ const {PluginClass}=mockPlugin(false),p=new PluginClass();await p.onload();
+ p.app.internalPlugins={getPluginById:()=>({instance:{options:{folder:'Daily',format:'YYYY-MM-DD'}}})};
+ const vault=p.app.vault,source='```TEMPVS\n30m @Studio [[Libro]]\n```';
+ const daily=await vault.create('Daily/2099-12-01.md',source);
+ const outside=await vault.create('Daily/Progetti/2099-12-02.md',source);
+ await assert.rejects(p.daily.syncFile(outside.path),/nota quotidiana/);await p.daily.syncFile(daily.path);
+ assert.equal(p.estimates.totals().get('Libro.md'),1800);
+ await p.onunload();
+});

@@ -1,4 +1,4 @@
-## TEMPVS 0.7.0 · La giornata in Obsidian
+## TEMPVS 0.7.1 · La giornata in Obsidian
 
 Le durate delle note dipendono dalle righe delle note quotidiane. Ogni riga con durata contribuisce una sola volta al totale della **prima nota collegata**, pause comprese. Vale anche per le assegnazioni senza orario. Un wikilink da solo è un promemoria e vale zero. Le stime nelle note di lettura indicano un obiettivo. **Assegna tempo** e **Avvia** inseriscono la riga nella daily del giorno scelto.
 

@@ -10,7 +10,7 @@ import {isEstimateSource,isActivitySource,markActivity} from '../core/tempo-esti
 import {MarkdownRenderChild,Notice,moment} from 'obsidian';
 import {normalizeArchive} from '../core/tempo-simple.js';
 import {sessionBounds} from '../core/tempo-core.js';
-import {isRegister,applyRegister,findDailyBlocks,blockIdentity,explicitDay,resolveDailyDate,replaceDailyBlock,prepareDailyPlan,applyDailyPlan,serializeDailyPlan,archivePlanningKey,daySessions,isLocked} from './daily-plan.js';
+import {validDay,isRegister,applyRegister,findDailyBlocks,blockIdentity,explicitDay,resolveDailyDate,replaceDailyBlock,prepareDailyPlan,applyDailyPlan,serializeDailyPlan,archivePlanningKey,daySessions,isLocked} from './daily-plan.js';
 
 function newDailyPlanIds(plan, state) {
   const existing = new Set(state.sessions.map((session) => session.id));
@@ -383,8 +383,16 @@ export class DailyBlocks {
   if(file?.extension!=='md')return null;
   const bound=this.bindings[this.bindingId(file.path)];
   if(bound)return bound.date;
-  const folder=this.plugin.app.internalPlugins?.getPluginById('daily-notes')?.instance?.options?.folder?.replace(/\/+$/,'');
-  if(folder&&!file.path.startsWith(folder+'/'))return null;
+  const options=this.plugin.app.internalPlugins?.getPluginById('daily-notes')?.instance?.options;
+  if(options){
+   const folder=(options.folder||'').replace(/^\/+|\/+$/g,'');
+   const prefix=folder?folder+'/':'';
+   if(!file.path.startsWith(prefix))return null;
+   const name=file.path.slice(prefix.length,-3),format=options.format||'YYYY-MM-DD';
+   if(format==='YYYY-MM-DD')return validDay(name)?name:null;
+   const parsed=moment?.(name,format,true);
+   return parsed?.isValid()?parsed.format('YYYY-MM-DD'):null;
+  }
   try{
    return resolveDailyDate('',file,{
     moment:moment||globalThis.moment,

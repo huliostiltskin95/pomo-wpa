@@ -604,7 +604,8 @@ export default class TempvsPlugin extends Plugin {
       // Save one offline recovery copy before replacing the old plugin data.
       if(legacy){
         const adapter=this.app.vault.adapter;
-        const path=this.manifest.dir+"/pre-0.7-recovery.json";
+        const dir=this.manifest.dir||this.app.vault.configDir+"/plugins/"+this.manifest.id;
+        const path=dir+"/pre-0.7-recovery.json";
         if(!await adapter.exists(path)){
           await adapter.write(path,JSON.stringify({archive:legacy,dailyNotes:data.dailyNotes,allocations:data.allocations}));
         }
@@ -884,6 +885,7 @@ export default class TempvsPlugin extends Plugin {
     }
   }
   async persist() {
+    if(this.daily?.indexing)return;
     const defaults=JSON.parse(JSON.stringify(this.state.defaults));
     delete defaults.simple.noteEstimates;
     const now=Date.now();
@@ -895,7 +897,7 @@ export default class TempvsPlugin extends Plugin {
       this.timerFlags[key]={until:+bounds.end,paused:!!session.paused,finished:!!session.finished,actualSeconds:session.actualSeconds||0};
     }
     for(const note of this.estimates?.notes||[]){
-      if(note.completed)this.noteFlags[note.path]={completed:true,completion:note.completion};
+      if(note.completed)this.noteFlags[note.path]={completed:true};
       else delete this.noteFlags[note.path];
     }
     const data=JSON.parse(JSON.stringify({format:2,defaults,timerFlags:this.timerFlags,noteFlags:this.noteFlags,
@@ -932,11 +934,10 @@ export default class TempvsPlugin extends Plugin {
       const links=updatedSessionNotes(session,input,{...options,replacePrimary:true,estimates:this.estimates?.notes||[]});
       updates.set(id,input.trim()?links.slice(0,1):links);
     }
-    const bindings=new Set(ids.map(id=>this.state.sessions.find(s=>s.id===id).noteBlockId).filter(Boolean));
-    if(bindings.size){
-      if(bindings.size!==1)throw Error('Modifica una giornata alla volta.');
-      await this.daily.editTimedRows(updates);
-    }else await this.change(()=>{for(const [id,notes] of updates){const s=this.state.sessions.find(s=>s.id===id);s.linkedNotes=notes;delete s.noteEstimateId;}});
+    const bindings=new Set(ids.map(id=>this.state.sessions.find(s=>s.id===id).noteBlockId));
+    if(bindings.has(undefined)||bindings.has(null))throw Error('Sessione assente dalla nota quotidiana.');
+    if(bindings.size!==1)throw Error('Modifica una giornata alla volta.');
+    await this.daily.editTimedRows(updates);
   }
   async setCompact(value){
     this.compact=Boolean(value);
