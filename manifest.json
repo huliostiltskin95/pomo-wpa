@@ -1,9 +1,9 @@
 {
   "id": "tempo-pomodoro",
   "name": "Tempo — Pomodoro",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "minAppVersion": "1.5.0",
-  "description": "Timer TEMPVS: programmazione e totali dalle note quotidiane di Obsidian, wikilink e modalità e-ink.",
+  "description": "Timer TEMPVS, agenda delle note quotidiane e importazione in sola lettura da Google Calendar.",
   "author": "Tempo",
   "isDesktopOnly": false
 }

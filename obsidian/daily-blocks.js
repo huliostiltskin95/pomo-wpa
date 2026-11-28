@@ -706,6 +706,12 @@ class DailyBlock extends MarkdownRenderChild {
     if(index)code.append('\n');
     if(register && !context.kind && (plannedRows.has(index)||records.some(r=>!r.planned&&r.sourceRow===index)))
      code.createSpan({cls:'tempvs-muted',text:plannedRows.has(index)?'Pianificata · ':'Registrata · '});
+    if(line.startsWith('Calendar · ')&&line.includes(' <!-- gcal:')){
+     const areaId=line.match(/ area:([^ ]+) -->$/)?.[1];
+     const area=this.controller.plugin.config.areas.find(a=>a.id===areaId);
+     code.createSpan({text:line.slice(0,line.lastIndexOf(' <!-- gcal:'))+(area?' · '+area.name:'')});
+     continue;
+    }
     renderSyntaxLine(code,line,this.controller.plugin.config.areas,(target,newLeaf)=>
      this.controller.plugin.app.workspace.openLinkText(target,this.ctx.sourcePath,newLeaf).catch(e=>new Notice(e.message)));
    }

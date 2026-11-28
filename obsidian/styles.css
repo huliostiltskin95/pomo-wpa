@@ -205,3 +205,9 @@
 :is(.tempvs-daily,.cm-editor) .tempvs-syntax-alias { color:var(--link-color,var(--text-accent)); font-style:italic; }
 :is(.tempvs-daily,.cm-editor) .tempvs-syntax-comment,
 :is(.tempvs-daily,.cm-editor) .tempvs-syntax-punctuation { color:var(--text-muted); }
+
+.tempvs-section-heading { flex-wrap: wrap; }
+.tempvs-date-nav { flex-wrap: wrap; }
+.tempvs-date-nav input[type="date"] { max-width: 9em; min-width: 0; }
+.tempvs-calendar-event .tempvs-session-info { display: grid; gap: 4px; }
+.tempvs-calendar-event select { justify-self: start; max-width: 100%; }

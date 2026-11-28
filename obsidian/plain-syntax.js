@@ -26,10 +26,11 @@ export function expandRange(line) {
   return line.replace(range, '$1 +$2 -$3');
 }
 
-export const isReminder = line => /^\s*\[\[[^\[\]\n|]+(?:\|[^\[\]\n]+)?\]\]\s*$/.test(line);
+export const isReminder = line => /^Calendar · .* <!-- gcal:[\w-]+(?: area:[^ ]+)? -->$/.test(line) || /^\s*\[\[[^\[\]\n|]+(?:\|[^\[\]\n]+)?\]\]\s*$/.test(line);
 
 // An explicit @area distinguishes a flexible allocation from credited time.
 export function flexibleAllocation(line) {
+  if(isReminder(line))return null;
   const links = line.match(/\[\[[^\[\]\n]+\]\]/g) || [];
   if (links.length > 1) return null;
   const fields = (links.length ? line.replace(links[0], ' ') : line).trim().split(/\s+/);

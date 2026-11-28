@@ -1,3 +1,5 @@
+import {CalendarImport,calendarRows,calendarAddress,changeRow} from './google-calendar.js';
+import {requestUrl} from 'obsidian';
 import {validDay} from './daily-plan.js';
 import {syntaxExtension} from './syntax-editor.js';
 import {expandRange} from './plain-syntax.js';
@@ -10,7 +12,7 @@ import { Plugin, ItemView, Notice, Platform, PluginSettingTab, Setting, setIcon 
 import { getActiveSession, getNextSession, getPhase, sessionBounds, hasSessionOverlaps, localDateString, formatTime, mmss } from "../core/tempo-core.js";
 import { normalizeArchive, manualSessionEnd, measuredFocus, parseQuick, planSessions, grossCycle } from "../core/tempo-simple.js";
 import { confirmTempvs } from "./cloud-adapter.js";
-import { noteLinks, appendNoteLink } from "./notes-integration.js";
+import { noteLinks } from "./notes-integration.js";
 import { TempoAmbientAudio } from "../core/tempo-audio.js";
 import { FocusEndChime } from "../core/tempo-chime.js";
 import { getAmbientFocusMode } from "../core/tempo-core.js";
@@ -48,7 +50,7 @@ class TempvsView extends ItemView {
   getDisplayText() { return "TEMPVS"; }
   getIcon() { return "timer"; }
   async onOpen() {
-    this.followDailyNote(); this.draw(); this.loadAllocations();
+    this.draw(); this.loadAllocations();
     if(typeof IntersectionObserver==="function"){
       this.visibilityObserver=new IntersectionObserver(entries=>{
         this.timerVisible=entries.at(-1).isIntersecting;
@@ -60,10 +62,6 @@ class TempvsView extends ItemView {
   }
   loadAllocations() {
     this.plugin.daily.loadAllocations(this.day).catch(error=>new Notice(error.message));
-  }
-  followDailyNote() {
-    const date=this.plugin.daily.panelDay();
-    if(date){this.day=date;this.dailyContext=this.plugin.app.workspace.getActiveFile()?.path+":"+date;}
   }
   async onClose() {
     this.visibilityObserver?.disconnect();
@@ -81,7 +79,6 @@ class TempvsView extends ItemView {
     brand.createEl("h3", {text:"TEMPVS"});
 
     const actions = heading.createDiv({cls:"tempvs-heading-actions"});
-    iconButton(actions,"settings","Impostazioni TEMPVS",()=>plugin.openSettings());
     iconButton(actions,"settings","Impostazioni TEMPVS",()=>plugin.openSettings());
     const timer = root.createDiv({cls:"tempvs-timer"});
     timer.createDiv({cls:"tempvs-phase"});
@@ -103,9 +100,10 @@ class TempvsView extends ItemView {
     const dateLabel = nav.createEl("button",{cls:"tempvs-day-label",text:"Oggi",attr:{title:"Torna a oggi","aria-label":"Data selezionata: oggi. Torna a oggi"}});
     dateLabel.onclick=()=>this.selectDay(today());
     iconButton(nav,"chevron-right","Giorno successivo",()=>this.selectDay(shiftDate(this.day,1)));
+    const picker=nav.createEl("input",{attr:{type:"date","aria-label":"Vai alla data"}});
+    picker.onchange=()=>{if(validDay(picker.value))this.selectDay(picker.value);};
     root.createDiv({cls:"tempvs-daily-status",attr:{role:"status"}});
     root.createDiv({cls:"tempvs-sessions"});
-    root.createDiv({cls:"tempvs-estimates"});
     const add = button(root,"+ Nuova sessione",()=>this.togglePanel("create"));
     add.addClass("mod-cta","tempvs-add-button");
     add.dataset.panel="create";
@@ -266,7 +264,7 @@ class TempvsView extends ItemView {
     const choice=root.querySelector(".tempvs-method");
     if(choice)choice.value=this.creation;
     if(this.creation==="plan"&&this.planDay!==this.day){
-      root.querySelector('input[type="date"]').value=this.day;
+      root.querySelector('.tempvs-method-plan input[type="date"]').value=this.day;
       this.planDay=this.day;
     }
   }
@@ -369,13 +367,20 @@ class TempvsView extends ItemView {
       dayLabel.textContent=this.day===today()?"Oggi":new Intl.DateTimeFormat("it-IT",{day:"numeric",month:"short"}).format(new Date(this.day+"T12:00:00"));
       dayLabel.setAttribute("aria-label","Data selezionata: "+this.day+". Torna a oggi");
     }
+    root.querySelector('.tempvs-date-nav input').value=this.day;
     const list=root.querySelector(".tempvs-sessions");
     const pendingTime=new Map([...list.querySelectorAll("[data-allocation]")].map(input=>[input.dataset.allocation,input.value]));
     const focusedTime=list.ownerDocument?.activeElement?.dataset?.allocation;
     list.empty();
     const now=new Date();
     const registered=plugin.state.history.filter(h=>h.registerBlock&&h.registerDay===this.day&&!h.planned);
-    const budgets=Object.values(plugin.dailyNotes||{}).find(b=>b.date===this.day)?.budgets||[];
+    const binding=Object.values(plugin.dailyNotes||{}).find(b=>b.date===this.day);
+    const events=calendarRows(binding?.source);
+    const budgets=(binding?.budgets||[]).map(b=>{
+      const area=plugin.config.areas.find(a=>a.name===b.area);
+      const minutes=events.filter(e=>e.area===area?.id).reduce((n,e)=>n+e.minutes,0);
+      return {...b,assigned:b.assigned+minutes*60};
+    });
     for(const b of budgets){
       const difference=b.seconds-b.assigned;
       list.createEl('p',{text:b.area+' · '+readableDuration(b.assigned)+' su '+readableDuration(b.seconds)+
@@ -394,9 +399,26 @@ class TempvsView extends ItemView {
     for(const group of groupSessions(sessions,plugin.estimates?.notes||[])){
       timeline.push({group,start:+sessionBounds(group.sessions[0]).start});
     }
+    for(const event of events){
+      const time=event.time==='Tutto il giorno'?'00:00':event.time.slice(0,5);
+      timeline.push({event,start:+new Date(this.day+'T'+time)});
+    }
     timeline.sort((a,b)=>a.start-b.start);
     let body;
-    for(const {record,group} of timeline){
+    for(const {record,group,event} of timeline){
+      if(event){
+        body=null;
+        const item=list.createDiv({cls:"tempvs-session tempvs-calendar-event"});
+        const info=item.createDiv({cls:"tempvs-session-info"});
+        info.createEl("strong",{text:event.time+" · "+event.title});
+        const area=info.createEl("select",{attr:{"aria-label":"Area per "+event.title}});
+        area.createEl("option",{text:"Area da assegnare",attr:{value:""}});
+        for(const a of plugin.config.areas)area.createEl("option",{text:a.name,attr:{value:a.id}});
+        area.value=event.area;
+        area.onchange=()=>plugin.editCalendarEvent(binding,event.key,area.value).catch(e=>{area.value=event.area;new Notice(e.message);});
+        iconButton(item,"trash-2","Rimuovi dalla daily "+event.title,()=>plugin.editCalendarEvent(binding,event.key,null));
+        continue;
+      }
       if(record){
         if(!body){
           const table=list.createEl('table'),head=table.createEl('thead').createEl('tr');
@@ -439,10 +461,14 @@ class TempvsView extends ItemView {
         iconButton(item,"trash-2","Elimina sessione "+(first.area||first.title),()=>plugin.removeSession(first.id));
       }
     }
-    if(registered.length){
+    if(registered.length||events.some(e=>e.area&&e.minutes)){
       const totals=new Map();
       for(const r of registered)totals.set(r.area,(totals.get(r.area)||0)+r.minutes);
-      if(!budgets.length)list.createEl('small',{text:[...totals].map(([area,min])=>area+' '+min+' min').join(' · ')});
+      for(const e of events){
+        const name=plugin.config.areas.find(a=>a.id===e.area)?.name;
+        if(e.minutes&&name)totals.set(name,(totals.get(name)||0)+e.minutes);
+      }
+      if(!budgets.length&&totals.size)list.createEl('small',{text:[...totals].map(([area,min])=>area+' '+min+' min').join(' · ')});
     }
     for(const allocation of plugin.allocatedOn(this.day)){
       const item=list.createDiv({cls:"tempvs-session tempvs-allocation"});
@@ -473,13 +499,12 @@ class TempvsView extends ItemView {
         finally{submit.disabled=false;}
       };
     }
-    if(!sessions.length&&!registered.length&&!budgets.length&&!plugin.allocatedOn(this.day).length){
+    if(!events.length&&!sessions.length&&!registered.length&&!budgets.length&&!plugin.allocatedOn(this.day).length){
       const empty=list.createDiv({cls:"tempvs-empty"});
       setIcon(empty.createDiv({cls:"tempvs-empty-icon"}),"calendar-check");
       empty.createEl("strong",{text:"Spazio per i tuoi progetti"});
       empty.createEl("p",{text:"Nessuna sessione in agenda. Avvia un focus o pianifica un momento per questa giornata."});
     }
-    plugin.estimates?.renderPanel(root.querySelector(".tempvs-estimates"),this.day);
   }
 }
 
@@ -488,6 +513,21 @@ class TempvsSettings extends PluginSettingTab {
   display(){
     const el=this.containerEl;el.empty();
     el.createEl("h2",{text:"TEMPVS — Impostazioni"});
+    el.createEl("h3",{text:"Google Calendar"});
+    el.createEl("p",{text:"Aggiungi l’indirizzo iCal di ogni calendario da leggere su questo dispositivo. TEMPVS aggiorna le daily esistenti dal "+this.plugin.calendar.since+" ogni 15 minuti con Obsidian aperto."});
+    for(const raw of this.plugin.calendar.urls){
+      const name=decodeURIComponent(calendarAddress(raw).calendar);
+      new Setting(el).setName(name).addButton(b=>b.setButtonText("Scollega").onClick(()=>{
+        this.plugin.setCalendarUrls(this.plugin.calendar.urls.filter(url=>url!==raw));this.display();
+      }));
+    }
+    const link=el.createEl("input",{attr:{type:"password",placeholder:"Indirizzo iCal","aria-label":"Indirizzo iCal",autocomplete:"off"}});
+    button(el,"Aggiungi calendario",async()=>{
+      const entry=calendarAddress(link.value);
+      this.plugin.setCalendarUrls([...this.plugin.calendar.urls.filter(u=>calendarAddress(u).calendar!==entry.calendar),entry.url]);
+      this.display();await this.plugin.calendarImport.sync();
+    });
+    button(el,"Aggiorna calendari ora",async()=>{await this.plugin.calendarImport.sync();new Notice("Calendari aggiornati.");});
     new Setting(el).setName("Modalità e-ink").setDesc("Su questo dispositivo, il conto alla rovescia si aggiorna solo nel pannello visibile. Con Obsidian aperto ricevi un avviso a inizio sessione, pausa e ripresa.")
       .addToggle(t=>t.setValue(this.plugin.eink).onChange(value=>this.plugin.setEink(value)));
     new Setting(el).setName("Layout del timer").setDesc("Automatico, pannello laterale oppure scheda ampia su iPad e desktop.")
@@ -534,13 +574,6 @@ class TempvsSettings extends PluginSettingTab {
       details.createEl("summary",{text:"Descrizione Markdown"});
       const description=details.createEl("textarea",{attr:{rows:"4","aria-label":"Descrizione area "+area.name}});
       description.value=area.description||"";
-      const resources=section.createEl("details");
-      resources.createEl("summary",{text:"Risorse dell’area"});
-      for(const note of noteLinks(area.description))button(resources,note.label,()=>this.plugin.app.workspace.openLinkText(note.path,"",false));
-      button(resources,"Collega nota aperta all’area",async()=>{
-        await this.plugin.attachActiveNote(area.name);
-        this.display();
-      });
       heading.addButton(b=>b.setButtonText("Salva").onClick(async()=>{
         try{
           const next=nameInput.value.trim();
@@ -612,6 +645,7 @@ export default class TempvsPlugin extends Plugin {
       }
       this.state=normalizeArchive({sessions:[],defaults:data?.defaults||legacy?.defaults||ZERO().defaults});
       this.state.defaults.simple.noteEstimates={};
+      this.calendar={since:data?.calendarSince||today(),urls:this.app.loadLocalStorage?.("tempo-pomodoro:calendars")||[]};
       this.dailyNotes=Object.create(null);
       this.allocations=[];
       this.timerFlags=data?.timerFlags||{};
@@ -647,16 +681,22 @@ export default class TempvsPlugin extends Plugin {
     this.estimates=new NoteEstimates(this);
     this.registerEditorExtension?.(syntaxExtension());
     this.daily=new DailyBlocks(this);this.daily.start();
+    this.calendarImport=new CalendarImport(this,async url=>(await requestUrl({url,method:"GET"})).text);
+    const syncCalendars=()=>{if(this.calendar.urls.length)this.calendarImport.sync().catch(e=>new Notice(e.message));};
+    this.app.workspace.onLayoutReady?.(async()=>{await this.daily.ready;await this.persist();syncCalendars();});
+    this.syncCalendars=syncCalendars;
+    if(this.app.vault?.on)this.registerEvent(this.app.vault.on("create",file=>{
+      if(!this.calendar.urls.length||!this.daily.panelDay(file))return;
+      window.clearTimeout(this.calendarDebounce);
+      this.calendarDebounce=window.setTimeout(syncCalendars,2000);
+    }));
+    this.updateCalendarInterval();
+    this.addCommand({id:"refresh-google-calendars",name:"Aggiorna Google Calendar",callback:syncCalendars});
     this.registerView(VIEW_TYPE, leaf => new TempvsView(leaf, this));
     this.addSettingTab(new TempvsSettings(this.app,this));
     this.addCommand({ id: "open-tempvs", name: "Apri timer TEMPVS", callback: () => this.openView() });
     this.addCommand({ id: "pause-tempvs", name: "Pausa o riprendi TEMPVS", callback: () => this.togglePause().catch(e => new Notice(e.message)) });
     this.addCommand({ id: "finish-tempvs", name: "Concludi sessione TEMPVS", callback: () => this.finish().catch(e => new Notice(e.message)) });
-    this.addCommand({id:"link-current-note",name:"Collega nota attiva all'area della sessione",callback:async()=>{
-      const area=this.active()?.area;
-      if(!area){await this.openView();new Notice("Apri i dettagli TEMPVS e scegli l'area della nota.");return;}
-      await this.attachActiveNote(area).catch(e=>new Notice(e.message));
-    }});
     this.addCommand({id:"toggle-compact-view",name:"Espandi o compatta il pannello TEMPVS",callback:()=>this.setCompact(!this.compact)});
     this.addRibbonIcon("timer", "Apri TEMPVS", () => this.openView());
     // Status bar is not exposed by the Obsidian API on mobile.
@@ -690,6 +730,23 @@ export default class TempvsPlugin extends Plugin {
     });
     this.refresh(true);
 
+  }
+  setCalendarUrls(urls){
+    this.app.saveLocalStorage("tempo-pomodoro:calendars",urls);
+    this.calendar.urls=urls;
+    this.updateCalendarInterval();
+  }
+  updateCalendarInterval(){
+    if(this.calendarInterval)window.clearInterval(this.calendarInterval);
+    this.calendarInterval=this.calendar.urls.length?window.setInterval(this.syncCalendars,15*60*1000):null;
+  }
+  async editCalendarEvent(binding,key,area){
+    await this.daily.queue(async()=>{
+      const context=await this.daily.context(binding.path);
+      if(!context?.date||!calendarRows(context.block.source).some(e=>e.key===key))throw Error("L’evento è cambiato.");
+      await this.daily.writeSource(context.file,null,context.block.source,changeRow(context.block.source,key,area),context.block.lineStart);
+    });
+    await this.daily.syncFile(binding.path);
   }
   get config() { return this.state.defaults.simple; }
   setEink(value){
@@ -839,6 +896,7 @@ export default class TempvsPlugin extends Plugin {
       if (!leaf) return;
       await leaf.setViewState({ type: VIEW_TYPE, active: true });
     }
+    leaf.view?.selectDay?.(today());
     await this.app.workspace.revealLeaf(leaf);
   }
   openSettings() { this.app.setting?.open(); this.app.setting?.openTabById(this.manifest.id); }
@@ -900,7 +958,7 @@ export default class TempvsPlugin extends Plugin {
       if(note.completed)this.noteFlags[note.path]={completed:true};
       else delete this.noteFlags[note.path];
     }
-    const data=JSON.parse(JSON.stringify({format:2,defaults,timerFlags:this.timerFlags,noteFlags:this.noteFlags,
+    const data=JSON.parse(JSON.stringify({format:2,defaults,calendarSince:this.calendar.since,timerFlags:this.timerFlags,noteFlags:this.noteFlags,
       ui:{compact:this.compact,layout:this.layout,timerStyle:this.timerStyle,clockSize:this.clockSize},
       audio:{kind:this.audioKind,volume:this.audioVolume},notifications:{sound:this.chimeEnabled}}));
     const write=this.writeChain.catch(()=>{}).then(()=>this.saveData(data));
@@ -943,16 +1001,6 @@ export default class TempvsPlugin extends Plugin {
     this.compact=Boolean(value);
     await this.persist();
     for(const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE))leaf.view?.draw?.();
-  }
-  async attachActiveNote(areaName){
-    const file=this.app.workspace.getActiveFile();
-    if(!file || file.extension!=="md")throw Error("Apri prima una nota Markdown in Obsidian.");
-    const area=this.config.areas.find(a=>a.name===areaName);
-    if(!area)throw Error("Area TEMPVS non valida.");
-    const updated=appendNoteLink(area.description,file.path);
-    if(updated===area.description){new Notice("Nota già collegata all'area.");return;}
-    await this.change(()=>{area.description=updated;});
-    new Notice("Nota collegata all'area "+areaName+".");
   }
   remapArea(from,to){
     for(const session of this.state.sessions){
@@ -1056,6 +1104,8 @@ export default class TempvsPlugin extends Plugin {
   }
   async onunload() {
     this.clockStopped=true;
+    window.clearTimeout(this.calendarDebounce);
+    if(this.calendarInterval)window.clearInterval(this.calendarInterval);
     if(this.clockHandle!=null)window.clearInterval(this.clockHandle);
     window.clearTimeout(this.boundaryHandle);
     this.daily?.destroy();
