@@ -156,7 +156,7 @@ function attributedFocus(record, note, state) {
 var estimatedSeconds = (note) => note.entries.reduce((sum, e) => sum + (e.targetMinutes ?? e.grossMinutes ?? e.count * e.minutes) * 60, 0);
 function measuredTotals(note, state) {
   const records = /* @__PURE__ */ new Map();
-  for (const history2 of state.history || []) if (history2.measured) records.set(history2.sessionId, history2);
+  for (const history of state.history || []) if (history.measured) records.set(history.sessionId, history);
   for (const session of state.sessions || []) records.set(session.id, session);
   let done = 0;
   for (const record of records.values()) {
@@ -395,13 +395,6 @@ function customPause(minutes, grossMinutes) {
     throw Error("La pausa deve essere un numero intero di minuti, da 0 a meno della durata lorda.");
   return minutes;
 }
-function manualSessionEnd(start, grossMinutes) {
-  const startedAt = start instanceof Date ? start : new Date(start);
-  const minutes = Number(grossMinutes);
-  if (!Number.isFinite(+startedAt) || !Number.isInteger(minutes) || minutes < 1 || minutes > 1439)
-    throw Error("La durata lorda deve essere compresa tra 1 e 1439 minuti.");
-  return new Date(startedAt.getTime() + minutes * 6e4);
-}
 function normalizeArchive(data) {
   if (!data || !Array.isArray(data.sessions) || data.sessions.some((s) => !validSession(s)) || new Set(data.sessions.map((s) => s.id)).size !== data.sessions.length) throw Error("Archivio sessioni non valido.");
   if (data.sessions.some((s) => s.actualSeconds !== void 0 && (!Number.isFinite(s.actualSeconds) || s.actualSeconds < 0))) throw Error("Tempo registrato non valido.");
@@ -616,7 +609,7 @@ function matchBudgetHeading(line) {
   return { name: name.trim(), value, unit, legacy: operator === "@" };
 }
 var taskLine = new RegExp("^-\\s*(\\[\\[[^\\]\\[]+\\]\\])\\s+@" + quantity + "\\s*=\\s*(\\d+)(?:\\s+\\+" + time + ")?$", "i");
-var plannedTask = new RegExp("^-\\s*(?:(\\[\\[[^\\]\\[]+\\]\\])\\s+)?@" + quantity + "(?:\\s+\\+" + time + ")?(?:\\s+-(\\d+)m)?(?:\\s+@(.+?))?$", "i");
+var plannedTask = /^-\s*(?:(\[\[[^\]\[]+\]\])\s+)?@(\d+(?:[.,]\d+)?)([hms]?)(?:\s+\+((?:[01]\d|2[0-3]):[0-5]\d)(?::([0-5]\d(?:\.\d{1,3})?))?)?(?:\s+-(\d+)m)?(?:\s+~(\d+)m)?(?:\s+!(\d+)m)?(?:\s+(\+1d))?(?:\s+@(.+?))?$/i;
 var compactTask = /^-\s*((?:\[\[[^\[\]]+\]\]\s+)+)(\d+(?:[.,]\d+)?)([hms])(?:\s*=\s*(\d+))?(?:\s+\+((?:[01]\d|2[0-3]):[0-5]\d))?\s+@(.+?)$/i;
 var possibleTask = new RegExp("^-?\\s*(\\[\\[[^\\]\\[]+\\]\\])\\s*[@*]?\\s*" + quantity + "\\s*=?\\s+(\\d+)(?:\\s*\\+?\\s*" + time + ")?$", "i");
 var possibleArea = new RegExp("^(.+?)\\s+[@*]?" + quantity + "$", "i");
@@ -653,17 +646,18 @@ function parseAreaRegister(source, areas) {
         const area2 = areas.find((a) => a.name.toLowerCase() === heading.name.toLowerCase());
         if (!area2) throw Error("Area sconosciuta. Aree disponibili: " + areas.map((a) => a.name).join(", "));
         budget = { area: area2.name, areaId: area2.id, seconds: secondsOf(heading.value, heading.unit), assigned: 0 };
+        if (budgets.some((item) => item.areaId === area2.id)) throw Error("Indica un solo budget per area e giorno.");
         budgets.push(budget);
         continue;
       }
       const planned = line.match(plannedTask);
       if (planned) {
-        const [, link2, value2, unit2, start2, cycle, explicitArea] = planned;
+        const [, link2, value2, unit2, start2, secondsPart, cycle, focus, pause, nextDay, explicitArea] = planned;
         const area2 = explicitArea ? areas.find((item) => item.name.toLowerCase() === explicitArea.trim().toLowerCase()) : budget;
         if (!area2) throw Error("Indica un\u2019area valida sopra l\u2019assegnazione o sulla stessa riga.");
         const seconds2 = secondsOf(value2, unit2), minutes = seconds2 / 60;
-        if (!Number.isInteger(minutes) || minutes > 1439) throw Error("Usa una durata da 1 a 1439 minuti interi.");
-        if (!explicitArea) budget.assigned += seconds2;
+        if (focus && (Number(focus) < 1 || Number(focus) > 240) || pause && Number(pause) >= minutes || cycle && (focus || pause)) throw Error("Controlla focus e pausa della sessione.");
+        if (!Number.isInteger(minutes) || minutes > 1440) throw Error("Usa una durata da 1 a 1439 minuti interi.");
         const linkedNotes2 = noteLinks(link2);
         if (link2 && !linkedNotes2.length) throw Error("Wikilink non valido.");
         slots.push({
@@ -674,6 +668,10 @@ function parseAreaRegister(source, areas) {
           start: start2 || null,
           planned: true,
           sourceRow: index,
+          offset: Number(secondsPart || 0),
+          dayOffset: nextDay ? 1 : 0,
+          ...focus ? { focusMinutes: Number(focus) } : {},
+          ...pause ? { customBreakMinutes: Number(pause) } : {},
           ...cycle ? { cycleMinutes: Number(cycle) } : {}
         });
         continue;
@@ -681,7 +679,7 @@ function parseAreaRegister(source, areas) {
       if (/^[^-].*?\s+\+\s*\d\d:\d\d\s*-/.test(line)) {
         const links = line.match(/\[\[[^\[\]]+\]\]/g) || [];
         const range2 = line.replace(/\[\[[^\[\]]+\]\]/g, "").trim();
-        for (const slot of parseQuick(range2, areas)) slots.push({ ...slot, linkedNotes: noteLinks(links.join(" ")) });
+        for (const slot of parseQuick(range2, areas)) slots.push({ ...slot, sourceRow: index, linkedNotes: noteLinks(links.join(" ")) });
         continue;
       }
       if (/^[^-].*?\s+@.*?\s+\+\d\d:\d\d/.test(line)) {
@@ -704,17 +702,21 @@ function parseAreaRegister(source, areas) {
       if (!linkedNotes.length) throw Error("Indica una nota tra parentesi quadre doppie.");
       const seconds = secondsOf(value, unit), count = Number(countText ?? 1);
       if (count < 1 || count > seconds || count > 86400) throw Error("Indica almeno un pomodoro, con almeno un secondo ciascuno (massimo 86400).");
-      if (!compact) budget.assigned += seconds;
       const start = task[5];
       let offset = 0;
       for (let i = 0; i < count; i++) {
         const duration2 = Math.floor(seconds / count) + Number(i < seconds % count);
-        slots.push({ area: compact ? area.name : area.area, areaId: compact ? area.id : area.areaId, minutes: duration2 / 60, linkedNotes, start: start || null, offset });
+        slots.push({ area: compact ? area.name : area.area, areaId: compact ? area.id : area.areaId, sourceRow: index, minutes: duration2 / 60, linkedNotes, start: start || null, offset });
         offset += duration2;
       }
     } catch (error) {
       throw Error("Riga " + (index + 1) + ": " + error.message);
     }
+  }
+  const byArea = new Map(budgets.map((item) => [item.areaId, item]));
+  for (const slot of slots) {
+    const target = byArea.get(slot.areaId);
+    if (target) target.assigned += Math.round(slot.minutes * 60);
   }
   return { budgets, slots };
 }
@@ -730,24 +732,24 @@ function parseRegister(source, areas) {
   for (const [index, raw] of source.split(/\r?\n/).entries()) {
     const line = raw.trim();
     if (isReminder(line) || !line || /^date:\s*\d{4}-\d\d-\d\d$/i.test(line) || /^<!-- tempvs-block:[\w-]+ -->$/.test(line)) continue;
-    const fail2 = (message) => {
+    const fail = (message) => {
       throw Error("Riga " + (index + 1) + ": " + message);
     };
     const match = line.match(header);
     if (match) {
       const [, name, value, unit, start, countText] = match;
       const area = areas.find((a) => a.name.toLowerCase() === name.trim().toLowerCase());
-      if (!area) fail2("Area sconosciuta: " + name);
+      if (!area) fail("Area sconosciuta: " + name);
       const minutes = Math.round(Number(value.replace(",", ".")) * (unit.toLowerCase() === "h" ? 60 : 1) * 1e8) / 1e8, count = Number(countText);
-      if (!Number.isInteger(minutes) || minutes < 1 || minutes > 1440 || count < 1 || count > minutes) fail2("Controlla durata e numero di sessioni: occorre almeno un minuto per sessione, entro 24 ore.");
+      if (!Number.isInteger(minutes) || minutes < 1 || minutes > 1440 || count < 1 || count > minutes) fail("Controlla durata e numero di sessioni: occorre almeno un minuto per sessione, entro 24 ore.");
       groups.push({ area, minutes, count, start, items: [] });
       continue;
     }
     const item = line.match(assignment), group = groups.at(-1);
-    if (!item || !group) fail2("Usa Area @2h 14:00 = 4 oppure - [[Nota]].");
-    if (group.items.length >= group.count) fail2("Le righe superano il numero di sessioni dichiarate.");
+    if (!item || !group) fail("Usa Area @2h 14:00 = 4 oppure - [[Nota]].");
+    if (group.items.length >= group.count) fail("Le righe superano il numero di sessioni dichiarate.");
     const links = noteLinks(item[2]);
-    if (item[2] && !links.length) fail2("Wikilink non valido.");
+    if (item[2] && !links.length) fail("Wikilink non valido.");
     group.items.push({ time: item[1], links });
   }
   return groups.flatMap(({ area, minutes, count, start, items }) => {
@@ -786,6 +788,7 @@ function registerPlan({ source, date, blockId, state, id, planningKey: planningK
       slotIndex: index,
       date: dayText,
       registerDay: date,
+      sourceRow: slot.sourceRow,
       title: slot.area,
       area: slot.area,
       areaId: slot.areaId,
@@ -836,7 +839,7 @@ function applyRegister(state, plan) {
     return {
       ...s,
       actualSeconds: old?.actualSeconds || 0,
-      ...s.registerPlanned && sameTime ? { finished: old.finished, paused: old.paused, noteWork: old.noteWork } : {}
+      ...sameTime ? { finished: old.finished, paused: old.paused, noteWork: old.noteWork } : {}
     };
   }));
   const obsolete = state.history.filter((h) => (h.registerBlock === plan.blockId || replaced.has(h.sessionId)) && !plan.records.some((r) => r.sessionId === h.sessionId)).map((h) => h.sessionId);
@@ -845,7 +848,7 @@ function applyRegister(state, plan) {
     state.syncDeleted[key2] = [.../* @__PURE__ */ new Set([...state.syncDeleted[key2] || [], ...removed])].filter((id) => !live.includes(id));
   }
 }
-function creditedWork(state, resolve, bindingPath, byArea, { includePlannedIntervals = true } = {}) {
+function creditedWork(state, resolve, bindingPath, byArea, { includePlannedIntervals = true, dailyOnly = false } = {}) {
   const totals = /* @__PURE__ */ new Map(), records = new Map(state.history.map((h) => [h.sessionId, h]));
   for (const s of state.sessions) if (!records.get(s.id)?.registerBlock || records.get(s.id)?.planned) records.set(s.id, s);
   const estimates = state.defaults.simple.noteEstimates || {};
@@ -859,6 +862,20 @@ function creditedWork(state, resolve, bindingPath, byArea, { includePlannedInter
     }
     totals.set(key2, (totals.get(key2) || 0) + seconds);
   };
+  if (dailyOnly) {
+    const registered = /* @__PURE__ */ new Set();
+    for (const row2 of state.history) {
+      if (!row2.registerBlock || !bindingPath(row2.registerBlock)) continue;
+      registered.add(row2.sessionId);
+      add(row2.linkedNotes?.[0]?.path, row2.minutes * 60, bindingPath(row2.registerBlock), row2.area);
+    }
+    for (const s of state.sessions) {
+      if (registered.has(s.id) || !s.noteBlockId || s.dailyRetired || s.manualSuperseded || !bindingPath(s.noteBlockId)) continue;
+      const bounds = sessionBounds(s);
+      add(s.linkedNotes?.[0]?.path, (bounds.end - bounds.start) / 1e3, bindingPath(s.noteBlockId), s.area);
+    }
+    return totals;
+  }
   for (const r of records.values()) {
     if (r.planned || r.dailyRetired || r.manualSuperseded) continue;
     const source = bindingPath(r.noteBlockId) || "";
@@ -1463,7 +1480,7 @@ var NoteEstimates = class {
       const notes = (_a = this.plugin.config).noteEstimates ?? (_a.noteEstimates = {});
       const preferred = "note:" + encodeURIComponent(this.vault) + "/" + encodeURIComponent(file.path);
       const id = old?.id || (notes[preferred] ? preferred + "/" + uid() : preferred);
-      const note = notes[id] = { ...old, id, vault: this.vault, path: file.path, title: file.basename, entries, archived: false, completed: old?.completed || false };
+      const note = notes[id] = { ...old, ...!old ? this.plugin.noteFlags?.[file.path] : {}, id, vault: this.vault, path: file.path, title: file.basename, entries, archived: false, completed: old?.completed || !old && this.plugin.noteFlags?.[file.path]?.completed || false };
       if (activity2) {
         note.activity = true;
         if (note.completed !== completed) {
@@ -1494,10 +1511,7 @@ var NoteEstimates = class {
   }
   async start(note, entry) {
     if (entry.kind === "total") throw Error("La stima @14h non imposta un\u2019area: avvia una sessione dall\u2019agenda e collega la nota.");
-    const plugin = this.plugin, now = /* @__PURE__ */ new Date(), end = manualSessionEnd(now, entry.minutes), cycle = grossCycle(entry.minutes);
-    const session = { id: uid(), title: entry.area, area: entry.area, areaId: entry.areaId, date: localDateString(now), start: formatTime(now), end: formatTime(end), timerStartedAt: now.toISOString(), timerEndsAt: end.toISOString(), workMinutes: cycle.focusMinutes, cycleMinutes: entry.minutes, breakEnabled: true, actualSeconds: 0, linkedNotes: [{ path: note.path, label: note.title }] };
-    if (plugin.state.sessions.some((s) => !s.finished && sessionBounds(s).start < end && sessionBounds(s).end > now)) throw Error("Questo intervallo \xE8 gi\xE0 occupato. Assegna la nota alla sessione in agenda.");
-    await plugin.change(() => plugin.state.sessions.push(session));
+    await this.plugin.start(entry.area, entry.minutes, 25, void 0, { path: note.path, label: note.title }, entry.minutes);
   }
   planStudy(note, area, minutes) {
     const modal = new import_obsidian2.Modal(this.plugin.app);
@@ -1529,13 +1543,13 @@ var NoteEstimates = class {
   }
   totals(includePlannedIntervals = true) {
     const cache = this.plugin.app.metadataCache;
-    return creditedWork(this.plugin.state, (p, source) => cache?.getFirstLinkpathDest?.(p, source)?.path, (id) => this.plugin.dailyNotes?.[id]?.path, void 0, { includePlannedIntervals });
+    return creditedWork(this.plugin.state, (p, source) => cache?.getFirstLinkpathDest?.(p, source)?.path, (id) => this.plugin.dailyNotes?.[id]?.path, void 0, { includePlannedIntervals, dailyOnly: true });
   }
   liveProgress(note, totals) {
     return { estimated: estimatedSeconds(note), done: totals.get(note.path) || 0 };
   }
   progress(note, totals) {
-    return estimateProgress(note, this.plugin.state, { live: this.liveProgress(note, note.activity ? totals.focus : totals.legacy) });
+    return estimateProgress({ ...note, completion: void 0 }, this.plugin.state, { live: this.liveProgress(note, totals.legacy) });
   }
   progressTotals() {
     return { legacy: this.totals(), focus: this.totals(false) };
@@ -1544,7 +1558,7 @@ var NoteEstimates = class {
     const p = this.progress(note, totals), box = parent.createDiv({ cls: "tempvs-estimate" });
     if (panel) action(box, note.title, () => this.plugin.app.workspace.openLinkText(note.path, "", false));
     const names = [...new Set(note.entries.map((entry) => entry.area).filter(Boolean))];
-    const time2 = note.activity ? compactEstimateTime(p.done) + "/" + compactEstimateTime(p.estimated) : "Tempo registrato " + estimateTime(p.done) + " su " + estimateTime(p.estimated);
+    const time2 = note.activity ? compactEstimateTime(p.done) + "/" + compactEstimateTime(p.estimated) : "Tempo in daily " + estimateTime(p.done) + " su " + estimateTime(p.estimated);
     box.createEl("p", { text: (names.join(" / ") || "Tutte le aree") + " \xB7 " + time2 });
     box.createEl("strong", { text: estimateResult(note, p) });
     const actions = box.createDiv({ cls: "tempvs-estimate-actions" });
@@ -1669,9 +1683,9 @@ function mergeAllocationBlocks(markdown2, file, date, areas) {
   const clean = markdown2.slice(0, beforeOpening) + markdown2.slice(afterClosing < 0 ? markdown2.length : afterClosing + 1);
   return entries.reduce((result, { id, ...entry }) => !id.includes(":") && findDailyBlocks(result)[0]?.source.includes("<!-- tempvs-allocation:" + id + " -->") ? result : appendUnifiedAllocation(result, { ...entry, id: id.includes(":") ? void 0 : id }), clean);
 }
-function unifiedAllocationRow({ area, minutes, cycleMinutes, note, id, start }, explicitArea = true) {
+function unifiedAllocationRow({ area, minutes, cycleMinutes, focusMinutes, customBreakMinutes, offsetMs, dayOffset, note, id, start }, explicitArea = true) {
   const wiki2 = note ? "[[" + note.path + (note.label && note.label !== note.path ? "|" + note.label : "") + "]] " : "";
-  return "- " + wiki2 + "@" + minutes + "m" + (start ? " +" + start : "") + (cycleMinutes ? " -" + cycleMinutes + "m" : "") + (explicitArea ? " @" + area : "") + (id ? " <!-- tempvs-allocation:" + id + " -->" : "");
+  return "- " + wiki2 + "@" + minutes + "m" + (start ? " +" + start + (offsetMs ? ":" + (offsetMs / 1e3).toFixed(3).padStart(6, "0") : "") : "") + (cycleMinutes ? " -" + cycleMinutes + "m" : "") + (focusMinutes ? " ~" + focusMinutes + "m" : "") + (customBreakMinutes !== void 0 ? " !" + customBreakMinutes + "m" : "") + (dayOffset ? " +1d" : "") + (explicitArea ? " @" + area : "") + (id ? " <!-- tempvs-allocation:" + id + " -->" : "");
 }
 function appendUnifiedAllocation(markdown2, allocation) {
   const blocks = findDailyBlocks(markdown2, true);
@@ -1889,8 +1903,8 @@ function restoreRowIds(original, edited) {
   let at = 0;
   return next.map((line) => {
     if (!line.trim() || /^\s*date:/i.test(line)) return line;
-    const same2 = rows.findIndex((row2, i) => !used.has(i) && plain(row2) === line);
-    const index = same2 >= 0 ? same2 : actual.length === rows.length && !used.has(at) ? at : -1;
+    const same = rows.findIndex((row2, i) => !used.has(i) && plain(row2) === line);
+    const index = same >= 0 ? same : actual.length === rows.length && !used.has(at) ? at : -1;
     at++;
     if (index < 0) return line;
     used.add(index);
@@ -1937,6 +1951,13 @@ var DailyBlocks = class {
       }));
       this.plugin.registerEvent(vault.on("delete", (file) => {
         for (const [day, entries] of this.allocationsByDay) if (entries.some((entry) => entry.file.path === file.path)) this.allocationsByDay.delete(day);
+        const id = this.bindingId(file.path);
+        if (id) this.queue(async () => {
+          applyRegister(this.plugin.state, { blockId: id, sessions: [], records: [], removeIds: this.plugin.state.sessions.filter((s) => s.noteBlockId === id).map((s) => s.id) });
+          delete this.bindings[id];
+          await this.syncLedgers();
+          this.plugin.refresh(true);
+        });
         this.plugin.refresh?.(true);
       }));
       this.plugin.registerEvent(vault.on("delete", (file) => {
@@ -1953,10 +1974,6 @@ var DailyBlocks = class {
         this.queue(() => this.syncLedgers()).catch((error) => new import_obsidian4.Notice(error.message));
       }
     }));
-    this.plugin.addCommand({ id: "unlink-daily-plan", name: "Scollega TEMPVS dalla nota attiva (conserva sessioni)", callback: () => {
-      const file = this.plugin.app.workspace.getActiveFile();
-      if (file) this.detach(file.path).catch((error) => new import_obsidian4.Notice("TEMPVS: " + error.message));
-    } });
     this.plugin.addCommand({ id: "plan-daily-note", name: "Pianifica la giornata", callback: async () => {
       try {
         new DailyPlannerModal(this, await this.plannerTarget()).open();
@@ -1965,7 +1982,14 @@ var DailyBlocks = class {
       }
     } });
     this.plugin.addCommand({ id: "insert-daily-plan", name: "Inserisci blocco TEMPVS nella nota", editorCallback: (editor) => editor.replaceSelection("```TEMPVS\n\n```\n") });
-    this.plugin.app.workspace.onLayoutReady?.(() => this.initialize().catch((error) => new import_obsidian4.Notice("TEMPVS: " + error.message)));
+    this.plugin.app.workspace.onLayoutReady?.(() => {
+      this.ready = this.initialize().catch((error) => {
+        new import_obsidian4.Notice("TEMPVS: " + error.message);
+        throw error;
+      });
+      this.ready.catch(() => {
+      });
+    });
   }
   dailyLocation(date) {
     const { workspace, vault, internalPlugins } = this.plugin.app;
@@ -1977,7 +2001,7 @@ var DailyBlocks = class {
     const path = [settings.folder, name + ".md"].filter(Boolean).join("/").replace(/^\/+|\/+(?=\/)/g, "");
     const activeMatches = active?.extension === "md" && (active.basename === date || active.basename === name.split("/").at(-1));
     const cached = this.allocationsByDay.get(date)?.[0]?.file;
-    const file = binding && vault?.getAbstractFileByPath(binding.path) || (activeMatches ? active : null) || vault?.getAbstractFileByPath(path) || cached && vault?.getAbstractFileByPath(cached.path);
+    const file = binding && vault?.getAbstractFileByPath(binding.path) || vault?.getAbstractFileByPath(path) || (activeMatches && (!settings.folder || active.path === path) ? active : null) || cached && vault?.getAbstractFileByPath(cached.path);
     return { file: file?.extension === "md" ? file : null, path, settings };
   }
   async loadAllocations(date, file = this.dailyLocation(date).file) {
@@ -1996,7 +2020,14 @@ var DailyBlocks = class {
     if (JSON.stringify(previous.map(({ file: file2, ...entry }) => entry)) !== JSON.stringify(entries.map(({ file: file2, ...entry }) => entry)))
       this.plugin.refresh?.(true);
   }
-  async writeAllocation(allocation) {
+  writeAllocation(allocation) {
+    return this.writeAllocations([allocation]);
+  }
+  async writeAllocations(rows) {
+    await this.ready;
+    const allocation = rows[0];
+    if (!allocation || rows.some((r) => r.date !== allocation.date)) throw Error("Usa una giornata per operazione.");
+    const append = (text) => rows.reduce((out, row2) => appendUnifiedAllocation(out, row2), text);
     const file = await this.queue(async () => {
       const { vault } = this.plugin.app;
       let markdown2;
@@ -2012,13 +2043,13 @@ var DailyBlocks = class {
         const day = (0, import_obsidian4.moment)?.(allocation.date, "YYYY-MM-DD", true);
         const title = path.split("/").at(-1).slice(0, -3);
         const body = initial.replace(/{{title}}/gi, () => title).replace(/{{date(?::([^}]+))?}}/gi, (_all, format) => day?.format?.(format || "YYYY-MM-DD") || allocation.date).replace(/{{time(?::([^}]+))?}}/gi, (all, format) => (0, import_obsidian4.moment)?.()?.format?.(format || "HH:mm") || all);
-        markdown2 = appendUnifiedAllocation(body, allocation);
+        markdown2 = append(body);
         this.validateAllocationSource(markdown2, allocation.date, path);
         file2 = await vault.create(path, markdown2);
       } else {
         const before = await this.readMarkdown(file2);
         if (!allocation.id || !findDailyBlocks(before)[0]?.source.includes("<!-- tempvs-allocation:" + allocation.id + " -->")) {
-          markdown2 = appendUnifiedAllocation(before, allocation);
+          markdown2 = append(before);
           this.validateAllocationSource(markdown2, allocation.date, file2.path);
           await this.replaceAllocationText(file2, before, markdown2);
         }
@@ -2245,9 +2276,9 @@ var DailyBlocks = class {
   }
   async syncLedgers(forcePath) {
     const { app, state } = this.plugin, vault = app.vault;
-    if (!vault?.process) return;
+    if (!vault?.process || this.indexing || this.unreadDays?.size) return;
     const totals = /* @__PURE__ */ new Map();
-    creditedWork(state, (path, source) => app.metadataCache?.getFirstLinkpathDest?.(path, source)?.path, (id) => this.bindings[id]?.path, totals);
+    creditedWork(state, (path, source) => app.metadataCache?.getFirstLinkpathDest?.(path, source)?.path, (id) => this.bindings[id]?.path, totals, { dailyOnly: true });
     const paths = forcePath ? [forcePath] : /* @__PURE__ */ new Set([...totals.keys(), ...this.ledgerVersions.keys()]);
     for (const path of paths) {
       const areas = totals.get(path) || /* @__PURE__ */ new Map(), version = JSON.stringify([...areas]);
@@ -2274,14 +2305,25 @@ var DailyBlocks = class {
     }
   }
   async initialize() {
+    this.indexing = true;
+    this.unreadDays = /* @__PURE__ */ new Set();
     const files = this.plugin.app.vault.getMarkdownFiles();
     const estimates = this.plugin.estimates;
     const move = archivedLinkResolver(files, estimates?.notes || [], estimates?.vault || "");
     await this.queue(() => this.rewriteReferences(move));
     for (const file of files) {
       if (this.destroyed) return;
+      let markdown2;
       try {
-        await this.migrateAllocationBlock(file);
+        markdown2 = await this.readMarkdown(file);
+      } catch (error) {
+        this.errors.set(file.path, error.message);
+        if (this.panelDay(file)) this.unreadDays.add(file.path);
+        continue;
+      }
+      if (!/tempvs|tempus/i.test(markdown2)) continue;
+      try {
+        if (/tempvs-assegnazioni/i.test(markdown2)) await this.migrateAllocationBlock(file);
       } catch (error) {
         new import_obsidian4.Notice("TEMPVS: blocco precedente conservato in " + file.path + ". " + error.message);
       }
@@ -2289,10 +2331,13 @@ var DailyBlocks = class {
         await this.syncFile(file.path, { force: true });
       } catch (error) {
         this.errors.set(file.path, error.message);
+        if (this.panelDay(file)) this.unreadDays.add(file.path);
       }
     }
-    await this.migrateAllocations();
-    await this.archiveChanged();
+    this.indexing = false;
+    await this.plugin.persist?.();
+    await this.syncLedgers();
+    this.plugin.refresh?.(true);
   }
   async reconcilePlans() {
     const vault = this.plugin.app.vault;
@@ -2316,11 +2361,21 @@ var DailyBlocks = class {
     if (file?.extension !== "md") return null;
     const bound = this.bindings[this.bindingId(file.path)];
     if (bound) return bound.date;
+    const options = this.plugin.app.internalPlugins?.getPluginById("daily-notes")?.instance?.options;
+    if (options) {
+      const folder = (options.folder || "").replace(/^\/+|\/+$/g, "");
+      const prefix = folder ? folder + "/" : "";
+      if (!file.path.startsWith(prefix)) return null;
+      const name = file.path.slice(prefix.length, -3), format = options.format || "YYYY-MM-DD";
+      if (format === "YYYY-MM-DD") return validDay(name) ? name : null;
+      const parsed = (0, import_obsidian4.moment)?.(name, format, true);
+      return parsed?.isValid() ? parsed.format("YYYY-MM-DD") : null;
+    }
     try {
       return resolveDailyDate("", file, {
         moment: import_obsidian4.moment || globalThis.moment,
         format: this.plugin.app.internalPlugins?.getPluginById("daily-notes")?.instance?.options?.format || "YYYY-MM-DD",
-        frontmatter: this.plugin.app.metadataCache?.getFileCache(file)?.frontmatter
+        frontmatter: void 0
       });
     } catch {
       return null;
@@ -2350,6 +2405,8 @@ var DailyBlocks = class {
     const file = this.plugin.app.vault.getAbstractFileByPath(path);
     if (!file || file.extension !== "md") throw Error("La nota Markdown non \xE8 pi\xF9 disponibile.");
     const markdown2 = await this.readMarkdown(file), blocks = findDailyBlocks(markdown2);
+    if (findDailyBlocks(markdown2, true).length !== blocks.length || !blocks.length && this.bindingId(path) && /^ {0,3}(?:`{1,2}|~{1,2})(?:tempvs|tempus)\s*$/im.test(markdown2))
+      throw Error("Chiudi il blocco TEMPVS. La giornata valida resta in uso.");
     const ledger = blocks.find((b) => isLedger(b.source));
     if (ledger && (blocks.length === 1 || isLedger(renderSource))) return { file, block: ledger, markdown: markdown2, kind: "ledger" };
     const plans = blocks.filter((b) => !isLedger(b.source));
@@ -2362,11 +2419,9 @@ var DailyBlocks = class {
     const block = plans[0];
     if (!block.source.trim() && this.plugin.estimates?.find(file.path)) return { file, block, markdown: markdown2, kind: "estimate-empty" };
     if (isEstimateSource(block.source.split(/\r?\n/).filter((line) => !flexibleAllocation(line)).join("\n"))) return { file, block, markdown: markdown2, kind: "estimate" };
-    const date = resolveDailyDate(block.source, file, {
-      moment: import_obsidian4.moment,
-      format: this.plugin.app.internalPlugins?.getPluginById("daily-notes")?.instance?.options?.format || "YYYY-MM-DD",
-      frontmatter: this.plugin.app.metadataCache?.getFileCache(file)?.frontmatter
-    });
+    const date = this.panelDay(file);
+    if (date && explicitDay(block.source) && explicitDay(block.source) !== date) throw Error("La data del blocco deve coincidere con la giornata.");
+    if (!date) throw Error("Le sessioni vanno nella nota quotidiana. In questa nota usa una stima o un totale T:.");
     return { file, block, date, markdown: markdown2 };
   }
   async locate(child) {
@@ -2411,8 +2466,9 @@ var DailyBlocks = class {
         if (context?.date || !target || target.path === file.path) await this.loadAllocations(date, file);
       }
       if (!context) {
+        this.unreadDays?.delete(path);
         const id = this.bindingId(path);
-        if (id && isRegister(this.bindings[id].source)) {
+        if (id) {
           this.applying = true;
           try {
             await this.plugin.change(() => {
@@ -2430,6 +2486,7 @@ var DailyBlocks = class {
       }
       if (context.kind === "ledger") {
         await this.syncEstimate(null, path);
+        if (this.indexing) this.ledgerVersions.set(path, null);
         this.errors.delete(path);
         await this.syncLedgers(path);
         this.refresh(path);
@@ -2460,6 +2517,7 @@ var DailyBlocks = class {
       const plan = prepareDailyPlan({ source: context.block.source, date: context.date, blockId, previousSource: binding?.source, protectedBlockIds: this.protectedBlocks(blockId), state: this.plugin.state });
       await this.commit({ ...context, ...plan, originalSource: context.block.source, keepSource: true });
       this.errors.delete(path);
+      if (this.unreadDays?.delete(path)) await this.syncLedgers();
       this.selectDay(path, context.date);
       this.plugin.refresh?.(true);
       this.refresh(path);
@@ -2514,7 +2572,9 @@ var DailyBlocks = class {
         await this.plugin.change(() => {
           const available = newDailyPlanIds(fresh, this.plugin.state);
           const checked = prepareDailyPlan({ source: prepared.source, date: prepared.date, blockId: prepared.blockId, previousSource: prepared.previousSource, protectedBlockIds: prepared.protectedBlockIds, state: this.plugin.state, id: () => available.shift() || uid2() });
+          const existing = new Set(this.plugin.state.sessions.map((s) => s.id));
           applyDailyPlan(this.plugin.state, checked);
+          this.plugin.restoreTimerFlags?.(this.plugin.state.sessions, existing);
           this.plugin.state = normalizeArchive(this.plugin.state);
           this.bindings[prepared.blockId] = { path: prepared.file.path, date: prepared.date, source: canonical, ratioVersion: 1, agendaVersion: 2, hiddenSessionIds: checked.retainedIds, budgets: fresh.budgets, unusedMinutes: fresh.unusedMinutes };
         });
@@ -2537,6 +2597,43 @@ var DailyBlocks = class {
   }
   apply(prepared) {
     return this.queue(() => this.commit(prepared));
+  }
+  async editTimedRows(updates) {
+    const first = this.plugin.state.sessions.find((s) => s.id === updates.keys().next().value);
+    const id = first?.noteBlockId, binding = this.bindings[id];
+    if (!binding) throw Error("Sessione assente dalla nota quotidiana.");
+    if (!isRegister(binding.source) && [...updates.values()].every((value) => value !== null)) return this.updateSessionNotes(id, updates);
+    return this.queue(async () => {
+      const ctx = await this.context(binding.path);
+      if (ctx?.block.source !== binding.source) throw Error("La giornata \xE8 cambiata. Riapri il pannello.");
+      const lines = binding.source.split(/\r?\n/);
+      const rows = this.plugin.state.history.filter((h) => h.registerBlock === id);
+      if (!isRegister(binding.source)) {
+        const remaining = this.plugin.state.sessions.filter((s) => s.noteBlockId === id && !updates.has(s.id) && !s.dailyRetired && !s.manualSuperseded);
+        const source2 = serializeDailyPlan(remaining, binding.date, binding.source);
+        if (explicitDay(binding.source)) lines.splice(0, lines.length, "date: " + binding.date, source2);
+        else lines.splice(0, lines.length, source2);
+      } else {
+        for (const [sessionId, links] of updates) {
+          const row2 = rows.find((h) => h.sessionId === sessionId);
+          if (!Number.isInteger(row2?.sourceRow) || rows.some((h) => h.sourceRow === row2.sourceRow && h.sessionId !== sessionId && !updates.has(h.sessionId)))
+            throw Error("Questa riga raggruppa pi\xF9 sessioni. Modificala nella daily.");
+          const index = row2.sourceRow;
+          if (links === null) {
+            lines[index] = null;
+            continue;
+          }
+          const wiki2 = links.map((n) => "[[" + n.path + (n.label && n.label !== n.path ? "|" + n.label : "") + "]]").join(" ");
+          const original = lines[index];
+          if (/\[\[[^\]]+\]\]/.test(original)) lines[index] = original.replace(/\[\[[^\]]+\]\](?:\s+\[\[[^\]]+\]\])*/g, () => wiki2);
+          else if (/^\s*-/.test(original)) lines[index] = original.replace(/^(\s*-\s*)/, (_, prefix) => prefix + wiki2 + " ");
+          else lines[index] = original + " " + wiki2;
+        }
+      }
+      const source = lines.filter((line) => line !== null).join("\n");
+      const plan = prepareDailyPlan({ source, date: binding.date, blockId: id, state: this.plugin.state, previousSource: binding.source, protectedBlockIds: this.protectedBlocks(id) });
+      await this.commit({ ...ctx, ...plan, originalSource: binding.source, preserveSource: true });
+    });
   }
   updateSessionNotes(blockId, updates) {
     return this.queue(async () => {
@@ -2673,9 +2770,14 @@ var DailyBlock = class extends import_obsidian4.MarkdownRenderChild {
       el.empty();
       el.addClass("tempvs-daily");
       const code = el.createEl("pre").createEl("code");
+      const records = this.controller.plugin.state.history.filter((h) => h.registerBlock === this.controller.bindingId(this.ctx.sourcePath));
+      const plannedRows = new Set(records.filter((r) => r.planned).map((r) => r.sourceRow));
+      const register = isRegister(this.source);
       const lines = plain(this.source).split("\n");
       for (const [index, line] of lines.entries()) {
         if (index) code.append("\n");
+        if (register && !context.kind && (plannedRows.has(index) || records.some((r) => !r.planned && r.sourceRow === index)))
+          code.createSpan({ cls: "tempvs-muted", text: plannedRows.has(index) ? "Pianificata \xB7 " : "Registrata \xB7 " });
         renderSyntaxLine(code, line, this.controller.plugin.config.areas, (target, newLeaf) => this.controller.plugin.app.workspace.openLinkText(target, this.ctx.sourcePath, newLeaf).catch((e) => new import_obsidian4.Notice(e.message)));
       }
       const error = this.controller.errors.get(this.ctx.sourcePath);
@@ -2686,7 +2788,10 @@ var DailyBlock = class extends import_obsidian4.MarkdownRenderChild {
       }
       if (isRegister(this.source)) {
         const rows = this.controller.plugin.state.history.filter((h) => h.registerBlock === this.controller.bindingId(this.ctx.sourcePath));
-        el.createEl("small", { text: error || new Intl.NumberFormat("it-IT", { maximumFractionDigits: 2 }).format(rows.reduce((sum, h) => sum + h.minutes, 0)) + " min registrati, pause comprese", attr: { role: error ? "alert" : "status" } });
+        const minutes = (items) => new Intl.NumberFormat("it-IT", { maximumFractionDigits: 2 }).format(items.reduce((sum, h) => sum + h.minutes, 0));
+        const planned = rows.filter((row2) => row2.planned), registered = rows.filter((row2) => !row2.planned);
+        const summary = (planned.length ? minutes(planned) + " min pianificati \xB7 " : "") + minutes(registered) + " min registrati, pause comprese";
+        el.createEl("small", { text: error || summary, attr: { role: error ? "alert" : "status" } });
         const legacy = lines.map(matchBudgetHeading).find((heading) => heading?.legacy);
         if (legacy && !error) el.createEl("small", { cls: "tempvs-muted", text: "Per il budget usa " + legacy.name + " = " + legacy.value + legacy.unit + "." });
         return;
@@ -2705,854 +2810,8 @@ var DailyBlock = class extends import_obsidian4.MarkdownRenderChild {
 // obsidian/main.js
 var import_obsidian6 = require("obsidian");
 
-// core/tempo-merge.js
-var absent = Symbol("missing");
-var has = (obj, key2) => Object.prototype.hasOwnProperty.call(obj, key2);
-var same = (a, b) => a === absent || b === absent ? a === b : JSON.stringify(a) === JSON.stringify(b);
-var object = (v) => v !== null && v !== absent && typeof v === "object" && !Array.isArray(v);
-var snapshotList = (state, collection) => Array.isArray(state?.[collection]) ? state[collection] : [];
-var deleted = (state, collection) => new Set(Array.isArray(state?.syncDeleted?.[collection]) ? state.syncDeleted[collection].filter((v) => typeof v === "string" && v) : []);
-var mapById = (entries, collection) => {
-  const result = /* @__PURE__ */ new Map();
-  for (const value of entries) {
-    const id = collection === "history" ? value?.sessionId : value?.id;
-    if (typeof id !== "string" || !id || result.has(id))
-      throw Error("Archivio non valido: identificativi duplicati o assenti (" + collection + ").");
-    result.set(id, value);
-  }
-  return result;
-};
-var choiceLabel = (section, id, field) => {
-  const names = { tasks: "Attivit\xE0", sessions: "Sessione", history: "Storico", defaults: "Preferenze", appearance: "Aspetto" };
-  const label = (names[section] || section) + (id ? " \xB7 " + id : "");
-  return label + (field ? " \xB7 " + field : "");
-};
-function mergeSnapshots(base, local, remote, choices = {}) {
-  if (!local || !remote) throw Error("Entrambi gli archivi sono necessari.");
-  const conflicts = [];
-  const chosen = (key2, section, label, left, right, options = null) => {
-    const optionsList = options || [
-      { value: "local", label: "Conserva questo dispositivo" },
-      { value: "remote", label: "Conserva Dropbox" }
-    ];
-    const value = choices[key2];
-    if (optionsList.some((option) => option.value === value)) return value;
-    conflicts.push({
-      key: key2,
-      section,
-      label,
-      options: optionsList,
-      localPreview: preview(left),
-      remotePreview: preview(right)
-    });
-    return null;
-  };
-  function preview(value) {
-    if (value === absent) return "Eliminato / non presente";
-    if (value === null) return "Nessun valore";
-    if (typeof value === "string") return value.slice(0, 160);
-    if (Array.isArray(value)) return value.length + " elementi";
-    if (object(value)) return String(value.title || value.date || "Dati modificati").slice(0, 160);
-    return String(value);
-  }
-  const field = (baseValue, localValue, remoteValue, key2, section, label) => {
-    if (same(localValue, remoteValue)) return localValue;
-    if (baseValue === absent && (localValue === absent || remoteValue === absent))
-      return localValue === absent ? remoteValue : localValue;
-    if (baseValue !== absent) {
-      if (same(localValue, baseValue)) return remoteValue;
-      if (same(remoteValue, baseValue)) return localValue;
-    }
-    if (object(localValue) && object(remoteValue) && (baseValue === absent || object(baseValue))) {
-      const output = {};
-      const keys = /* @__PURE__ */ new Set([
-        ...Object.keys(object(baseValue) ? baseValue : {}),
-        ...Object.keys(localValue),
-        ...Object.keys(remoteValue)
-      ]);
-      for (const property of keys) {
-        const value = field(
-          object(baseValue) && has(baseValue, property) ? baseValue[property] : absent,
-          has(localValue, property) ? localValue[property] : absent,
-          has(remoteValue, property) ? remoteValue[property] : absent,
-          key2 + "." + property,
-          section,
-          label + " \xB7 " + property
-        );
-        if (value !== absent) output[property] = value;
-      }
-      return output;
-    }
-    const answer = chosen(key2, section, label, localValue, remoteValue);
-    return answer === "remote" ? remoteValue : localValue;
-  };
-  const merged = {
-    app: "Tempo Pomodoro",
-    version: 5,
-    defaults: field(
-      base?.defaults ?? absent,
-      local.defaults ?? absent,
-      remote.defaults ?? absent,
-      "defaults",
-      "defaults",
-      "Preferenze"
-    ),
-    appearance: field(
-      base?.appearance ?? absent,
-      local.appearance ?? absent,
-      remote.appearance ?? absent,
-      "appearance",
-      "appearance",
-      "Aspetto"
-    )
-  };
-  const finalDeleted = { tasks: /* @__PURE__ */ new Set(), sessions: /* @__PURE__ */ new Set(), history: /* @__PURE__ */ new Set() };
-  function collection(name) {
-    const b = mapById(snapshotList(base, name), name);
-    const l = mapById(snapshotList(local, name), name);
-    const r = mapById(snapshotList(remote, name), name);
-    const bDel = deleted(base, name), lDel = deleted(local, name), rDel = deleted(remote, name);
-    const allIds = /* @__PURE__ */ new Set([
-      ...b.keys(),
-      ...l.keys(),
-      ...r.keys(),
-      ...bDel,
-      ...lDel,
-      ...rDel
-    ]);
-    const out = [];
-    for (const id of allIds) {
-      const bp = b.has(id), lp = l.has(id), rp = r.has(id);
-      const bv = bp ? b.get(id) : absent, lv = lp ? l.get(id) : absent, rv = rp ? r.get(id) : absent;
-      const label = choiceLabel(name, name === "history" ? id : (l.get(id) || r.get(id) || b.get(id))?.title || id, "");
-      let result = absent;
-      if (lp && rp) {
-        if ((lDel.has(id) || rDel.has(id)) && !bp) {
-          const key2 = name + ":" + id + ":delete";
-          const answer = chosen(key2, name, label + " \xB7 eliminazione", lv, rv);
-          result = answer === "remote" ? rv : lv;
-        } else result = field(bv, lv, rv, name + ":" + id, name, label);
-      } else if (lp || rp) {
-        const present = lp ? lv : rv;
-        const explicitDeletion = lp ? rDel.has(id) : lDel.has(id);
-        const missingIsDeletion = name !== "history" && bp || explicitDeletion;
-        if (!missingIsDeletion) result = present;
-        else if (bp && same(present, bv) || name === "history" && explicitDeletion && !bp) result = absent;
-        else {
-          const key2 = name + ":" + id + ":exists";
-          const answer = chosen(key2, name, label + " \xB7 modifica o eliminazione", lv, rv);
-          result = answer === "remote" ? rv : lv;
-        }
-      }
-      if (result !== absent) out.push(result);
-      else if (bp || lDel.has(id) || rDel.has(id)) finalDeleted[name].add(id);
-    }
-    return out;
-  }
-  merged.tasks = collection("tasks");
-  merged.sessions = collection("sessions");
-  merged.history = collection("history");
-  if (merged.defaults !== absent) merged.defaults = JSON.parse(JSON.stringify(merged.defaults));
-  const areas = merged.defaults?.simple?.areas;
-  if (Array.isArray(areas)) {
-    const missing = /* @__PURE__ */ new Map();
-    for (const name of ["sessions", "tasks", "history"]) for (const item of merged[name]) {
-      if (item.areaId && !areas.some((a) => a.id === item.areaId || a.name === item.area)) missing.set(item.areaId, item.area);
-    }
-    for (const [id, name] of missing) {
-      const source = [local, remote, base].flatMap((state) => state?.defaults?.simple?.areas || []).find((a) => a.id === id);
-      if (!source) throw Error("Area associata non disponibile: " + name);
-      const answer = chosen("areas:" + id + ":exists", "areas", "Area eliminata con elementi modificati \xB7 " + name, absent, source, [
-        { value: "restore", label: "Ripristina l\u2019area e conserva gli elementi" },
-        { value: "delete", label: "Elimina gli elementi collegati all\u2019area" }
-      ]);
-      if (answer === "restore") areas.push(source);
-      else if (answer === "delete") for (const collection2 of ["sessions", "tasks", "history"]) {
-        for (const item of merged[collection2]) if (item.areaId === id) finalDeleted[collection2].add(collection2 === "history" ? item.sessionId : item.id);
-        merged[collection2] = merged[collection2].filter((item) => item.areaId !== id);
-      }
-    }
-  }
-  const active = new Map(merged.sessions.map((s) => [s.id, s]));
-  const sorted = [...active.values()].sort((a, b) => String(a.id).localeCompare(String(b.id)));
-  for (let i = 0; i < sorted.length; i++) for (let j = i + 1; j < sorted.length; j++) {
-    const a = sorted[i], b = sorted[j];
-    if (!active.has(a.id) || !active.has(b.id)) continue;
-    if (!isOverlap(a, b)) continue;
-    const key2 = "overlap:" + [a.id, b.id].sort().join(":");
-    const decision = chosen(key2, "sessions", "Sessioni sovrapposte \xB7 " + a.date + " " + a.start + "\u2013" + a.end + " (" + a.title + ") / " + b.date + " " + b.start + "\u2013" + b.end + " (" + b.title + ")", a, b, [
-      { value: a.id, label: "Conserva " + a.title + " \xB7 " + a.start + "\u2013" + a.end },
-      { value: b.id, label: "Conserva " + b.title + " \xB7 " + b.start + "\u2013" + b.end }
-    ]);
-    if (decision) {
-      const removed = decision === a.id ? b.id : a.id;
-      active.delete(removed);
-      finalDeleted.sessions.add(removed);
-    }
-  }
-  merged.sessions = [...active.values()];
-  const retainedSessionIds = new Set(merged.sessions.map((session) => session.id));
-  merged.history = merged.history.filter((entry) => entry.measured || retainedSessionIds.has(entry.sessionId));
-  const taskIds = new Set(merged.tasks.map((t) => t.id));
-  const sessionIds = new Set(merged.sessions.map((s) => s.id));
-  merged.sessions = merged.sessions.map((s) => {
-    const taskIdsInSession = Array.isArray(s.taskIds) ? { taskIds: s.taskIds.filter((id) => taskIds.has(id)) } : {};
-    return { ...s, ...taskIdsInSession, ...typeof s.taskId === "string" && !taskIds.has(s.taskId) ? { taskId: "" } : {} };
-  });
-  merged.tasks = merged.tasks.map((t) => t.autoSessionId && !sessionIds.has(t.autoSessionId) ? { ...t, autoSessionId: "" } : t);
-  for (const t of merged.tasks) finalDeleted.tasks.delete(t.id);
-  for (const s of merged.sessions) finalDeleted.sessions.delete(s.id);
-  merged.syncDeleted = {
-    tasks: [...finalDeleted.tasks].sort(),
-    sessions: [...finalDeleted.sessions].sort(),
-    ...finalDeleted.history.size ? { history: [...finalDeleted.history].sort() } : {}
-  };
-  return { merged, conflicts };
-}
-function isOverlap(a, b) {
-  if (a.finished || b.finished) return false;
-  const bounds = (session) => {
-    if (session.timerStartedAt && session.timerEndsAt) return [+new Date(session.timerStartedAt), +new Date(session.timerEndsAt)];
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(session.date || "") || !/^\d\d:\d\d$/.test(session.start || "") || !/^\d\d:\d\d$/.test(session.end || "")) return null;
-    const start = /* @__PURE__ */ new Date(session.date + "T" + session.start + ":00");
-    const end = /* @__PURE__ */ new Date(session.date + "T" + session.end + ":00");
-    if (end <= start) end.setDate(end.getDate() + 1);
-    return [start.getTime(), end.getTime()];
-  };
-  const x = bounds(a), y = bounds(b);
-  return Boolean(x && y && x[0] < y[1] && x[1] > y[0]);
-}
-
-// core/tempo-dropbox.js
-var AUTH_KEY = "tempo-dropbox-auth-v1";
-var META_KEY = "tempo-dropbox-sync-v1";
-var BASE_KEY = "tempo-dropbox-common-base-v1";
-var RECOVERY_KEY = "tempo-dropbox-recovery-v1";
-var FILE = "/tempo-backup.json";
-var API = "https://api.dropboxapi.com";
-var CONTENT = "https://content.dropboxapi.com";
-var bytesToBase64 = (url) => btoa(String.fromCharCode(...new Uint8Array(url))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
-var randomCode = () => bytesToBase64(crypto.getRandomValues(new Uint8Array(48)));
-async function shaChallenge(code) {
-  return bytesToBase64(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(code)));
-}
-async function fail(response) {
-  if (response.ok) return response;
-  let body = "";
-  try {
-    body = await response.text();
-  } catch {
-  }
-  const error = new Error("Dropbox HTTP " + response.status + " " + body.slice(0, 250));
-  error.status = response.status;
-  const retryAfter = Number(response.headers?.get?.("Retry-After"));
-  if (Number.isFinite(retryAfter) && retryAfter > 0) error.retryAfter = retryAfter * 1e3;
-  throw error;
-}
-function createDropboxSync({ getState, applyRemote, normalizeRemote, onStatus, resolveConflicts, platform = {} }) {
-  const storage = platform.storage ?? globalThis.localStorage;
-  const rawRequest = platform.request ?? fetch;
-  let generation = 0, disposed = false;
-  const assertCurrent = (epoch) => {
-    if (disposed || epoch !== generation) throw Error("Operazione Dropbox annullata.");
-  };
-  const request = async (...args) => {
-    const epoch = generation;
-    assertCurrent(epoch);
-    let response;
-    try {
-      response = await rawRequest(...args);
-    } catch (error) {
-      assertCurrent(epoch);
-      error.retryable = true;
-      throw error;
-    }
-    assertCurrent(epoch);
-    const body = (method) => async () => {
-      const value = await response[method]();
-      assertCurrent(epoch);
-      return value;
-    };
-    return { ok: response.ok, status: response.status, headers: response.headers, json: body("json"), text: body("text") };
-  };
-  const isOnline = platform.isOnline ?? (() => typeof navigator === "undefined" || navigator.onLine !== false);
-  const transientStorage = platform.transientStorage ?? globalThis.sessionStorage;
-  if (!storage || !transientStorage) throw new Error("Archivio locale Dropbox non disponibile.");
-  const read = (k, fallback = {}) => {
-    try {
-      return JSON.parse(storage.getItem(k)) ?? fallback;
-    } catch {
-      return fallback;
-    }
-  };
-  const write = (k, v) => storage.setItem(k, JSON.stringify(v));
-  const redirectUri = () => platform.redirectUri ? platform.redirectUri() : location.origin + location.pathname;
-  const currentUrl = () => platform.currentUrl ? platform.currentUrl() : location.href;
-  const navigate = (url) => platform.navigate ? platform.navigate(url) : location.assign(url);
-  const clearCallback = () => platform.clearCallback ? platform.clearCallback() : history.replaceState({}, document.title, redirectUri() + location.hash);
-  let auth = read(AUTH_KEY), meta = read(META_KEY, { rev: null, dirty: false, ready: false });
-  let inFlight = null, delay = null, overridePending = false, retryCount = 0, eventsAttached = false, phase = "idle";
-  const syncState = (data) => ({
-    sessions: data?.sessions || [],
-    tasks: data?.tasks || [],
-    history: data?.history || [],
-    defaults: data?.defaults || {},
-    appearance: data?.appearance || {},
-    syncDeleted: {
-      tasks: data?.syncDeleted?.tasks || [],
-      sessions: data?.syncDeleted?.sessions || [],
-      ...data?.syncDeleted?.history?.length ? { history: data.syncDeleted.history } : {}
-    }
-  });
-  const stateJSON = (data) => JSON.stringify(syncState(data));
-  const current = () => JSON.parse(JSON.stringify(syncState(getState())));
-  const baseline = () => read(BASE_KEY, null);
-  const saveBase = (data) => write(BASE_KEY, syncState(data));
-  const recovery = () => read(RECOVERY_KEY, null);
-  const backupBeforeReplacement = (next) => {
-    const local = current();
-    if (stateJSON(local) !== stateJSON(next)) write(RECOVERY_KEY, {
-      savedAt: (/* @__PURE__ */ new Date()).toISOString(),
-      data: { app: "TEMPVS", version: 5, ...local }
-    });
-  };
-  const status = (message, nextPhase = "idle") => {
-    phase = nextPhase;
-    return !disposed && onStatus(message, { connected: Boolean(auth.refreshToken), dirty: meta.dirty, ready: meta.ready, lastSyncedAt: meta.lastSyncedAt || null, recoveryAvailable: Boolean(recovery()), phase, busy: ["checking", "uploading", "downloading", "merging"].includes(phase) });
-  };
-  const storeMeta = () => write(META_KEY, meta);
-  const storeAuth = () => write(AUTH_KEY, auth);
-  const snapshot = (data = current()) => ({
-    app: "Tempo Pomodoro",
-    version: 5,
-    exportedAt: (/* @__PURE__ */ new Date()).toISOString(),
-    ...syncState(data)
-  });
-  const queueSync = (wait = 2500) => {
-    clearTimeout(delay);
-    if (disposed || overridePending || !meta.ready || !auth.refreshToken) return;
-    delay = setTimeout(() => {
-      delay = null;
-      sync().catch(() => {
-      });
-    }, wait);
-  };
-  const handleSyncError = (error) => {
-    const retryable = error.retryable || error.status === 409 || error.status === 429 || error.status >= 500;
-    if (retryable && !disposed && !overridePending && meta.ready && auth.refreshToken) {
-      retryCount = Math.min(retryCount + 1, 6);
-      const wait = Math.max(error.retryAfter || 0, Math.min(5e3 * 2 ** (retryCount - 1), 12e4));
-      status(error.message + " \xB7 nuovo tentativo automatico fra " + Math.round(wait / 1e3) + " s", "error");
-      queueSync(wait);
-    } else status(error.message, "error");
-  };
-  const onConnectionResume = () => {
-    if (!disposed && meta.ready && auth.refreshToken) queueSync(0);
-  };
-  const onVisibilityResume = () => {
-    if (typeof document !== "undefined" && !document.hidden) onConnectionResume();
-  };
-  function changed() {
-    if (disposed) return;
-    meta.dirty = true;
-    storeMeta();
-    status("Modifiche locali in attesa di caricamento", "pending");
-    retryCount = 0;
-    queueSync();
-  }
-  async function connect(appKey) {
-    appKey = (appKey || auth.appKey || "").trim();
-    if (!/^[a-z0-9]{8,}$/i.test(appKey)) throw new Error("Inserisci una App key Dropbox valida.");
-    if (!crypto?.subtle) throw new Error("Questo browser non supporta OAuth PKCE.");
-    const verifier = randomCode(), nonce = randomCode();
-    transientStorage.setItem("tempo-dropbox-pkce", JSON.stringify({ verifier, nonce, appKey }));
-    const u = new URL("https://www.dropbox.com/oauth2/authorize");
-    const params = { client_id: appKey, response_type: "code", token_access_type: "offline", code_challenge_method: "S256", code_challenge: await shaChallenge(verifier), state: nonce };
-    if (!platform.manualAuthorization) params.redirect_uri = redirectUri();
-    Object.entries(params).forEach(([k, v]) => u.searchParams.set(k, v));
-    await navigate(u.toString());
-    return u.toString();
-  }
-  async function exchangeManualCode(code) {
-    if (!platform.manualAuthorization) throw Error("Autenticazione manuale non configurata.");
-    const stored = JSON.parse(transientStorage.getItem("tempo-dropbox-pkce") || "null");
-    if (!stored?.verifier || !stored?.appKey) throw Error("Avvia prima il collegamento Dropbox.");
-    code = String(code || "").trim();
-    if (!code) throw Error("Incolla il codice autorizzazione di Dropbox.");
-    const form = new URLSearchParams({ code, grant_type: "authorization_code", client_id: stored.appKey, code_verifier: stored.verifier });
-    const res = await fail(await request(API + "/oauth2/token", { method: "POST", body: form }));
-    const data = await res.json();
-    if (!data.refresh_token || !data.access_token || !Number.isFinite(data.expires_in) || data.expires_in <= 0) throw Error("Credenziali OAuth Dropbox incomplete o non valide.");
-    auth = { appKey: stored.appKey, refreshToken: data.refresh_token, accessToken: data.access_token, expiresAt: Date.now() + data.expires_in * 1e3 - 6e4 };
-    transientStorage.removeItem("tempo-dropbox-pkce");
-    storeAuth();
-    meta = { rev: null, dirty: meta.dirty, ready: false };
-    storage.removeItem(BASE_KEY);
-    storeMeta();
-    status("Dropbox collegato. Scegli la prima sincronizzazione.");
-  }
-  async function callback() {
-    if (platform.manualAuthorization) return false;
-    const url = new URL(currentUrl()), code = url.searchParams.get("code"), error = url.searchParams.get("error");
-    if (!code && !error) return false;
-    const stored = JSON.parse(transientStorage.getItem("tempo-dropbox-pkce") || "null");
-    if (!stored) throw new Error("Autorizzazione Dropbox scaduta. Riprova.");
-    if (url.searchParams.get("state") !== stored.nonce) throw new Error("Controllo di sicurezza Dropbox non riuscito.");
-    clearCallback();
-    transientStorage.removeItem("tempo-dropbox-pkce");
-    if (error) throw new Error("Autorizzazione Dropbox annullata.");
-    const form = new URLSearchParams({ code, grant_type: "authorization_code", client_id: stored.appKey, code_verifier: stored.verifier, redirect_uri: redirectUri() });
-    const res = await fail(await request(API + "/oauth2/token", { method: "POST", body: form }));
-    const data = await res.json();
-    if (!data.refresh_token || !data.access_token || !Number.isFinite(data.expires_in) || data.expires_in <= 0) throw new Error("Credenziali OAuth Dropbox incomplete o non valide.");
-    auth = { appKey: stored.appKey, refreshToken: data.refresh_token, accessToken: data.access_token, expiresAt: Date.now() + data.expires_in * 1e3 - 6e4 };
-    storeAuth();
-    meta = { rev: null, dirty: meta.dirty, ready: false };
-    storage.removeItem(BASE_KEY);
-    storeMeta();
-    status("Dropbox collegato. Scegli la prima sincronizzazione.");
-    return true;
-  }
-  async function token() {
-    if (!auth.refreshToken) throw new Error("Collega prima Dropbox.");
-    if (auth.accessToken && Date.now() < auth.expiresAt) return auth.accessToken;
-    const res = await fail(await request(API + "/oauth2/token", { method: "POST", body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: auth.refreshToken, client_id: auth.appKey }) }));
-    const data = await res.json();
-    if (!data.access_token || !Number.isFinite(data.expires_in) || data.expires_in <= 0) throw Error("Risposta di rinnovo Dropbox non valida.");
-    auth.accessToken = data.access_token;
-    auth.expiresAt = Date.now() + data.expires_in * 1e3 - 6e4;
-    storeAuth();
-    return auth.accessToken;
-  }
-  async function metadata() {
-    const response = await request(API + "/2/files/get_metadata", { method: "POST", headers: { "Authorization": "Bearer " + await token(), "Content-Type": "application/json" }, body: JSON.stringify({ path: FILE }) });
-    if (response.status === 409) {
-      const err = await response.json().catch(() => ({}));
-      if (JSON.stringify(err).includes("not_found")) return null;
-    }
-    await fail(response);
-    const data = await response.json();
-    if (typeof data.rev !== "string" || !data.rev) throw Error("Metadati Dropbox non validi: revisione assente.");
-    return data;
-  }
-  async function download() {
-    const response = await fail(await request(CONTENT + "/2/files/download", { method: "POST", headers: { "Authorization": "Bearer " + await token(), "Dropbox-API-Arg": JSON.stringify({ path: FILE }) } }));
-    const file = await response.json();
-    if (!file || !Array.isArray(file.sessions) || file.tasks !== void 0 && !Array.isArray(file.tasks) || file.history !== void 0 && !Array.isArray(file.history)) throw new Error("Il backup Dropbox non \xE8 valido.");
-    const info2 = JSON.parse(response.headers.get("Dropbox-API-Result") || "{}");
-    if (typeof info2.rev !== "string" || !info2.rev) throw new Error("Revisione Dropbox assente.");
-    return { file: normalizeRemote ? normalizeRemote(file) : syncState(file), rev: info2.rev };
-  }
-  async function upload(expectedRev, data = current()) {
-    const mode = expectedRev ? { ".tag": "update", update: expectedRev } : "add";
-    const response = await request(CONTENT + "/2/files/upload", { method: "POST", headers: {
-      "Authorization": "Bearer " + await token(),
-      "Dropbox-API-Arg": JSON.stringify({ path: FILE, mode, autorename: false, strict_conflict: true, mute: true }),
-      "Content-Type": "application/octet-stream"
-    }, body: JSON.stringify(snapshot(data)) });
-    if (response.status === 409) {
-      const error = new Error("Dropbox \xE8 cambiato durante la sincronizzazione. Riprova l'unione; nessun archivio locale \xE8 stato sostituito.");
-      error.status = 409;
-      throw error;
-    }
-    await fail(response);
-    const info2 = await response.json();
-    if (typeof info2.rev !== "string" || !info2.rev) throw new Error("Dropbox non ha restituito una revisione del backup.");
-    return info2.rev;
-  }
-  function synced(data, rev) {
-    if (disposed) return;
-    saveBase(data);
-    retryCount = 0;
-    meta.lastSyncedAt = (/* @__PURE__ */ new Date()).toISOString();
-    meta.rev = rev;
-    meta.ready = true;
-    meta.dirty = stateJSON(current()) !== stateJSON(data);
-    storeMeta();
-    status(
-      meta.dirty ? "Altre modifiche locali da sincronizzare" : "Dropbox sincronizzato",
-      meta.dirty ? "pending" : "idle"
-    );
-    if (meta.dirty) {
-      queueSync();
-    }
-  }
-  async function adopt(data, rev, original = current()) {
-    const epoch = generation;
-    if (stateJSON(current()) !== stateJSON(original))
-      throw new Error("Dati locali cambiati durante il download. Riprova la sincronizzazione.");
-    backupBeforeReplacement(data);
-    await applyRemote(data);
-    assertCurrent(epoch);
-    synced(data, rev);
-  }
-  async function applyMerged(item, { manual = false } = {}) {
-    if (overridePending && !manual) return false;
-    const epoch = generation;
-    const local = current(), base = baseline();
-    let decisions = {}, result = mergeSnapshots(base, local, item.file, decisions);
-    if (result.conflicts.length && !manual) {
-      meta.dirty = true;
-      storeMeta();
-      status(result.conflicts.length + " conflitti da risolvere: usa \xABUnisci archivi\xBB.", "conflict");
-      return false;
-    }
-    let rounds = 0;
-    while (result.conflicts.length) {
-      if (!resolveConflicts) throw new Error("Risoluzione dei conflitti non disponibile.");
-      if (++rounds > 6) throw new Error("Troppi conflitti consecutivi: esporta un backup e riprova.");
-      status("Scelta delle modifiche da conservare\u2026", "merging");
-      const selected = await resolveConflicts(result.conflicts);
-      assertCurrent(epoch);
-      if (!selected) {
-        status("Unione annullata: nessun dato sovrascritto.", "pending");
-        return false;
-      }
-      decisions = { ...decisions, ...selected };
-      result = mergeSnapshots(base, local, item.file, decisions);
-    }
-    const merged = normalizeRemote ? normalizeRemote(result.merged) : result.merged;
-    if (stateJSON(current()) !== stateJSON(local))
-      throw new Error("I dati locali sono cambiati durante la scelta. Riprova l'unione.");
-    if (overridePending && !manual) return false;
-    backupBeforeReplacement(merged);
-    if (stateJSON(merged) === stateJSON(item.file)) {
-      await adopt(merged, item.rev, local);
-      status("Unione completata: dati Dropbox acquisiti.");
-      return true;
-    }
-    status("Caricamento dell'archivio unificato su Dropbox\u2026", "uploading");
-    const revision = await upload(item.rev, merged);
-    if (stateJSON(current()) !== stateJSON(local)) {
-      meta.ready = true;
-      meta.dirty = true;
-      storeMeta();
-      status("Backup unificato caricato, ma i dati locali sono cambiati: nuova unione necessaria.", "pending");
-      queueSync();
-      return true;
-    }
-    await applyRemote(merged);
-    assertCurrent(epoch);
-    synced(merged, revision);
-    status(meta.dirty ? "Unione salvata su Dropbox; nuove modifiche locali ancora da inviare." : "Archivi uniti e sincronizzati.", meta.dirty ? "pending" : "idle");
-    return true;
-  }
-  async function firstSync(direction) {
-    if (direction === "merge") return mergeNow();
-    if (overridePending) throw Error("Un'altra operazione manuale \xE8 in corso.");
-    overridePending = true;
-    clearTimeout(delay);
-    try {
-      const epoch = generation;
-      if (!auth.refreshToken) throw new Error("Collega prima Dropbox.");
-      if (meta.ready) throw new Error("Sincronizzazione gi\xE0 inizializzata.");
-      if (!isOnline()) throw new Error("Connessione assente.");
-      status("Verifica del backup Dropbox in corso\u2026", "checking");
-      const remote = await metadata();
-      if (direction === "download") {
-        if (!remote) throw new Error("Nessun backup presente su Dropbox.");
-        status("Scaricamento del backup Dropbox\u2026", "downloading");
-        const before = current();
-        const item = await download();
-        if (stateJSON(current()) !== stateJSON(before))
-          throw new Error("I dati locali sono cambiati durante il download. Riprova.");
-        backupBeforeReplacement(item.file);
-        await applyRemote(item.file);
-        assertCurrent(epoch);
-        synced(item.file, item.rev);
-        return;
-      }
-      if (direction === "upload") {
-        if (remote) throw new Error("Dropbox contiene gi\xE0 un backup. Usa \xABUnisci gli archivi\xBB.");
-        const local = current();
-        status("Caricamento del primo backup Dropbox\u2026", "uploading");
-        const rev = await upload(null, local);
-        synced(local, rev);
-        return;
-      }
-      throw new Error("Operazione iniziale non riconosciuta.");
-    } catch (error) {
-      status(error.message, "error");
-      throw error;
-    } finally {
-      overridePending = false;
-      if (!disposed && meta.dirty && meta.ready) queueSync();
-    }
-  }
-  async function sync() {
-    if (disposed || overridePending) return;
-    if (inFlight) return inFlight;
-    inFlight = (async () => {
-      if (!auth.refreshToken || !meta.ready) return;
-      if (!isOnline()) {
-        status("Offline: modifiche conservate in locale", "pending");
-        return;
-      }
-      const base = baseline();
-      if (base && stateJSON(current()) !== stateJSON(base) && !meta.dirty) {
-        meta.dirty = true;
-        storeMeta();
-      }
-      status("Verifica delle modifiche su Dropbox\u2026", "checking");
-      const remote = await metadata();
-      if (overridePending) return;
-      if (!remote) {
-        if (meta.rev) throw new Error("Backup remoto rimosso: evita una nuova copia senza conferma.");
-        if (!meta.dirty) return;
-        const local = current();
-        const rev = await upload(null, local);
-        synced(local, rev);
-        return;
-      }
-      if (remote.rev === meta.rev && base) {
-        if (!meta.dirty) {
-          retryCount = 0;
-          meta.lastSyncedAt = (/* @__PURE__ */ new Date()).toISOString();
-          storeMeta();
-          status("Dropbox sincronizzato");
-          return;
-        }
-        status("Caricamento delle modifiche su Dropbox\u2026", "uploading");
-        const local = current();
-        const rev = await upload(meta.rev, local);
-        synced(local, rev);
-        return;
-      }
-      status("Confronto dell'archivio remoto e di quello locale\u2026", "downloading");
-      const item = await download();
-      if (overridePending) return;
-      if (item.rev !== remote.rev)
-        throw new Error("Dropbox \xE8 cambiato durante il download. Riprova.");
-      if (base && !meta.dirty && stateJSON(current()) === stateJSON(base)) {
-        await adopt(item.file, item.rev);
-        status("Dati aggiornati da Dropbox.");
-        return;
-      }
-      if (!base && !meta.dirty && stateJSON(current()) === stateJSON(item.file)) {
-        synced(item.file, item.rev);
-        return;
-      }
-      await applyMerged(item);
-    })().catch((e) => {
-      handleSyncError(e);
-      throw e;
-    }).finally(() => {
-      inFlight = null;
-    });
-    return inFlight;
-  }
-  async function mergeNow() {
-    if (!auth.refreshToken) throw new Error("Collega prima Dropbox.");
-    if (overridePending) throw new Error("Un'altra operazione manuale \xE8 in corso.");
-    overridePending = true;
-    clearTimeout(delay);
-    try {
-      if (inFlight) await inFlight.catch(() => {
-      });
-      if (!isOnline()) throw new Error("Connessione assente: unione rinviata.");
-      status("Lettura della versione pi\xF9 recente su Dropbox\u2026", "checking");
-      const remote = await metadata();
-      if (!remote) {
-        if (meta.rev) throw new Error("Il backup Dropbox \xE8 stato eliminato. Usa la sovrascrittura esplicita per ricrearlo.");
-        const local = current(), rev = await upload(null, local);
-        synced(local, rev);
-        return;
-      }
-      const item = await download();
-      if (item.rev !== remote.rev) throw new Error("Dropbox \xE8 cambiato durante il download: riprova.");
-      await applyMerged(item, { manual: true });
-    } catch (e) {
-      status(e.message, "error");
-      throw e;
-    } finally {
-      overridePending = false;
-      if (!disposed && meta.dirty && meta.ready) {
-        queueSync();
-      }
-    }
-  }
-  async function forceUpload() {
-    if (!auth.refreshToken) throw new Error("Collega prima Dropbox.");
-    if (overridePending) throw new Error("Un'altra operazione manuale \xE8 in corso.");
-    overridePending = true;
-    clearTimeout(delay);
-    try {
-      if (inFlight) await inFlight.catch(() => {
-      });
-      if (!isOnline()) throw new Error("Connessione assente.");
-      status("Controllo della revisione Dropbox\u2026", "checking");
-      const remote = await metadata(), local = current();
-      status("Sovrascrittura esplicita del backup Dropbox\u2026", "uploading");
-      const rev = await upload(remote?.rev || null, local);
-      synced(local, rev);
-      status(
-        meta.dirty ? "Modifiche successive da inviare" : "Dropbox sovrascritto con i dati locali",
-        meta.dirty ? "pending" : "idle"
-      );
-    } catch (e) {
-      status(e.message, "error");
-      throw e;
-    } finally {
-      overridePending = false;
-      if (!disposed && meta.dirty && meta.ready) queueSync();
-    }
-  }
-  async function forceDownload(allowDirty = false) {
-    const epoch = generation;
-    if (!auth.refreshToken || !meta.ready) throw new Error("Inizializza prima la sincronizzazione.");
-    if (meta.dirty && !allowDirty) throw new Error("Modifiche locali da conservare: download bloccato.");
-    if (overridePending) throw new Error("Un'altra operazione manuale \xE8 in corso.");
-    overridePending = true;
-    clearTimeout(delay);
-    try {
-      if (inFlight) await inFlight.catch(() => {
-      });
-      const before = current();
-      const item = await download();
-      if (stateJSON(current()) !== stateJSON(before))
-        throw new Error("I dati locali sono cambiati durante il download. Riprova.");
-      backupBeforeReplacement(item.file);
-      await applyRemote(item.file);
-      assertCurrent(epoch);
-      synced(item.file, item.rev);
-      status("Archivio Dropbox scaricato.");
-    } finally {
-      overridePending = false;
-      if (!disposed && meta.dirty && meta.ready) queueSync();
-    }
-  }
-  function disconnect() {
-    ++generation;
-    clearTimeout(delay);
-    transientStorage.removeItem("tempo-dropbox-pkce");
-    auth = {};
-    meta = { rev: null, dirty: false, ready: false };
-    retryCount = 0;
-    storage.removeItem(AUTH_KEY);
-    storage.removeItem(META_KEY);
-    storage.removeItem(BASE_KEY);
-    status("Dropbox scollegato. Dati locali conservati.");
-  }
-  function destroy() {
-    disposed = true;
-    ++generation;
-    clearTimeout(delay);
-    if (eventsAttached) {
-      if (typeof window !== "undefined") window.removeEventListener("online", onConnectionResume);
-      if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVisibilityResume);
-      eventsAttached = false;
-    }
-  }
-  function info() {
-    return { phase, connected: Boolean(auth.refreshToken), ready: meta.ready, dirty: meta.dirty, lastSyncedAt: meta.lastSyncedAt || null, recoveryAvailable: Boolean(recovery()) };
-  }
-  async function init() {
-    if (!eventsAttached) {
-      if (typeof window !== "undefined") window.addEventListener("online", onConnectionResume);
-      if (typeof document !== "undefined") document.addEventListener("visibilitychange", onVisibilityResume);
-      eventsAttached = true;
-    }
-    await callback();
-    status(auth.refreshToken ? meta.ready ? "Dropbox connesso" : "Dropbox collegato: inizializzazione necessaria" : "Dropbox non collegato");
-    if (meta.ready) await sync().catch(() => {
-    });
-  }
-  return { init, connect, exchangeManualCode, firstSync, sync, changed, mergeNow, forceUpload, forceDownload, disconnect, destroy, info, recovery };
-}
-
 // obsidian/cloud-adapter.js
 var import_obsidian5 = require("obsidian");
-async function dropboxRequest(url, options = {}) {
-  const headers = { ...options.headers || {} };
-  let body = options.body;
-  if (body instanceof URLSearchParams) {
-    body = body.toString();
-    headers["Content-Type"] = "application/x-www-form-urlencoded";
-  }
-  const response = await (0, import_obsidian5.requestUrl)({
-    url,
-    method: options.method || "GET",
-    headers,
-    ...body === void 0 ? {} : { body },
-    throw: false
-  });
-  return {
-    status: response.status,
-    ok: response.status >= 200 && response.status < 300,
-    headers: { get(name) {
-      const key2 = Object.keys(response.headers || {}).find((k) => k.toLowerCase() === name.toLowerCase());
-      return key2 ? response.headers[key2] : null;
-    } },
-    text: async () => response.text,
-    json: async () => JSON.parse(response.text)
-  };
-}
-function createCloudStorage(initial = {}, onMutation = () => {
-}) {
-  const map = new Map(Object.entries(initial));
-  return {
-    getItem: (k) => map.has(k) ? map.get(k) : null,
-    setItem(k, value) {
-      map.set(k, String(value));
-      onMutation();
-    },
-    removeItem(k) {
-      map.delete(k);
-      onMutation();
-    },
-    snapshot: () => Object.fromEntries(map)
-  };
-}
-var TempvsConflictModal = class extends import_obsidian5.Modal {
-  constructor(app, conflicts, finish) {
-    super(app);
-    this.conflicts = conflicts;
-    this.finish = finish;
-    this.setTitle("TEMPVS \xB7 Conflitti Dropbox");
-  }
-  onOpen() {
-    const parent = this.contentEl;
-    parent.empty();
-    parent.createEl("p", { text: "Scegli per ogni elemento quale versione conservare. Nessuna modifica verr\xE0 applicata finch\xE9 non confermi." });
-    const selects = [];
-    for (const conflict of this.conflicts) {
-      const row2 = parent.createDiv({ cls: "tempvs-conflict" });
-      row2.createEl("strong", { text: conflict.label || conflict.key });
-      row2.createEl("small", { text: "Dispositivo: " + String(conflict.localPreview ?? "\u2014").slice(0, 180) });
-      row2.createEl("small", { text: "Dropbox: " + String(conflict.remotePreview ?? "\u2014").slice(0, 180) });
-      const select = row2.createEl("select", { attr: { "aria-label": conflict.label || conflict.key } });
-      select.createEl("option", { text: "Scegli una versione", attr: { value: "" } });
-      for (const option of conflict.options || []) select.createEl("option", { text: option.label, attr: { value: option.value } });
-      selects.push({ key: conflict.key, select });
-    }
-    const controls = parent.createDiv({ cls: "tempvs-controls" });
-    const ok = controls.createEl("button", { text: "Conferma l'unione", cls: "mod-cta" });
-    ok.addEventListener("click", () => {
-      if (selects.some((item) => !item.select.value)) {
-        new import_obsidian5.Notice("Seleziona una versione per ogni conflitto.");
-        return;
-      }
-      this.complete(Object.fromEntries(selects.map((item) => [item.key, item.select.value])));
-    });
-    const cancel = controls.createEl("button", { text: "Annulla" });
-    cancel.addEventListener("click", () => this.close());
-  }
-  complete(value) {
-    this.finish?.(value);
-    this.finish = null;
-    this.close();
-  }
-  onClose() {
-    if (this.finish) {
-      this.finish(null);
-      this.finish = null;
-    }
-    this.contentEl.empty();
-  }
-};
-function chooseTempvsConflicts(app, conflicts) {
-  return new Promise((resolve) => new TempvsConflictModal(app, conflicts, resolve).open());
-}
 function confirmTempvs(app, title, description) {
   return new Promise((resolve) => {
     class Confirmation extends import_obsidian5.Modal {
@@ -3865,61 +3124,6 @@ var iconButton = (parent, icon, label, action2) => {
 var setPanel = (el, show) => {
   el.hidden = !show;
 };
-function renderCloudSettings(parent, plugin) {
-  const more = parent;
-  const cloud = more.createDiv({ cls: "tempvs-cloud tempvs-form" });
-  const status = cloud.createEl("p", { cls: "tempvs-cloud-status", text: plugin.cloudMessage || "Non collegato" });
-  status.setAttribute("role", "status");
-  if (plugin.cloudInfo?.lastSyncedAt) cloud.createEl("p", { cls: "tempvs-muted", text: "Ultimo controllo Dropbox riuscito: " + new Date(plugin.cloudInfo.lastSyncedAt).toLocaleString("it-IT") });
-  const key2 = cloud.createEl("input", { attr: { "aria-label": "Dropbox App key", placeholder: "App key Dropbox" } });
-  const link = cloud.createEl("a", { text: "Apri autorizzazione Dropbox", href: "#", cls: "tempvs-cloud-link" });
-  link.hidden = true;
-  link.setAttribute("target", "_blank");
-  link.setAttribute("rel", "noopener noreferrer");
-  button(cloud, "1. Autorizza su Dropbox", async () => {
-    const url = await plugin.cloud.connect(key2.value);
-    link.href = url;
-    link.hidden = false;
-    await plugin.persist();
-    new import_obsidian6.Notice("Autorizza TEMPVS su Dropbox e copia il codice mostrato.");
-  });
-  const code = cloud.createEl("input", { attr: { "aria-label": "Codice autorizzazione Dropbox", placeholder: "Incolla il codice Dropbox", autocomplete: "off" } });
-  button(cloud, "2. Completa collegamento", async () => {
-    await plugin.cloud.exchangeManualCode(code.value);
-    code.value = "";
-    await plugin.persist();
-    plugin.refresh(true);
-  });
-  const actions = cloud.createDiv({ cls: "tempvs-controls" });
-  button(actions, "Sincronizza", () => plugin.cloudOperation("sync"));
-  button(actions, "Unisci", () => plugin.cloudOperation("mergeNow"));
-  button(actions, "Salva recupero nel vault", async () => {
-    const copy = plugin.cloud.recovery();
-    if (!copy?.data) throw Error("Nessuna copia di recupero disponibile.");
-    const filename = "tempvs-recupero-" + Date.now() + ".json";
-    await plugin.app.vault.create(filename, JSON.stringify(copy.data, null, 2));
-    new import_obsidian6.Notice("Copia di recupero salvata nel vault: " + filename);
-  });
-  const initial = cloud.createDiv({ cls: "tempvs-controls" });
-  button(initial, "Prima unione", () => plugin.cloudOperation("firstSync", "merge"));
-  button(initial, "Scarica prima copia", async () => {
-    if (await confirmTempvs(plugin.app, "Scaricare il backup Dropbox?", "Se il plugin contiene gi\xE0 sessioni locali, verr\xE0 creata una copia di recupero prima di sostituirle."))
-      await plugin.cloudOperation("firstSync", "download");
-  });
-  button(initial, "Carica prima copia", () => plugin.cloudOperation("firstSync", "upload"));
-  const dangerous = cloud.createDiv({ cls: "tempvs-controls" });
-  button(dangerous, "Sovrascrivi Dropbox", async () => {
-    if (await confirmTempvs(plugin.app, "Sovrascrivere Dropbox?", "L'archivio remoto verr\xE0 sostituito con quello locale. Usa Unisci per evitare perdite."))
-      await plugin.cloudOperation("forceUpload");
-  });
-  button(dangerous, "Scollega", async () => {
-    if (await confirmTempvs(plugin.app, "Scollegare Dropbox?", "Le sessioni locali resteranno salvate in Obsidian.")) {
-      plugin.cloud.disconnect();
-      await plugin.persist();
-      plugin.refresh(true);
-    }
-  });
-}
 var TempvsView = class extends import_obsidian6.ItemView {
   constructor(leaf, plugin) {
     super(leaf);
@@ -3977,8 +3181,7 @@ var TempvsView = class extends import_obsidian6.ItemView {
     const brand = heading.createDiv({ cls: "tempvs-brand" });
     brand.createEl("h3", { text: "TEMPVS" });
     const actions = heading.createDiv({ cls: "tempvs-heading-actions" });
-    const cloud = iconButton(actions, "cloud", "Impostazioni Dropbox", () => plugin.openSettings());
-    cloud.addClass("tempvs-cloud-indicator");
+    iconButton(actions, "settings", "Impostazioni TEMPVS", () => plugin.openSettings());
     iconButton(actions, "settings", "Impostazioni TEMPVS", () => plugin.openSettings());
     const timer = root.createDiv({ cls: "tempvs-timer" });
     timer.createDiv({ cls: "tempvs-phase" });
@@ -4294,13 +3497,6 @@ var TempvsView = class extends import_obsidian6.ItemView {
     if (finish) finish.disabled = !active;
     root.querySelector(".tempvs-primary-controls").hidden = !active;
     this.updateSoundControls();
-    const cloud = root.querySelector(".tempvs-cloud-indicator");
-    if (cloud) {
-      const status = plugin.cloudMessage || "Dropbox non collegato";
-      cloud.title = status;
-      cloud.setAttribute("aria-label", status + " \u2014 Apri impostazioni");
-      cloud.toggleClass("tempvs-cloud-error", /errore|error|fallit/i.test(status));
-    }
     const dailyStatus = root.querySelector(".tempvs-daily-status");
     if (dailyStatus) {
       const path = plugin.app.workspace.getActiveFile?.()?.path;
@@ -4320,14 +3516,14 @@ var TempvsView = class extends import_obsidian6.ItemView {
     const focusedTime = list.ownerDocument?.activeElement?.dataset?.allocation;
     list.empty();
     const now = /* @__PURE__ */ new Date();
-    const registered = plugin.state.history.filter((h) => h.registerBlock && h.registerDay === this.day && (!h.planned || h.start));
+    const registered = plugin.state.history.filter((h) => h.registerBlock && h.registerDay === this.day && !h.planned);
     const budgets = Object.values(plugin.dailyNotes || {}).find((b) => b.date === this.day)?.budgets || [];
     for (const b of budgets) {
       const difference = b.seconds - b.assigned;
       list.createEl("p", { text: b.area + " \xB7 " + readableDuration(b.assigned) + " su " + readableDuration(b.seconds) + (difference ? " \xB7 " + readableDuration(Math.abs(difference)) + (difference > 0 ? " disponibili" : " oltre il budget") : "") });
     }
     const sessions = plugin.state.sessions.filter((s) => {
-      if (s.registerMinutes || s.registerPlanned) return false;
+      if (s.registerMinutes) return false;
       if (s.dailyRetired || s.manualSuperseded) return false;
       return s.date === this.day || this.day === today() && sessionBounds(s).start <= now && sessionBounds(s).end > now;
     }).sort((a, b) => sessionBounds(a).start - sessionBounds(b).start);
@@ -4576,21 +3772,28 @@ var TempvsSettings = class extends import_obsidian6.PluginSettingTab {
         new import_obsidian6.Notice(e.message);
       }
     }));
-    el.createEl("h3", { text: "Dropbox" });
-    renderCloudSettings(el, this.plugin);
-    el.createEl("p", { cls: "tempvs-muted", text: "Lo storico delle sessioni rimane salvato per statistiche, backup e sincronizzazione, ma non \xE8 mostrato nel timer." });
   }
 };
 var TempvsPlugin = class extends import_obsidian6.Plugin {
   async onload() {
     try {
       const data = await this.loadData();
-      if (data && !data.archive && !Array.isArray(data.sessions) && Object.keys(data).length)
-        throw Error("Formato precedente non riconosciuto: nessun dato verr\xE0 sovrascritto.");
-      this.state = normalizeArchive(data?.archive || (Array.isArray(data?.sessions) ? data : ZERO()));
-      this.allocations = Array.isArray(data?.allocations) ? data.allocations : [];
-      this.dailyNotes = Object.assign(/* @__PURE__ */ Object.create(null), data?.dailyNotes || {});
-      this.cloudData = data?.cloudData && typeof data.cloudData === "object" ? data.cloudData : {};
+      const legacy = data?.archive || (Array.isArray(data?.sessions) ? data : null);
+      if (data && !legacy && data.format !== 2 && Object.keys(data).length) throw Error("Formato impostazioni sconosciuto.");
+      if (legacy) {
+        const adapter = this.app.vault.adapter;
+        const dir = this.manifest.dir || this.app.vault.configDir + "/plugins/" + this.manifest.id;
+        const path = dir + "/pre-0.7-recovery.json";
+        if (!await adapter.exists(path)) {
+          await adapter.write(path, JSON.stringify({ archive: legacy, dailyNotes: data.dailyNotes, allocations: data.allocations }));
+        }
+      }
+      this.state = normalizeArchive({ sessions: [], defaults: data?.defaults || legacy?.defaults || ZERO().defaults });
+      this.state.defaults.simple.noteEstimates = {};
+      this.dailyNotes = /* @__PURE__ */ Object.create(null);
+      this.allocations = [];
+      this.timerFlags = data?.timerFlags || {};
+      this.noteFlags = data?.noteFlags || {};
       this.compact = typeof data?.ui?.compact === "boolean" ? data.ui.compact : import_obsidian6.Platform.isMobile;
       this.layout = ["auto", "side", "wide"].includes(data?.ui?.layout) ? data.ui.layout : "auto";
       this.timerStyle = ["digits", "ring"].includes(data?.ui?.timerStyle) ? data.ui.timerStyle : "bar";
@@ -4618,52 +3821,6 @@ var TempvsPlugin = class extends import_obsidian6.Plugin {
     this.lastNotifiedPhase = this.currentNoticePhase(new Date(this.lastNoticeCheck));
     this.dirty = false;
     this.writeChain = Promise.resolve();
-    this.cloudMessage = "Dropbox non collegato";
-    this.cloudStorage = createCloudStorage(this.cloudData, () => {
-      this.cloudDirty = true;
-      clearTimeout(this.cloudSaveTimer);
-      this.cloudSaveTimer = window.setTimeout(() => this.persist().catch((e) => new import_obsidian6.Notice("TEMPVS: errore nel salvataggio Dropbox: " + e.message)), 150);
-    });
-    this.cloud = createDropboxSync({
-      getState: () => this.state,
-      applyRemote: async (remote) => {
-        this.record();
-        const next = normalizeArchive(remote);
-        const previous = this.state;
-        this.state = next;
-        try {
-          await this.persist();
-        } catch (error) {
-          this.state = previous;
-          throw error;
-        }
-        this.lastTick = Date.now();
-        this.lastNoticeCheck = this.lastTick;
-        this.lastNotifiedPhase = this.currentNoticePhase(new Date(this.lastTick));
-        for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) leaf.view?.draw?.();
-        this.syncAmbient();
-        this.refresh(true);
-        await this.daily?.reconcilePlans();
-      },
-      normalizeRemote: normalizeArchive,
-      onStatus: (message, detail) => {
-        this.cloudMessage = message;
-        this.cloudInfo = detail;
-        this.refresh(true);
-      },
-      resolveConflicts: (conflicts) => chooseTempvsConflicts(this.app, conflicts),
-      platform: {
-        storage: this.cloudStorage,
-        transientStorage: this.cloudStorage,
-        manualAuthorization: true,
-        request: dropboxRequest,
-        navigate: async (url) => {
-          this.pendingAuthUrl = url;
-          await this.persist();
-        },
-        isOnline: () => navigator.onLine !== false
-      }
-    });
     this.estimates = new NoteEstimates(this);
     this.registerEditorExtension?.(syntaxExtension());
     this.daily = new DailyBlocks(this);
@@ -4723,10 +3880,6 @@ var TempvsPlugin = class extends import_obsidian6.Plugin {
       }
     });
     this.refresh(true);
-    this.cloud.init().catch((error) => {
-      this.cloudMessage = "Dropbox: " + error.message;
-      this.refresh(true);
-    });
   }
   get config() {
     return this.state.defaults.simple;
@@ -4786,6 +3939,7 @@ var TempvsPlugin = class extends import_obsidian6.Plugin {
         else if (+end > now) next = Math.min(next, session.paused ? +end : +getPhase(session, date).end);
       }
     }
+    if (this.eink && this.boundaryAt != null && this.boundaryAt <= now) return;
     if (next === this.boundaryAt) return;
     window.clearTimeout(this.boundaryHandle);
     this.boundaryAt = next;
@@ -4802,7 +3956,7 @@ var TempvsPlugin = class extends import_obsidian6.Plugin {
           this.showPhaseNotice(current, beginning);
         }
         this.record();
-        if (this.dirty) this.persist().then(() => this.cloud?.changed()).catch((e) => new import_obsidian6.Notice(e.message));
+        if (this.dirty) this.persist().catch((e) => new import_obsidian6.Notice(e.message));
       }
       this.refresh(true);
     }, Math.min(2147483647, Math.max(1, next - now)));
@@ -4921,27 +4075,53 @@ var TempvsPlugin = class extends import_obsidian6.Plugin {
     this.record();
     const now = Date.now();
     if (this.dirty && now - this.lastSave >= 15e3) {
-      this.persist().then(() => {
-        this.cloud?.changed();
-      }).catch((e) => new import_obsidian6.Notice("TEMPVS: salvataggio fallito: " + e.message));
+      this.persist().catch((e) => new import_obsidian6.Notice("TEMPVS: salvataggio fallito: " + e.message));
       this.lastSave = now;
     }
     if (Math.floor(now / 15e3) !== Math.floor((now - 1e3) / 15e3)) this.daily?.refresh();
     this.refresh(Math.floor(now / 6e4) !== Math.floor((now - 1e3) / 6e4));
   }
+  timerKey(s) {
+    const b = sessionBounds(s);
+    return JSON.stringify([s.date, s.area, +b.start, +b.end]);
+  }
+  restoreTimerFlags(sessions, existing) {
+    for (const s of sessions) {
+      if (existing.has(s.id)) continue;
+      const flags = this.timerFlags[this.timerKey(s)];
+      if (flags && flags.until > Date.now()) Object.assign(s, { paused: flags.paused, finished: flags.finished, actualSeconds: flags.actualSeconds });
+    }
+  }
   async persist() {
-    const archive = JSON.parse(JSON.stringify(this.state));
-    const cloudData = this.cloudStorage?.snapshot() || {};
-    const audio = { kind: this.audioKind, volume: this.audioVolume };
-    const notifications = { sound: this.chimeEnabled };
-    const allocations = JSON.parse(JSON.stringify(this.allocations));
-    const dailyNotes = JSON.parse(JSON.stringify(this.dailyNotes || {}));
+    if (this.daily?.indexing) return;
+    const defaults = JSON.parse(JSON.stringify(this.state.defaults));
+    delete defaults.simple.noteEstimates;
+    const now = Date.now();
+    for (const [key2, flags] of Object.entries(this.timerFlags)) if (flags.until <= now) delete this.timerFlags[key2];
+    for (const session of this.state.sessions) {
+      const bounds = sessionBounds(session);
+      if (+bounds.end <= now || +bounds.start > now) continue;
+      const key2 = this.timerKey(session);
+      this.timerFlags[key2] = { until: +bounds.end, paused: !!session.paused, finished: !!session.finished, actualSeconds: session.actualSeconds || 0 };
+    }
+    for (const note of this.estimates?.notes || []) {
+      if (note.completed) this.noteFlags[note.path] = { completed: true };
+      else delete this.noteFlags[note.path];
+    }
+    const data = JSON.parse(JSON.stringify({
+      format: 2,
+      defaults,
+      timerFlags: this.timerFlags,
+      noteFlags: this.noteFlags,
+      ui: { compact: this.compact, layout: this.layout, timerStyle: this.timerStyle, clockSize: this.clockSize },
+      audio: { kind: this.audioKind, volume: this.audioVolume },
+      notifications: { sound: this.chimeEnabled }
+    }));
     const write = this.writeChain.catch(() => {
-    }).then(() => this.saveData({ archive, cloudData, ui: { compact: this.compact, layout: this.layout, timerStyle: this.timerStyle, clockSize: this.clockSize }, audio, notifications, dailyNotes, allocations }));
+    }).then(() => this.saveData(data));
     this.writeChain = write;
     await write;
-    if (JSON.stringify(this.state) === JSON.stringify(archive)) this.dirty = false;
-    if (JSON.stringify(this.cloudStorage?.snapshot() || {}) === JSON.stringify(cloudData)) this.cloudDirty = false;
+    this.dirty = false;
   }
   async change(mutator) {
     if (this.changing) throw Error("Salvataggio in corso. Attendi prima di riprovare.");
@@ -4960,17 +4140,11 @@ var TempvsPlugin = class extends import_obsidian6.Plugin {
         this.refresh(true);
         throw error;
       }
-      try {
-        this.cloud?.changed();
-        await this.persist();
-      } catch (error) {
-        new import_obsidian6.Notice("TEMPVS: dati salvati in locale; sincronizzazione da riprovare. " + error.message);
-      }
       this.refresh(true);
     } finally {
       this.changing = false;
     }
-    await this.daily?.archiveChanged();
+    if (!this.daily?.applying) await this.daily?.syncLedgers();
   }
   setSessionNote(ids, input, options = {}) {
     const operation = (this.noteWrite || Promise.resolve()).then(() => this.applySessionNote(ids, input, options));
@@ -4986,17 +4160,10 @@ var TempvsPlugin = class extends import_obsidian6.Plugin {
       const links = updatedSessionNotes(session, input, { ...options, replacePrimary: true, estimates: this.estimates?.notes || [] });
       updates.set(id, input.trim() ? links.slice(0, 1) : links);
     }
-    const bindings = new Set(ids.map((id) => this.state.sessions.find((s) => s.id === id).noteBlockId).filter(Boolean));
-    if (bindings.size) {
-      if (bindings.size !== 1) throw Error("Modifica una giornata alla volta.");
-      await this.daily.updateSessionNotes([...bindings][0], updates);
-    } else await this.change(() => {
-      for (const [id, notes] of updates) {
-        const s = this.state.sessions.find((s2) => s2.id === id);
-        s.linkedNotes = notes;
-        delete s.noteEstimateId;
-      }
-    });
+    const bindings = new Set(ids.map((id) => this.state.sessions.find((s) => s.id === id).noteBlockId));
+    if (bindings.has(void 0) || bindings.has(null)) throw Error("Sessione assente dalla nota quotidiana.");
+    if (bindings.size !== 1) throw Error("Modifica una giornata alla volta.");
+    await this.daily.editTimedRows(updates);
   }
   async setCompact(value) {
     this.compact = Boolean(value);
@@ -5034,28 +4201,23 @@ var TempvsPlugin = class extends import_obsidian6.Plugin {
       delete this.state.appearance.areaColors[from];
     }
   }
-  async start(area, gross, focus, pause) {
+  async start(area, gross, focus, pause, note, cycleMinutes) {
     if (!this.config.areas.some((a) => a.name === area)) throw Error("Area non valida.");
     if (!Number.isInteger(gross) || gross < 1 || gross > 1439) throw Error("Durata lorda non valida.");
     if (!Number.isInteger(focus) || focus < 1 || focus > 240) throw Error("Focus da 1 a 240 minuti.");
     if (pause !== void 0 && (!Number.isInteger(pause) || pause < 0 || pause >= gross)) throw Error("Pausa personalizzata non valida.");
-    const start = /* @__PURE__ */ new Date(), end = manualSessionEnd(start, gross);
-    const s = {
-      id: uuid(),
-      title: area,
+    const now = /* @__PURE__ */ new Date();
+    await this.daily.writeAllocation({
       area,
-      date: localDateString(start),
-      start: formatTime(start),
-      end: formatTime(end),
-      timerStartedAt: start.toISOString(),
-      timerEndsAt: end.toISOString(),
-      workMinutes: focus,
-      breakEnabled: pause === void 0 ? this.state.defaults.breakEnabled : pause > 0,
-      actualSeconds: 0
-    };
-    if (pause !== void 0) s.customBreakMinutes = pause;
-    if (hasSessionOverlaps([...this.state.sessions.filter((s2) => !s2.finished), s])) throw Error("Sessione sovrapposta a un'altra.");
-    await this.change(() => this.state.sessions.push(s));
+      minutes: gross,
+      date: localDateString(now),
+      start: formatTime(now),
+      note,
+      offsetMs: now.getSeconds() * 1e3 + now.getMilliseconds(),
+      cycleMinutes,
+      focusMinutes: cycleMinutes ? void 0 : focus,
+      customBreakMinutes: pause
+    });
   }
   async schedule(text, date) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw Error("Data non valida.");
@@ -5082,7 +4244,7 @@ var TempvsPlugin = class extends import_obsidian6.Plugin {
       const raw = binding?.source.split(/\r?\n/)[record.sourceRow];
       return file && raw ? [{ ...record, id: record.sessionId, file, raw, index: record.sourceRow, note: record.linkedNotes[0], unified: true }] : [];
     });
-    return [...unified, ...entries, ...this.allocations.filter((item) => item.date === date && !entries.some((entry) => entry.id === item.id))];
+    return [...unified, ...entries];
   }
   removeAllocation(entry) {
     if (entry.unified) return this.daily.updateUnifiedAllocation(entry);
@@ -5092,11 +4254,8 @@ var TempvsPlugin = class extends import_obsidian6.Plugin {
   }
   async scheduleRequests(requests, date, note) {
     if (!validDay(date)) throw Error("Data non valida.");
-    await this.change(() => {
-      const sessions = this.plannedSessions(requests, date);
-      if (note) for (const session of sessions) session.linkedNotes = [note];
-      this.state.sessions.push(...sessions);
-    });
+    this.plannedSessions(requests, date);
+    await this.daily.writeAllocations(requests.map((r) => ({ ...r, date, note })));
   }
   plannedSessions(requests, date) {
     const result = planSessions(
@@ -5117,24 +4276,10 @@ var TempvsPlugin = class extends import_obsidian6.Plugin {
         throw Error("Scegli un orario futuro per avviare il timer.");
       return this.daily.updateUnifiedAllocation(allocation, start);
     }
-    const { date, note, area, areaId, minutes, cycleMinutes, focusMinutes, customBreakMinutes } = allocation;
-    const commit = () => this.change(() => {
-      if (!allocation.file && !this.allocations.some((entry) => entry.id === allocation.id))
-        throw Error("Tempo assegnato non pi\xF9 disponibile.");
-      const currentArea = this.config.areas.find((item) => areaId && item.id === areaId || item.name === area);
-      if (!currentArea) throw Error("Area non pi\xF9 disponibile.");
-      const request = { area: currentArea.name, areaId: currentArea.id, minutes, cycleMinutes, focusMinutes, customBreakMinutes, start };
-      const [session] = this.plannedSessions([request], date);
-      if (note) {
-        const target = this.app.metadataCache?.getFirstLinkpathDest?.(note.path.split("#")[0], allocation.file?.path || "");
-        const anchor = note.path.includes("#") ? note.path.slice(note.path.indexOf("#")) : "";
-        session.linkedNotes = [target ? { ...note, path: target.path + anchor } : note];
-      }
-      this.state.sessions.push(session);
-      this.allocations = this.allocations.filter((entry) => entry.id !== allocation.id);
-    });
-    if (allocation.file) await this.daily.consumeAllocation(allocation, commit);
-    else await commit();
+    if (!allocation.file) throw Error("Assegnazione assente dalla daily.");
+    await this.daily.migrateAllocationBlock(allocation.file);
+    await this.daily.syncFile(allocation.file.path);
+    throw Error("La daily usa ora il blocco unificato. Scegli la riga aggiornata per impostare l\u2019orario.");
   }
   async togglePause() {
     const s = this.active();
@@ -5158,24 +4303,7 @@ var TempvsPlugin = class extends import_obsidian6.Plugin {
   async removeSession(id) {
     const s = this.state.sessions.find((s2) => s2.id === id);
     if (!s || s.finished || sessionBounds(s).start <= /* @__PURE__ */ new Date()) throw Error("Puoi eliminare solo sessioni future.");
-    await this.change(() => {
-      this.state.sessions = this.state.sessions.filter((item) => item.id !== id);
-      this.state.syncDeleted.sessions.push(id);
-    });
-  }
-  async cloudOperation(method, argument) {
-    this.record();
-    if (this.dirty) await this.persist();
-    try {
-      if (method === "firstSync") await this.cloud.firstSync(argument);
-      else await this.cloud[method]();
-      await this.persist();
-      this.refresh(true);
-    } catch (error) {
-      await this.persist();
-      this.refresh(true);
-      throw error;
-    }
+    await this.daily.editTimedRows(/* @__PURE__ */ new Map([[id, null]]));
   }
   async onunload() {
     this.clockStopped = true;
@@ -5184,12 +4312,10 @@ var TempvsPlugin = class extends import_obsidian6.Plugin {
     this.daily?.destroy();
     await this.daily?.chain.catch(() => {
     });
-    this.cloud?.destroy();
     this.chime?.destroy();
     this.ambient?.destroy();
     this.record();
-    clearTimeout(this.cloudSaveTimer);
-    if (this.dirty || this.cloudDirty) await this.persist().catch((e) => console.error("TEMPVS:", e));
+    if (this.dirty) await this.persist().catch((e) => console.error("TEMPVS:", e));
     await this.writeChain.catch(() => {
     });
   }
