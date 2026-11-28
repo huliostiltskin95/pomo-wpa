@@ -615,7 +615,6 @@ export default class TempvsPlugin extends Plugin {
       this.allocations=[];
       this.timerFlags=data?.timerFlags||{};
       this.noteFlags=data?.noteFlags||{};
-      this.legacyPaths=data?.dailyPaths||Object.fromEntries(Object.values(data?.dailyNotes||{}).map(b=>[b.path,b.date]));
       this.compact = typeof data?.ui?.compact === "boolean" ? data.ui.compact : Platform.isMobile;
       this.layout = ["auto","side","wide"].includes(data?.ui?.layout) ? data.ui.layout : "auto";
       this.timerStyle=["digits","ring"].includes(data?.ui?.timerStyle)?data.ui.timerStyle:"bar";
@@ -899,7 +898,7 @@ export default class TempvsPlugin extends Plugin {
       if(note.completed)this.noteFlags[note.path]={completed:true,completion:note.completion};
       else delete this.noteFlags[note.path];
     }
-    const data=JSON.parse(JSON.stringify({format:2,defaults,dailyPaths:this.legacyPaths,timerFlags:this.timerFlags,noteFlags:this.noteFlags,
+    const data=JSON.parse(JSON.stringify({format:2,defaults,timerFlags:this.timerFlags,noteFlags:this.noteFlags,
       ui:{compact:this.compact,layout:this.layout,timerStyle:this.timerStyle,clockSize:this.clockSize},
       audio:{kind:this.audioKind,volume:this.audioVolume},notifications:{sound:this.chimeEnabled}}));
     const write=this.writeChain.catch(()=>{}).then(()=>this.saveData(data));

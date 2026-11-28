@@ -326,7 +326,7 @@ export class DailyBlocks {
  }
  async syncLedgers(forcePath){
   const {app,state}=this.plugin,vault=app.vault;
-  if(!vault?.process||this.indexing)return;
+  if(!vault?.process||this.indexing||this.unreadDays?.size)return;
   const totals=new Map();
   creditedWork(state,(path,source)=>app.metadataCache?.getFirstLinkpathDest?.(path,source)?.path,id=>this.bindings[id]?.path,totals,{dailyOnly:true});
   const paths=forcePath?[forcePath]:new Set([...totals.keys(),...this.ledgerVersions.keys()]);
@@ -349,15 +349,19 @@ export class DailyBlocks {
  }
  async initialize(){
   this.indexing=true;
+  this.unreadDays=new Set();
   const files=this.plugin.app.vault.getMarkdownFiles();
   const estimates=this.plugin.estimates;
   const move=archivedLinkResolver(files,estimates?.notes||[],estimates?.vault||'');
   await this.queue(()=>this.rewriteReferences(move));
   for(const file of files){
    if(this.destroyed)return;
-   try{await this.migrateAllocationBlock(file);}
+   let markdown;
+   try{markdown=await this.readMarkdown(file);}catch(error){this.errors.set(file.path,error.message);if(this.panelDay(file))this.unreadDays.add(file.path);continue;}
+   if(!/tempvs|tempus/i.test(markdown))continue;
+   try{if(/tempvs-assegnazioni/i.test(markdown))await this.migrateAllocationBlock(file);}
    catch(error){new Notice('TEMPVS: blocco precedente conservato in '+file.path+'. '+error.message);}
-   try{await this.syncFile(file.path,{force:true});}catch(error){this.errors.set(file.path,error.message);}
+   try{await this.syncFile(file.path,{force:true});}catch(error){this.errors.set(file.path,error.message);if(this.panelDay(file))this.unreadDays.add(file.path);}
   }
   this.indexing=false;
   await this.plugin.persist?.();
@@ -408,7 +412,7 @@ export class DailyBlocks {
   const file=this.plugin.app.vault.getAbstractFileByPath(path);
   if(!file||file.extension!=='md')throw Error('La nota Markdown non è più disponibile.');
   const markdown=await this.readMarkdown(file),blocks=findDailyBlocks(markdown);
-  if(findDailyBlocks(markdown,true).length!==blocks.length)
+  if(findDailyBlocks(markdown,true).length!==blocks.length || !blocks.length && this.bindingId(path) && /^ {0,3}(?:`{1,2}|~{1,2})(?:tempvs|tempus)\s*$/im.test(markdown))
    throw Error('Chiudi il blocco TEMPVS. La giornata valida resta in uso.');
   const ledger=blocks.find(b=>isLedger(b.source));
   if(ledger&&(blocks.length===1||isLedger(renderSource)))return {file,block:ledger,markdown,kind:'ledger'};
@@ -422,7 +426,7 @@ export class DailyBlocks {
   const block=plans[0];
   if(!block.source.trim()&&this.plugin.estimates?.find(file.path))return {file,block,markdown,kind:"estimate-empty"};
   if(isEstimateSource(block.source.split(/\r?\n/).filter(line=>!flexibleAllocation(line)).join('\n')))return {file,block,markdown,kind:"estimate"};
-  const date=this.panelDay(file)||this.plugin.legacyPaths?.[path];
+  const date=this.panelDay(file);
   if(date&&explicitDay(block.source)&&explicitDay(block.source)!==date)throw Error('La data del blocco deve coincidere con la giornata.');
   if(!date)throw Error('Le sessioni vanno nella nota quotidiana. In questa nota usa una stima o un totale T:.');
   return {file,block,date,markdown};
@@ -462,6 +466,7 @@ export class DailyBlocks {
    if(context?.date||!target||target.path===file.path)await this.loadAllocations(date,file);
   }
   if(!context){
+   this.unreadDays?.delete(path);
    const id=this.bindingId(path);
    if(id){
     this.applying=true;
@@ -488,6 +493,7 @@ export class DailyBlocks {
   const plan=prepareDailyPlan({source:context.block.source,date:context.date,blockId,previousSource:binding?.source,protectedBlockIds:this.protectedBlocks(blockId),state:this.plugin.state});
   await this.commit({...context,...plan,originalSource:context.block.source,keepSource:true});
   this.errors.delete(path);
+  if(this.unreadDays?.delete(path))await this.syncLedgers();
   this.selectDay(path,context.date);
   this.plugin.refresh?.(true);this.refresh(path);
  });}

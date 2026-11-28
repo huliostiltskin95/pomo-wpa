@@ -40,7 +40,10 @@ try {
     class ItemView{constructor(){this.containerEl=document.querySelector('#view');this.containerEl.createDiv();this.containerEl.createDiv()}}
     const setIcon=(el,name)=>{el.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4" y="4" width="16" height="16" rx="4"/><path d="M8 12h8M12 8v8"/></svg>';el.dataset.icon=name};
     window.notices=[];
-    window.require=()=>({Plugin,ItemView,MarkdownRenderChild:class{constructor(el){this.containerEl=el}},Modal:class{constructor(app){this.app=app;this.contentEl=document.createElement("div")}open(){document.body.append(this.contentEl);this.onOpen()}close(){this.onClose();this.contentEl.remove()}},PluginSettingTab:class{},Setting:class{},Platform:{isMobile:true},setIcon,Notice:class{constructor(message){window.notices.push(message)}}});
+    window.require=()=>({moment:(text,fmt)=>({
+      isValid:()=>fmt==='D MMMM YYYY'&&text==='15 novembre 2026',
+      format:pattern=>pattern==='D MMMM YYYY'&&text==='2026-11-15'?'15 novembre 2026':text==='15 novembre 2026'?'2026-11-15':text
+    }),Plugin,ItemView,MarkdownRenderChild:class{constructor(el){this.containerEl=el}},Modal:class{constructor(app){this.app=app;this.contentEl=document.createElement("div")}open(){document.body.append(this.contentEl);this.onOpen()}close(){this.onClose();this.contentEl.remove()}},PluginSettingTab:class{},Setting:class{},Platform:{isMobile:true},setIcon,Notice:class{constructor(message){window.notices.push(message)}}});
     window.module={exports:{}};
     window.mount=async()=>{const plugin=new module.exports.default();
       const files=new Map();
@@ -253,7 +256,7 @@ try {
   await page.evaluate(()=>{const old=plugin.app.vault.process;plugin.app.vault.process=async(file,change)=>{await old(file,change);window.liveDailyText=dailyText;};});
   await estimates.getByRole('button',{name:'Collega alle sessioni libere del giorno',exact:true}).click();
   await page.waitForFunction(()=>plugin.state.sessions.filter(s=>s.date==='2099-11-06'&&!s.finished).every(s=>s.linkedNotes?.length===1));
-  assert.match(await estimates.textContent(),/10%/);
+  assert.match(await estimates.textContent(),/2 h 30 min su 20 h/);
   assert.match(await estimates.textContent(),/20 h/);
   assert.equal(await page.locator('.tempvs-note-assignment').count(),0);
   await page.locator('.tempvs-session-cycles > summary').click();
@@ -304,7 +307,7 @@ try {
    const NativeDate=Date,clock=+new NativeDate('2026-11-15T20:25:00');
    window.Date=class extends NativeDate{constructor(...args){super(...(args.length?args:[clock]));}static now(){return clock;}};
    const file={path:'agenda/15 novembre 2026.md',basename:'15 novembre 2026',extension:'md'};
-   plugin.legacyPaths[file.path]='2026-11-15';
+   plugin.app.internalPlugins={getPluginById:()=>({instance:{options:{folder:'agenda',format:'D MMMM YYYY'}}})};
    window.screenshotNote='---\ntitle: 15 novembre 2026\n---\n\n# 15 novembre 2026\n\n```TEMPVS\ndate: 2026-11-15\nPersonale +01:26-01:56 -30m\nStudio +15:00-16:00 -60m\nSvago +18:30-21:00 -120m\nStudio +21:00-23:00 -60m\n```';
    plugin.dailyNotes=Object.create(null);plugin.app.workspace.getActiveFile=()=>file;
    const oldLeaves=plugin.app.workspace.getLeavesOfType;plugin.app.workspace.getLeavesOfType=type=>type==='markdown'?[]:oldLeaves(type);

@@ -272,7 +272,7 @@ test('e-ink uses one boundary alarm and no hidden countdown, retains focus and r
    timerStartedAt:new Date(start).toISOString(),timerEndsAt:new Date(end).toISOString()}];
  p.refresh();
  assert.equal(alarm.delay,60000);
- now=start;alarm.callback();
+ now=start;const queued=alarm; p.refresh();assert.equal(alarm,queued);alarm.callback();
  assert.match(notices.at(-1),/Inizia la sessione/);
  assert.equal(alarm.delay,1500000);
  const view={timerVisible:true,containerEl:{getClientRects:()=>[{}]},update(){}};
@@ -291,4 +291,29 @@ test('e-ink uses one boundary alarm and no hidden countdown, retains focus and r
  assert.equal(next.eink,true);assert.equal(intervals.size,0);
  next.setEink(false);assert.equal(intervals.size,1);
  await next.onunload();assert.equal(intervals.size,0);
+});
+
+test('daily authority survives interrupted edits, ignores orphan history, and supersedes stored ledgers',async()=>{
+ const {PluginClass,getSaved}=mockPlugin(false),p=new PluginClass();await p.onload();
+ const vault=p.app.vault,day=await vault.create('2099-12-01.md','```TEMPVS\nStudio = 2h\n14:00 30m Studio [[Libro]]\n```');
+ const book=await vault.create('Libro.md','```TEMPVS\nT: 9h @Studio\n```');
+ await p.daily.syncFile(day.path);
+ const session=p.state.sessions[0];session.finished=true;session.actualSeconds=720;
+ const valid=day.text;day.text=valid.slice(0,-1);
+ await assert.rejects(p.daily.syncFile(day.path),/Chiudi il blocco/);
+ assert.equal(p.state.sessions[0].actualSeconds,720);
+ day.text=valid.replace('[[Libro]]','[[Libro]]\n[[Promemoria]]');await p.daily.syncFile(day.path);
+ assert.equal(p.state.sessions[0].finished,true);
+ day.text=day.text.replace('30m Studio','30m @Studio');await p.daily.syncFile(day.path);
+ assert.equal(p.estimates.totals().get(book.path),1800);
+ assert.equal(Object.values(p.dailyNotes)[0].budgets[0].assigned,1800);
+ assert.match(book.text,/T: 30m @Studio/);
+ p.state.history.push({sessionId:'orphan',area:'Studio',minutes:60,linkedNotes:[{path:'Libro'}]});
+ assert.equal(p.estimates.totals().get(book.path),1800);
+ day.text='# Daily';await p.daily.syncFile(day.path);assert.match(book.text,/T: 0h @Studio/);
+ await p.onunload();
+ book.text=book.text.replace('0h','7h');
+ const next=new PluginClass();await next.onload();await next.daily.initialize();
+ assert.match(book.text,/T: 0h @Studio/);assert.equal(next.state.sessions.length,0);
+ assert.equal(getSaved().archive,undefined);await next.onunload();
 });
